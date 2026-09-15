@@ -1,5 +1,6 @@
 <template>
 	<div class="flex gap-2 items-center">
+		<DomainSwitcher />
 		<Dropdown
 			v-model:shown="notificationCenterShown"
 			placement="bottom-end"
@@ -210,6 +211,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppUpdateButton from '@/components/ui/app-update-button/index.vue'
+import DomainSwitcher from '@/components/ymcl/DomainSwitcher.vue'
 import { useInstallJobNotifications } from '@/composables/browse/install-job-notifications'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { trackEvent } from '@/helpers/analytics'
