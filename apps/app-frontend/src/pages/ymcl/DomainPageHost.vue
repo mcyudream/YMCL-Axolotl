@@ -14,7 +14,7 @@ const ymclStore = useYmclStore()
 const messages = defineMessages({
 	title: {
 		id: 'app.ymcl.domain-page.title',
-		defaultMessage: 'Domain page',
+		defaultMessage: '域页面',
 	},
 	pageUnavailable: {
 		id: 'app.ymcl.domain-page.unavailable',
@@ -23,7 +23,7 @@ const messages = defineMessages({
 	},
 	notInDomain: {
 		id: 'app.ymcl.domain-page.not-in-domain',
-		defaultMessage: 'Domain pages are only available while a domain is active.',
+		defaultMessage: '域页面仅在加入域后可用。',
 	},
 	rendererUnknown: {
 		id: 'app.ymcl.domain-page.renderer-unknown',
@@ -32,11 +32,11 @@ const messages = defineMessages({
 	},
 	loadFailed: {
 		id: 'app.ymcl.domain-page.load-failed',
-		defaultMessage: 'Could not load this page from the domain.',
+		defaultMessage: '无法从域加载此页面。',
 	},
 	refresh: {
 		id: 'app.ymcl.domain-page.refresh',
-		defaultMessage: 'Refresh',
+		defaultMessage: '刷新',
 	},
 })
 

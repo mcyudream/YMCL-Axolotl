@@ -35,19 +35,19 @@ const HomeDashboardComponent = HomeDashboard
 const messages = defineMessages({
 	title: {
 		id: 'app.ymcl.design.title',
-		defaultMessage: 'Home layout designer',
+		defaultMessage: '首页布局设计器',
 	},
 	description: {
 		id: 'app.ymcl.design.description',
 		defaultMessage:
 			'Configure the home page card layout for everyone in this domain. Saving publishes the layout to all members.',
 	},
-	addCard: { id: 'app.ymcl.design.add-card', defaultMessage: 'Add card' },
+	addCard: { id: 'app.ymcl.design.add-card', defaultMessage: '添加卡片' },
 	remove: { id: 'app.ymcl.design.remove', defaultMessage: 'Remove' },
-	moveUp: { id: 'app.ymcl.design.move-up', defaultMessage: 'Move up' },
-	moveDown: { id: 'app.ymcl.design.move-down', defaultMessage: 'Move down' },
-	save: { id: 'app.ymcl.design.save', defaultMessage: 'Publish layout' },
-	preview: { id: 'app.ymcl.design.preview', defaultMessage: 'Preview' },
+	moveUp: { id: 'app.ymcl.design.move-up', defaultMessage: '上移' },
+	moveDown: { id: 'app.ymcl.design.move-down', defaultMessage: '下移' },
+	save: { id: 'app.ymcl.design.save', defaultMessage: '发布布局' },
+	preview: { id: 'app.ymcl.design.preview', defaultMessage: '预览' },
 	notUnlocked: {
 		id: 'app.ymcl.design.not-unlocked',
 		defaultMessage:
@@ -55,11 +55,11 @@ const messages = defineMessages({
 	},
 	emptyLayout: {
 		id: 'app.ymcl.design.empty-layout',
-		defaultMessage: 'No cards yet. Add a card to start building the layout.',
+		defaultMessage: '还没有卡片。添加一张卡片开始搭建布局。',
 	},
 	lockedNote: {
 		id: 'app.ymcl.design.locked-note',
-		defaultMessage: 'This layout is locked: members cannot reorder or hide cards.',
+		defaultMessage: '此布局已锁定：成员无法调整顺序或隐藏卡片。',
 	},
 	unmappedNote: {
 		id: 'app.ymcl.design.unmapped-note',

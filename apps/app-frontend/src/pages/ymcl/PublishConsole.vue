@@ -26,22 +26,22 @@ const ymclStore = useYmclStore()
 const messages = defineMessages({
 	title: {
 		id: 'app.ymcl.publish.title',
-		defaultMessage: 'Publish console',
+		defaultMessage: '发布控制台',
 	},
 	description: {
 		id: 'app.ymcl.publish.description',
 		defaultMessage:
 			'Push a local modpack instance to the domain as an initial package or incremental update. Publishing binds the pack to the selected server and notifies members.',
 	},
-	instance: { id: 'app.ymcl.publish.instance', defaultMessage: 'Instance' },
+	instance: { id: 'app.ymcl.publish.instance', defaultMessage: '实例' },
 	loading: { id: 'app.ymcl.publish.loading', defaultMessage: 'Loading…' },
-	checkDiff: { id: 'app.ymcl.publish.check', defaultMessage: 'Check changes' },
-	versionLabel: { id: 'app.ymcl.publish.version', defaultMessage: 'New version' },
-	channelLabel: { id: 'app.ymcl.publish.channel', defaultMessage: 'Channel' },
-	push: { id: 'app.ymcl.publish.push', defaultMessage: 'Publish update' },
+	checkDiff: { id: 'app.ymcl.publish.check', defaultMessage: '检查变更' },
+	versionLabel: { id: 'app.ymcl.publish.version', defaultMessage: '新版本号' },
+	channelLabel: { id: 'app.ymcl.publish.channel', defaultMessage: '渠道' },
+	push: { id: 'app.ymcl.publish.push', defaultMessage: '发布更新' },
 	nothingToDo: {
 		id: 'app.ymcl.publish.nothing',
-		defaultMessage: 'No changes to publish: the instance matches the bound version.',
+		defaultMessage: '没有可发布的变更：实例与绑定版本一致。',
 	},
 	needsDomain: {
 		id: 'app.ymcl.publish.needs-domain',
@@ -61,7 +61,7 @@ const messages = defineMessages({
 	},
 	published: {
 		id: 'app.ymcl.publish.published',
-		defaultMessage: 'Update published and bound to the server.',
+		defaultMessage: '更新已发布并绑定到服务器。',
 	},
 })
 

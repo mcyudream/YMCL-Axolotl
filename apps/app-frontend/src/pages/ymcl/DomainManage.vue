@@ -39,7 +39,7 @@ const showLogin = ref(false)
 const messages = defineMessages({
 	title: {
 		id: 'app.settings.ymcl-domains.title',
-		defaultMessage: 'Domains',
+		defaultMessage: '域',
 	},
 	description: {
 		id: 'app.settings.ymcl-domains.description',
@@ -48,23 +48,23 @@ const messages = defineMessages({
 	},
 	addLabel: {
 		id: 'app.settings.ymcl-domains.add',
-		defaultMessage: 'Add domain',
+		defaultMessage: '添加域',
 	},
 	addPlaceholder: {
 		id: 'app.settings.ymcl-domains.add-placeholder',
-		defaultMessage: 'Domain address, e.g. yda.example.com',
+		defaultMessage: '域地址，例如 yda.example.com',
 	},
 	personalDomain: {
 		id: 'app.settings.ymcl-domains.personal',
-		defaultMessage: 'Personal domain',
+		defaultMessage: '个人域',
 	},
 	activate: {
 		id: 'app.settings.ymcl-domains.activate',
-		defaultMessage: 'Use this domain',
+		defaultMessage: '使用此域',
 	},
 	activeLabel: {
 		id: 'app.settings.ymcl-domains.active',
-		defaultMessage: 'Active',
+		defaultMessage: '使用中',
 	},
 	remove: {
 		id: 'app.settings.ymcl-domains.remove',
@@ -72,63 +72,63 @@ const messages = defineMessages({
 	},
 	refreshManifest: {
 		id: 'app.settings.ymcl-domains.refresh-manifest',
-		defaultMessage: 'Refresh manifest',
+		defaultMessage: '刷新清单',
 	},
 	noDomains: {
 		id: 'app.settings.ymcl-domains.none',
-		defaultMessage: 'No domains joined yet. Add a domain address above to get started.',
+		defaultMessage: '还没有加入任何域。在上方输入域地址即可开始。',
 	},
 	adapterVersion: {
 		id: 'app.settings.ymcl-domains.adapter-version',
-		defaultMessage: 'Adapter version',
+		defaultMessage: '适配器版本',
 	},
 	protocolVersion: {
 		id: 'app.settings.ymcl-domains.protocol-version',
-		defaultMessage: 'Protocol version',
+		defaultMessage: '协议版本',
 	},
 	account: {
 		id: 'app.settings.ymcl-domains.account',
-		defaultMessage: 'Account',
+		defaultMessage: '账号',
 	},
 	signInHeading: {
 		id: 'app.settings.ymcl-domains.sign-in',
-		defaultMessage: 'Sign in to this domain',
+		defaultMessage: '登录此域',
 	},
 	usernameLabel: {
 		id: 'app.settings.ymcl-domains.username',
-		defaultMessage: 'Username or email',
+		defaultMessage: '用户名或邮箱',
 	},
 	passwordLabel: {
 		id: 'app.settings.ymcl-domains.password',
-		defaultMessage: 'Password',
+		defaultMessage: '密码',
 	},
 	signIn: {
 		id: 'app.settings.ymcl-domains.sign-in-button',
-		defaultMessage: 'Sign in',
+		defaultMessage: '登录',
 	},
 	oauthSignIn: {
 		id: 'app.settings.ymcl-domains.oauth-sign-in',
-		defaultMessage: 'Sign in with browser',
+		defaultMessage: '使用浏览器登录',
 	},
 	signOut: {
 		id: 'app.settings.ymcl-domains.sign-out',
-		defaultMessage: 'Sign out',
+		defaultMessage: '退出登录',
 	},
 	department: {
 		id: 'app.settings.ymcl-domains.department',
-		defaultMessage: 'Department',
+		defaultMessage: '部门',
 	},
 	role: {
 		id: 'app.settings.ymcl-domains.role',
-		defaultMessage: 'Role',
+		defaultMessage: '角色',
 	},
 	noLoginMethods: {
 		id: 'app.settings.ymcl-domains.no-login-methods',
-		defaultMessage: 'This domain does not require an account.',
+		defaultMessage: '此域无需登录账号。',
 	},
 	loginPending: {
 		id: 'app.settings.ymcl-domains.login-pending',
-		defaultMessage: 'Complete the login in your browser…',
+		defaultMessage: '请在浏览器中完成登录…',
 	},
 })
 
