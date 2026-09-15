@@ -68,9 +68,7 @@ const renderers: Record<string, ReturnType<typeof defineAsyncComponent>> = {
 	stats: defineAsyncComponent(() => import('@/components/ymcl/renderers/StatsRenderer.vue')),
 }
 
-const BundleFrame = defineAsyncComponent(
-	() => import('@/components/ymcl/bundle/BundleFrame.vue'),
-)
+const BundleFrame = defineAsyncComponent(() => import('@/components/ymcl/bundle/BundleFrame.vue'))
 
 const pageId = computed(() => String(route.params.pageId ?? ''))
 const page = computed(() => ymclStore.pageById(pageId.value))
@@ -128,7 +126,7 @@ async function runPageAction(action: YmclAction) {
 }
 
 watch(
-	[pageId, () => ymclStore.manifest, reloadTick],
+	[pageId, () => ymclStore.manifest, reloadTick, () => ymclStore.dataEpoch],
 	() => {
 		if (!ymclStore.isPersonal && page.value?.data_source) {
 			void loadEnvelope()
@@ -190,7 +188,7 @@ watch(
 				v-else-if="isExtensionRenderer && page"
 				:page="page"
 				@reload="
-					reloadTick++;
+					reloadTick++
 					loadEnvelope()
 				"
 			/>

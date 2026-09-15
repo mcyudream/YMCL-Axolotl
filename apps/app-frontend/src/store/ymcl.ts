@@ -20,6 +20,8 @@ interface YmclStoreState {
 	adding: boolean
 	loadingManifest: boolean
 	loggingIn: boolean
+	/** Bumped on data-affecting push events; page hosts watch and re-pull. */
+	dataEpoch: number
 }
 
 const EXTERNAL_POLL_INTERVAL_MS = 2000
@@ -35,6 +37,7 @@ export const useYmclStore = defineStore('ymclStore', {
 		adding: false,
 		loadingManifest: false,
 		loggingIn: false,
+		dataEpoch: 0,
 	}),
 	getters: {
 		isPersonal: (state) => state.activeDomainId === PERSONAL_DOMAIN_ID,
@@ -121,6 +124,13 @@ export const useYmclStore = defineStore('ymclStore', {
 					break
 				case 'session.revoked':
 					this.session = null
+					break
+				case 'pack.published':
+				case 'binding.updated':
+					// Envelope data may have changed; DomainPageHost watches
+					// this counter and re-pulls its data source (YAP §6.10:
+					// events locate, GET pulls).
+					this.dataEpoch += 1
 					break
 				default:
 					break
