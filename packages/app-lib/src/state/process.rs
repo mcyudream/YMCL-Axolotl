@@ -607,8 +607,8 @@ impl Process {
     async fn process_output<R>(
         instance_id: &str,
         _instance_path: &str,
-        instance_name: &str,
-        process_id: &str,
+        _instance_name: &str,
+        _process_id: &str,
         reader: R,
         log_path: impl AsRef<Path>,
         xml_logging: bool,
@@ -768,13 +768,6 @@ impl Process {
                                             .as_deref()
                                             .unwrap_or("")
                                             .trim();
-                                        crate::api::multiplayer::observe_minecraft_log(
-                                        instance_id,
-                                        instance_name,
-                                        process_id,
-                                        message,
-                                    )
-                                    .await;
                                         if let Err(e) = Self::maybe_handle_server_join_logging(
 											instance_id,
 											&timestamp,
@@ -842,13 +835,6 @@ impl Process {
                         tracing::warn!("Failed to write to log file: {}", e);
                     }
                     Self::emit_legacy_log(instance_id, line.trim_ascii_end());
-                    crate::api::multiplayer::observe_minecraft_log(
-                        instance_id,
-                        instance_name,
-                        process_id,
-                        line.trim_ascii_end(),
-                    )
-                    .await;
                     if let Err(e) = Self::maybe_handle_old_server_join_logging(
                         instance_id,
                         line.trim_ascii_end(),
@@ -1178,8 +1164,6 @@ impl Process {
                 }
             }
         }
-        crate::api::multiplayer::minecraft_process_finished(&instance_id).await;
-
         // Now fully complete- update playtime one last time
         update_playtime(&mut last_updated_playtime, &instance_id, true).await;
 

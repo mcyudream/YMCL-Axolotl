@@ -46,6 +46,30 @@ export default new createRouter({
 			},
 		},
 		{
+			path: '/ymcl/publish',
+			name: 'YmclPublishConsole',
+			component: () => import('@/pages/ymcl/PublishConsole.vue'),
+			meta: {
+				breadcrumb: [{ name: 'Publish' }],
+			},
+		},
+		{
+			path: '/ymcl/design',
+			name: 'YmclHomeDesigner',
+			component: () => import('@/pages/ymcl/HomeDesigner.vue'),
+			meta: {
+				breadcrumb: [{ name: 'Home designer' }],
+			},
+		},
+		{
+			path: '/domain/:pageId',
+			name: 'YmclDomainPage',
+			component: () => import('@/pages/ymcl/DomainPageHost.vue'),
+			meta: {
+				breadcrumb: [{ name: 'Domain' }],
+			},
+		},
+		{
 			path: '/settings',
 			name: 'Settings',
 			component: () => import('@/pages/Settings.vue'),
@@ -92,46 +116,6 @@ export default new createRouter({
 				breadcrumb: [{ name: 'Skin selector' }],
 				discordActivity: 'Changing skins...',
 			},
-		},
-		{
-			path: '/multiplayer',
-			name: 'Multiplayer',
-			component: () => import('@/pages/Multiplayer.vue'),
-			meta: {
-				breadcrumb: [{ name: 'Multiplayer' }],
-				discordActivity: 'Idling...',
-				pageTransitionGroup: 'multiplayer',
-			},
-			children: [
-				{
-					path: '',
-					redirect: { name: 'MultiplayerServers' },
-				},
-				{
-					path: 'servers',
-					name: 'MultiplayerServers',
-					component: () => import('@/components/multiplayer/servers/ServersOverview.vue'),
-				},
-				{
-					path: 'servers/:id',
-					name: 'MultiplayerServerDetail',
-					component: () => import('@/components/multiplayer/servers/ServerDetail.vue'),
-				},
-				{
-					path: 'servers/:id/studio',
-					name: 'MultiplayerServerFileStudio',
-					component: () => import('@/components/multiplayer/servers/ServerFileStudio.vue'),
-					meta: {
-						renderMode: 'fixed',
-						breadcrumb: [{ name: 'Multiplayer', link: '/multiplayer/servers' }, { name: 'Studio' }],
-					},
-				},
-				{
-					path: 'rooms',
-					name: 'MultiplayerRooms',
-					component: () => import('@/components/multiplayer/MultiplayerRooms.vue'),
-				},
-			],
 		},
 		{
 			path: '/lab',
@@ -220,11 +204,6 @@ export default new createRouter({
 					path: 'modpacks',
 					name: 'Modpacks',
 					component: () => import('@/pages/library/Modpacks.vue'),
-				},
-				{
-					path: 'servers',
-					name: 'LibraryServers',
-					component: () => import('@/pages/library/Servers.vue'),
 				},
 				{
 					path: 'custom',

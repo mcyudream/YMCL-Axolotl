@@ -71,6 +71,12 @@ impl DirectoryInfo {
         })
     }
 
+    /// Get the cached YMCL extension page bundles directory
+    #[inline]
+    pub fn ymcl_bundles_dir(&self) -> PathBuf {
+        self.config_dir.join("ymcl_bundles")
+    }
+
     /// Get the Minecraft instance metadata directory
     #[inline]
     pub fn metadata_dir(&self) -> PathBuf {

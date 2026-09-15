@@ -19,7 +19,6 @@ export const DEFAULT_FEATURE_FLAGS = {
 	page_path: false,
 	worlds_tab: false,
 	worlds_in_home: true,
-	server_project_qa: false,
 	show_version_environment_column: false,
 	server_ram_as_bytes_always_on: false,
 	always_show_app_controls: false,

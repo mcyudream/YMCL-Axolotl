@@ -18,7 +18,6 @@
 		"@lobehub/icons-static-svg": "^1.95.0",
 		"@modrinth/api-client": "workspace:^",
 		"@modrinth/assets": "workspace:*",
-		"@modrinth/server": "workspace:*",
 		"@modrinth/ui": "workspace:*",
 		"@modrinth/utils": "workspace:*",
 		"@sfirew/minecraft-motd-parser": "^1.1.6",

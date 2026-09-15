@@ -55,6 +55,9 @@ tasks.shadowJar {
 val authlibInjector by tasks.registering {
     notCompatibleWithConfigurationCache("Downloads and verifies a pinned external Java agent")
     val output = layout.buildDirectory.file("libs/authlib-injector.jar")
+    // Lives outside the build directory so the jar survives cargo build-script
+    // fingerprint changes, which would otherwise re-trigger the download.
+    val cacheDir = layout.projectDirectory.dir(".cache")
     inputs.property("version", "1.2.8")
     inputs.property(
         "sha256",
@@ -63,18 +66,57 @@ val authlibInjector by tasks.registering {
     outputs.file(output)
 
     doLast {
-        val bytes = uri(
-            "https://authlib-injector.yushi.moe/artifact/56/authlib-injector-1.2.8.jar",
-        ).toURL().readBytes()
-        val checksum = MessageDigest.getInstance("SHA-256")
-            .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
-        check(checksum == inputs.properties["sha256"]) {
-            "authlib-injector checksum mismatch: $checksum"
+        val version = inputs.properties["version"] as String
+        val expected = inputs.properties["sha256"] as String
+        val cachedFile = cacheDir.file("authlib-injector-$version.jar").asFile
+        val sources = listOf(
+            "https://authlib-injector.yushi.moe/artifact/56/authlib-injector-$version.jar",
+            "https://bmclapi.bangbang93.com/mirrors/authlib-injector/artifact/56/authlib-injector-$version.jar",
+        )
+
+        fun ByteArray.sha256() =
+            MessageDigest.getInstance("SHA-256").digest(this).joinToString("") { "%02x".format(it) }
+
+        // The pinned checksum still gates cache acceptance so a corrupted or
+        // tampered cache file falls through to a fresh download.
+        if (cachedFile.exists() && cachedFile.readBytes().sha256() == expected) {
+            output.get().asFile.apply {
+                parentFile.mkdirs()
+                writeBytes(cachedFile.readBytes())
+            }
+            return@doLast
+        }
+
+        var bytes: ByteArray? = null
+        var lastError: Exception? = null
+        for (source in sources) {
+            repeat(3) { attempt ->
+                if (bytes != null) return@repeat
+                try {
+                    val candidate = uri(source).toURL().readBytes()
+                    if (candidate.sha256() == expected) {
+                        bytes = candidate
+                    } else {
+                        lastError = IllegalStateException("checksum mismatch for $source")
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < 2) Thread.sleep(1000L * (attempt + 1))
+                }
+            }
+            if (bytes != null) break
+        }
+        val data = requireNotNull(bytes) {
+            "authlib-injector download failed: ${lastError?.message}"
+        }
+
+        cachedFile.apply {
+            parentFile.mkdirs()
+            writeBytes(data)
         }
         output.get().asFile.apply {
             parentFile.mkdirs()
-            writeBytes(bytes)
+            writeBytes(data)
         }
     }
 }

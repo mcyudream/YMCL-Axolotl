@@ -1199,7 +1199,7 @@ fn requires_modrinth_auth(
     }
 
     uri_path.is_some_and(|path| {
-        matches!(path, "/v2/user" | "/v3/friends")
+        matches!(path, "/v2/user")
             || path.starts_with("/v2/session")
             || path.starts_with("/v3/friend/")
             || path.starts_with("/v3/notification")

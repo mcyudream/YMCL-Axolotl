@@ -31,7 +31,6 @@ import {
 	readTextFile,
 	remove,
 	rename,
-	watch as watchFiles,
 	writeFile,
 	writeTextFile,
 } from '@tauri-apps/plugin-fs'
@@ -46,7 +45,6 @@ import {
 	type StudioDocument,
 	useStudioDocuments,
 } from '@/components/instance/studio/useStudioDocuments'
-import type { ServerView } from '@/composables/useServers'
 import { get_full_path } from '@/helpers/instance'
 import {
 	listenStudioFilesChanged,
@@ -73,7 +71,6 @@ interface StudioTreeNode {
 
 const props = defineProps<{
 	instance?: GameInstance
-	server?: ServerView
 }>()
 
 const messages = defineMessages({
@@ -271,23 +268,7 @@ async function deleteStudioFile(path: string): Promise<void> {
 	return remove(await resolvePath(path), { recursive: true })
 }
 
-function workspaceRelativePath(path: string): string | null {
-	const root = instanceRoot.value.replaceAll('\\', '/').replace(/\/+$/, '')
-	const normalized = path.replaceAll('\\', '/')
-	if (!root || normalized === root) return null
-	if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1)
-	return /^(?:[A-Za-z]:)?\//.test(normalized) ? null : normalized
-}
-
 function exitStudio() {
-	if (props.server) {
-		void router.push({
-			name: 'MultiplayerServerDetail',
-			params: { id: props.server.id },
-			query: { tab: 'files' },
-		})
-		return
-	}
 	if (props.instance) {
 		void router.push({ name: 'Files', params: { id: props.instance.id } })
 	}
@@ -579,28 +560,6 @@ async function stopStudioWatcher() {
 async function startStudioWatcher() {
 	const generation = ++watcherGeneration
 	await stopStudioWatcher()
-	if (props.server) {
-		try {
-			unwatchWorkspaceFiles = await watchFiles(
-				instanceRoot.value,
-				(event) => {
-					const paths = event.paths
-						.map(workspaceRelativePath)
-						.filter((path): path is string => path !== null)
-					if (paths.length > 0) scheduleFileChanges(paths)
-				},
-				{ recursive: true, delayMs: 150 },
-			)
-		} catch (error) {
-			console.warn('Failed to start server Studio file watcher', error)
-			return
-		}
-		if (generation !== watcherGeneration) {
-			unwatchWorkspaceFiles?.()
-			unwatchWorkspaceFiles = null
-		}
-		return
-	}
 	if (!props.instance) return
 	const instanceId = props.instance.id
 	const registrationId = await registerStudioWatcher(instanceId)
@@ -775,7 +734,7 @@ async function revealContextMenuItem() {
 
 async function initialize() {
 	instanceRoot.value =
-		props.server?.path ?? (props.instance ? await get_full_path(props.instance.id) : '')
+(props.instance ? await get_full_path(props.instance.id) : '')
 	resetDocuments()
 	await loadRoot()
 }
@@ -793,7 +752,7 @@ if (props.instance) {
 await startStudioWatcher()
 
 watch(
-	() => props.instance?.id ?? props.server?.id,
+	() => props.instance?.id,
 	async () => {
 		await initialize()
 		await startStudioWatcher()

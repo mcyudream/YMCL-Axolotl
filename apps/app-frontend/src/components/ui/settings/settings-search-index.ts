@@ -462,6 +462,12 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		label: message('app.settings.resources.download-engine', 'Download engine'),
 	},
 	{
+		id: 'ymcl-domain-management',
+		categoryId: 'ymcl-domains',
+		targetId: 'settings-target-ymcl-domains',
+		label: message('app.settings.tabs.ymcl-domains', 'Domains'),
+	},
+	{
 		id: 'resources-download-concurrency',
 		categoryId: 'content-downloads',
 		targetId: 'settings-target-resources-maximum-downloads',
@@ -470,7 +476,7 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 	},
 	{
 		id: 'resources-proxy',
-		categoryId: 'network-multiplayer',
+		categoryId: 'network',
 		targetId: 'settings-target-resources-proxy',
 		label: message('app.settings.resources.proxy-settings', 'Proxy settings'),
 		keywords: [
@@ -480,7 +486,7 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 	},
 	{
 		id: 'network-mojang-auth-source',
-		categoryId: 'network-multiplayer',
+		categoryId: 'network',
 		targetId: 'settings-target-network-mojang-auth-source',
 		label: message('app.settings.resources.mojang-auth-service', 'Mojang authentication service'),
 	},
@@ -517,12 +523,6 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		categoryId: 'storage-backups',
 		targetId: 'settings-target-storage-cache',
 		label: message('app.settings.resources.app-cache', 'App cache'),
-	},
-	{
-		id: 'multiplayer-public-nodes',
-		categoryId: 'network-multiplayer',
-		targetId: 'terracotta-public-nodes-title',
-		label: message('app.multiplayer.terracotta.public-nodes', 'Terracotta public nodes'),
 	},
 	{
 		id: 'storage-overview',

@@ -31,7 +31,8 @@ const settingsComponentFiles = {
 		'./SharedLogsSettings.vue',
 	],
 	'content-downloads': ['./AppearanceSettings.vue', './ResourceManagementSettings.vue'],
-	'network-multiplayer': ['./ResourceManagementSettings.vue', './MultiplayerSettings.vue'],
+	'ymcl-domains': ['../../../pages/ymcl/DomainManage.vue'],
+	network: ['./ResourceManagementSettings.vue', './NetworkSettings.vue'],
 	'storage-backups': ['./ResourceManagementSettings.vue', './StorageSettings.vue'],
 	'privacy-data': ['./PrivacySettings.vue'],
 	updates: ['./UpdateSettings.vue'],
@@ -173,7 +174,7 @@ test('settings navigation groups preserve the intended Axolotl information archi
 		'launch-defaults',
 		'java-performance',
 		'content-downloads',
-		'network-multiplayer',
+		'network',
 	])
 	assert.deepEqual(categoriesForGroup('data-privacy'), ['storage-backups', 'privacy-data'])
 	assert.deepEqual(categoriesForGroup('support'), ['updates', 'about', 'logs'])

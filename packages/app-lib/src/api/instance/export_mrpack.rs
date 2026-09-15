@@ -640,8 +640,11 @@ async fn add_all_recursive_folder_paths(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "tauri"))]
     use crate::state::{CreateDirectLinkInstance, State};
+    #[cfg(not(feature = "tauri"))]
     use std::sync::Arc;
+    #[cfg(not(feature = "tauri"))]
     use tempfile::TempDir;
 
     #[test]
@@ -656,6 +659,7 @@ mod tests {
     /// reuse it so `State::get()` resolves inside these APIs. The state root
     /// is intentionally leaked (`.keep()`) because the shared state outlives
     /// this function.
+    #[cfg(not(feature = "tauri"))]
     async fn global_state() -> Arc<State> {
         if !State::initialized() {
             let root = TempDir::new().unwrap().keep();
@@ -665,6 +669,7 @@ mod tests {
         State::get().await.unwrap()
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn direct_link_instances_cannot_be_exported() {
         let state = global_state().await;

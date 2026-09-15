@@ -27,7 +27,6 @@ const messages = defineMessages({
 	library: { id: 'app.library.title', defaultMessage: 'Library' },
 	allInstances: { id: 'app.library.tabs.all-instances', defaultMessage: 'All instances' },
 	modpacks: { id: 'app.library.tabs.modpacks', defaultMessage: 'Modpacks' },
-	servers: { id: 'app.library.tabs.servers', defaultMessage: 'Servers' },
 	custom: { id: 'app.library.tabs.custom', defaultMessage: 'Custom' },
 	shared: { id: 'app.library.tabs.shared', defaultMessage: 'Shared with me' },
 	saved: { id: 'app.library.tabs.saved', defaultMessage: 'Saved' },
@@ -66,7 +65,6 @@ onUnmounted(() => {
 			:links="[
 				{ label: formatMessage(messages.allInstances), href: `/library` },
 				{ label: formatMessage(messages.modpacks), href: `/library/modpacks` },
-				{ label: formatMessage(messages.servers), href: `/library/servers` },
 				{ label: formatMessage(messages.custom), href: `/library/custom` },
 				{ label: formatMessage(messages.shared), href: `/library/shared`, shown: false },
 				{ label: formatMessage(messages.saved), href: `/library/saved`, shown: false },

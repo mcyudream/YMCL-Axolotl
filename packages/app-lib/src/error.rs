@@ -42,11 +42,6 @@ pub enum ErrorKind {
     #[error("NBT data structure error: {0}")]
     NBTReprError(#[from] quartz_nbt::NbtReprError),
 
-    #[error("Serialization error (websocket): {0}")]
-    WebsocketSerializationError(
-        #[from] ariadne::networking::serialization::SerializationError,
-    ),
-
     #[error("Error parsing UUID: {0}")]
     UUIDError(#[from] uuid::Error),
 

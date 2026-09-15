@@ -33,7 +33,7 @@ pub async fn get_mod_full_path(
     Ok(get_full_path(instance_id).await?.join(project_path))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "tauri")))]
 mod tests {
     use super::*;
     use crate::state::CreateDirectLinkInstance;

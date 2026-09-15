@@ -25,9 +25,6 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     settings.telemetry = current.telemetry;
     settings.telemetry_consent_version = current.telemetry_consent_version;
     settings.discord_rpc = current.discord_rpc;
-    super::terracotta::validate_public_nodes(
-        &settings.terracotta_public_nodes,
-    )?;
     settings.apply_legacy_download_source_settings();
     settings.update(&state.pool).await?;
     state.update_download_settings(&settings);

@@ -1,6 +1,4 @@
 //! Theseus state management system
-use ariadne::ids::UserId;
-use ariadne::users::UserStatus;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -297,51 +295,6 @@ pub enum ProcessPayloadType {
 
 #[derive(Serialize, Clone)]
 #[cfg(feature = "tauri")]
-pub struct ServerPayload {
-    #[serde(rename = "serverId")]
-    pub server_id: String,
-    #[serde(flatten)]
-    pub event: ServerPayloadType,
-}
-
-/// Classifies why a server process exited on its own, derived from the tail
-/// of its console output so the UI can react (e.g. offer the EULA dialog)
-/// instead of just reporting a dead process.
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ExitReason {
-    Eula,
-}
-
-#[derive(Serialize, Clone, Debug)]
-#[serde(tag = "event", rename_all = "snake_case")]
-pub enum ServerPayloadType {
-    Log {
-        line: String,
-    },
-    ConsoleOutput {
-        data: String,
-    },
-    DownloadProgress {
-        downloaded: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        total: Option<u64>,
-    },
-    Started,
-    Stopped {
-        crashed: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<ExitReason>,
-    },
-    #[allow(dead_code)]
-    EulaRequired {
-        server_id: String,
-        eula_text: String,
-    },
-}
-
-#[derive(Serialize, Clone)]
-#[cfg(feature = "tauri")]
 pub struct InstancePayload {
     pub instance_id: String,
     #[serde(flatten)]
@@ -376,16 +329,6 @@ pub enum InstancePayloadType {
         message: String,
     },
     Removed,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "event")]
-pub enum FriendPayload {
-    FriendRequest { from: UserId },
-    UserOffline { id: UserId },
-    StatusUpdate { user_status: UserStatus },
-    StatusSync,
 }
 
 #[cfg(feature = "tauri")]

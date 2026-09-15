@@ -56,15 +56,10 @@ pub use self::cache::*;
 pub mod content_favorites;
 pub use self::content_favorites::*;
 
-mod friends;
-pub use self::friends::*;
-
-mod tunnel;
-pub use self::tunnel::*;
-
 pub mod db;
 pub(crate) mod db_backup;
 mod mr_auth;
+pub mod ymcl_session;
 
 pub use self::mr_auth::*;
 
@@ -136,9 +131,6 @@ pub struct State {
     //
     // /// App identifier string (like com.modrinth.AxolotlLauncher)
     // pub app_identifier: String,
-    /// Friends socket
-    pub friends_socket: FriendsSocket,
-
     pub restart_after_pending_update: AtomicBool,
 
     /// Per-instance locks serializing content writes against instance
@@ -864,8 +856,6 @@ impl State {
 
         let process_manager = ProcessManager::new();
 
-        let friends_socket = FriendsSocket::new();
-
         Ok(Arc::new(Self {
             directories,
             fetch_semaphore,
@@ -913,7 +903,6 @@ impl State {
             install_job_operation_locks: DashMap::new(),
             discord_rpc,
             process_manager,
-            friends_socket,
             restart_after_pending_update: AtomicBool::new(false),
             instance_locks: Arc::new(InstanceLockManager::default()),
             pool,
@@ -981,7 +970,6 @@ pub(crate) async fn test_state(
         install_job_operation_locks: DashMap::new(),
         discord_rpc: DiscordGuard::init()?,
         process_manager: ProcessManager::new(),
-        friends_socket: FriendsSocket::new(),
         restart_after_pending_update: AtomicBool::new(false),
         instance_locks: Arc::new(InstanceLockManager::default()),
         pool,

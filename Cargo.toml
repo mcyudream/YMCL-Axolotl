@@ -4,7 +4,6 @@ members = [
   "apps/app",
   "apps/installer-ui",
   "packages/app-lib",
-  "packages/ariadne",
   "packages/daedalus",
   "packages/modrinth-content-management",
   "packages/path-util",
@@ -16,7 +15,6 @@ rust-version = "1.90.0"
 repository = "https://github.com/Mystic-Stars/Axolotl"
 
 [workspace.dependencies]
-ariadne = { path = "packages/ariadne" }
 async-minecraft-ping = { path = "packages/async-minecraft-ping" }
 async-recursion = "1.1.1"
 async-trait = "0.1.89"

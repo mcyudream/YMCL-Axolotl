@@ -635,6 +635,7 @@ mod tests {
         ModrinthVersionId,
     };
     use std::fs;
+    #[cfg(not(feature = "tauri"))]
     use std::sync::Arc;
 
     fn modrinth_ref() -> ContentProviderRef {
@@ -705,6 +706,7 @@ mod tests {
     /// reuse it so `State::get()` (used by the hash cache) resolves inside
     /// these APIs. The state root is intentionally leaked (`.keep()`) because
     /// the shared state outlives this function.
+    #[cfg(not(feature = "tauri"))]
     async fn global_state() -> Arc<State> {
         if !State::initialized() {
             let root = tempfile::TempDir::new().unwrap().keep();
@@ -714,6 +716,7 @@ mod tests {
         State::get().await.unwrap()
     }
 
+    #[cfg(not(feature = "tauri"))]
     fn write_self_contained_version(minecraft: &Path, version_id: &str) {
         let version_dir = minecraft.join("versions").join(version_id);
         fs::create_dir_all(&version_dir).unwrap();
@@ -728,6 +731,7 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn direct_link_refresh_scans_linked_dot_minecraft_content() {
         let state = global_state().await;
@@ -782,6 +786,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn pcl_isolated_direct_link_scans_version_isolated_content() {
         let state = global_state().await;
@@ -834,6 +839,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn ordinary_instance_refresh_still_scans_its_profile_directory() {
         let state = global_state().await;

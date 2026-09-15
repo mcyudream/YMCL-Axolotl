@@ -41,6 +41,7 @@ import type { GameInstance } from '@/helpers/types'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useTheming } from '@/store/state'
 import type { FeatureFlag, HomeLayout } from '@/store/theme'
+import { useYmclStore } from '@/store/ymcl'
 
 const { handleError } = injectNotificationManager()
 const route = useRoute()
@@ -99,6 +100,12 @@ breadcrumbs.setRootContext({ name: formatMessage(messages.home), link: route.pat
 
 const instances = ref<GameInstance[]>([])
 const playerName = ref<string | null>(null)
+const ymclStore = useYmclStore()
+const domainDashboard = computed(() =>
+	ymclStore.isPersonal ? null : ymclStore.domainHomeDashboard,
+)
+const domainDashboardLocked = computed(() => !ymclStore.isPersonal && ymclStore.domainHomeLocked)
+const effectiveDashboard = computed(() => domainDashboard.value ?? dashboardConfig.value)
 const dashboardConfig = ref<HomeDashboardConfig | null>(null)
 const dashboard = ref<InstanceType<typeof HomeDashboard>>()
 const dashboardEditing = ref(false)
@@ -268,9 +275,9 @@ onUnmounted(() => {
 	/>
 	<div class="min-h-full">
 		<HomeDashboard
-			v-if="!isMinimal && dashboardConfig"
+			v-if="!isMinimal && effectiveDashboard"
 			ref="dashboard"
-			:config="dashboardConfig"
+			:config="effectiveDashboard"
 			:instances="instances"
 			:player-name="playerName"
 			:editing="dashboardEditing"
@@ -287,7 +294,7 @@ onUnmounted(() => {
 		/>
 	</div>
 	<div class="home-floating-controls" :style="floatingControlsStyle">
-		<template v-if="!isMinimal">
+		<template v-if="!isMinimal && !domainDashboardLocked">
 			<button
 				v-if="dashboardEditing"
 				v-tooltip="formatMessage(messages.addWidget)"

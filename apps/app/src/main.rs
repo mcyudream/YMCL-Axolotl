@@ -781,6 +781,7 @@ fn main() {
             window_state_builder.build()
         })
         .setup(|app| {
+            theseus::ymcl::events::start_event_loop(app.handle().clone());
             lightweight_mode::init(&app.handle());
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -872,12 +873,9 @@ fn main() {
         .plugin(api::datapacks::init())
         .plugin(api::drop::init())
         .plugin(api::files::init())
-        .plugin(api::friends::init())
         .plugin(api::worlds::init())
-        .plugin(api::terracotta::init())
-        .plugin(api::multiplayer::init())
+        .plugin(api::ymcl::init())
         .manage(api::files::StudioWatchers::default())
-        .plugin(api::servers::init())
         .manage(PendingUpdateData::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
@@ -929,16 +927,6 @@ fn main() {
                 {
                     tracing::warn!(
                         "Failed to flush pending Minecraft skin change before exit: {error}"
-                    );
-                }
-
-                if matches!(&event, tauri::RunEvent::ExitRequested { .. })
-                    && let Err(error) = tauri::async_runtime::block_on(
-                        theseus::multiplayer::shutdown(),
-                    )
-                {
-                    tracing::warn!(
-                        "Failed to stop multiplayer services before exit: {error}"
                     );
                 }
 

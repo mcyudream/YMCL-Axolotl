@@ -777,14 +777,18 @@ pub async fn get_generic_live_log_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "tauri"))]
     use crate::state::CreateDirectLinkInstance;
+    #[cfg(not(feature = "tauri"))]
     use std::sync::Arc;
+    #[cfg(not(feature = "tauri"))]
     use tempfile::TempDir;
 
     /// The launcher state is a process-wide singleton; initialize it once and
     /// reuse it so `State::get()` resolves inside these APIs. The state root
     /// is intentionally leaked (`.keep()`) because the shared state outlives
     /// this function.
+    #[cfg(not(feature = "tauri"))]
     async fn global_state() -> Arc<State> {
         if !State::initialized() {
             let root = TempDir::new().unwrap().keep();
@@ -797,6 +801,7 @@ mod tests {
     /// Creates a directly associated instance whose linked `.minecraft`
     /// lives in a fresh temp dir (generic dialect: launches from the linked
     /// `.minecraft/versions/<id>` directory).
+    #[cfg(not(feature = "tauri"))]
     async fn create_direct_link_fixture(
         label: &str,
     ) -> (TempDir, crate::state::InstanceMetadata) {
@@ -836,6 +841,7 @@ mod tests {
         (minecraft, metadata)
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn direct_link_instance_resolves_to_linked_game_dir() {
         let state = global_state().await;
@@ -909,6 +915,7 @@ mod tests {
         assert!(compacted.output.len() <= MAX_LOG_DISPLAY_BYTES);
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn ordinary_instance_still_resolves_to_relative_path() {
         let state = global_state().await;
@@ -936,6 +943,7 @@ mod tests {
         assert!(game_dir_override.is_none());
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn direct_link_instance_logs_are_enumerated_from_linked_root() {
         let state = global_state().await;
@@ -981,6 +989,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "tauri"))]
     #[tokio::test]
     async fn direct_link_crash_analysis_finds_linked_crash_reports() {
         let _state = global_state().await;

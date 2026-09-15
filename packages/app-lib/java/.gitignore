@@ -6,3 +6,4 @@ build
 
 # Ignore IDE/compiler output written outside Gradle's build directory
 /bin/
+.cache/

@@ -9,7 +9,8 @@ export type SettingsCategoryId =
 	| 'launch-defaults'
 	| 'java-performance'
 	| 'content-downloads'
-	| 'network-multiplayer'
+	| 'network'
+	| 'ymcl-domains'
 	| 'storage-backups'
 	| 'privacy-data'
 	| 'updates'
@@ -111,13 +112,22 @@ export const settingsCategoryDefinitions: SettingsCategoryDefinition[] = [
 		onboardingId: 'settings-tab-content-downloads',
 	},
 	{
-		id: 'network-multiplayer',
+		id: 'network',
 		name: defineMessage({
-			id: 'app.settings.tabs.network-multiplayer',
-			defaultMessage: 'Network & multiplayer',
+			id: 'app.settings.tabs.network',
+			defaultMessage: 'Network',
 		}),
 		group: 'game',
-		onboardingId: 'settings-tab-network-multiplayer',
+		onboardingId: 'settings-tab-network',
+	},
+	{
+		id: 'ymcl-domains',
+		name: defineMessage({
+			id: 'app.settings.tabs.ymcl-domains',
+			defaultMessage: 'Domains',
+		}),
+		group: 'launcher',
+		onboardingId: 'settings-tab-ymcl-domains',
 	},
 	{
 		id: 'storage-backups',

@@ -7,6 +7,7 @@ import {
 	ExternalIcon,
 	FlaskConicalIcon,
 	FolderOpenIcon,
+	GlobeIcon,
 	HomeIcon,
 	LeftArrowIcon,
 	LibraryIcon,
@@ -19,7 +20,6 @@ import {
 	SettingsIcon,
 	SpinnerIcon,
 	UserIcon,
-	UsersIcon,
 	WorldIcon,
 	XIcon,
 } from '@modrinth/assets'
@@ -184,16 +184,55 @@ import { setupAuthProvider } from '@/providers/setup/auth'
 import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
+import { useYmclStore } from '@/store/ymcl'
+import { initYmclTheme } from '@/store/ymcl-theme'
 
 import { get_available_capes, get_available_skins } from './helpers/skins'
 import { AppNotificationManager } from './providers/app-notifications'
 import { AppPopupNotificationManager } from './providers/app-popup-notifications'
 
 const themeStore = useTheming()
+const ymclStore = useYmclStore()
+void ymclStore.init()
+initYmclTheme()
+void listen('ymcl://event', (event) => {
+	void ymclStore.handleServerEvent((event.payload ?? {}) as { type?: string })
+})
 /** While a dialog is open no shortcut fires, including the one being recorded. */
 const { hasModal } = useModalStack()
 const router = useRouter()
 const route = useRoute()
+
+const ymclNavIconMap = {
+	home: HomeIcon,
+	worlds: WorldIcon,
+	discover: CompassIcon,
+	skins: ChangeSkinIcon,
+	library: LibraryIcon,
+	lab: FlaskConicalIcon,
+	downloads: DownloadIcon,
+}
+
+const ymclNavItems = computed(() =>
+	ymclStore.navigation.flatMap((item) => {
+		if (item.type === 'separator') {
+			return [{ id: item.id, kind: 'separator' as const }]
+		}
+		const to =
+			item.type === 'native' && item.route
+				? item.route
+				: `/domain/${encodeURIComponent(item.page_id ?? item.id)}`
+		return [
+			{
+				id: item.id,
+				kind: 'nav' as const,
+				to,
+				title: item.title ?? item.id,
+				icon: ymclNavIconMap[item.icon ?? ''] ?? GlobeIcon,
+			},
+		]
+	}),
+)
 const onSkinsPage = computed(() => route.path === '/skins')
 const onSchematicWorkshopPage = computed(() => route.path === '/lab/schematic-preview')
 const onSettingsPage = computed(() => route.path.startsWith('/settings'))
@@ -969,10 +1008,6 @@ const messages = defineMessages({
 	library: {
 		id: 'app.navigation.library',
 		defaultMessage: 'Library',
-	},
-	multiplayer: {
-		id: 'app.navigation.multiplayer',
-		defaultMessage: 'Multiplayer',
 	},
 	downloads: {
 		id: 'app.navigation.downloads',
@@ -2621,7 +2656,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		<div
 			class="app-grid-navbar bg-bg-raised flex flex-col p-[0.5rem] pt-0 gap-[0.5rem] w-[--left-bar-width] overflow-hidden"
 		>
-			<NavRail>
+			<NavRail v-if="ymclStore.isPersonal">
 				<NavButton v-tooltip.right="formatMessage(messages.home)" to="/">
 					<HomeIcon />
 				</NavButton>
@@ -2648,13 +2683,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					to="/skins"
 				>
 					<ChangeSkinIcon />
-				</NavButton>
-				<NavButton
-					v-tooltip.right="formatMessage(messages.multiplayer)"
-					to="/multiplayer"
-					:is-primary="(r) => r.path.startsWith('/multiplayer')"
-				>
-					<UsersIcon />
 				</NavButton>
 				<NavButton
 					v-tooltip.right="formatMessage(messages.library)"
@@ -2693,6 +2721,19 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 						{{ Math.min(downloadManager.activeCount.value, 99) }}
 					</span>
 				</NavButton>
+			</NavRail>
+			<NavRail v-else>
+				<template v-for="item in ymclNavItems" :key="item.id">
+					<div v-if="item.kind === 'separator'" class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
+					<NavButton
+						v-else
+						v-tooltip.right="item.title"
+						:to="item.to"
+						:is-primary="(r) => r.path === item.to"
+					>
+						<component :is="item.icon" />
+					</NavButton>
+				</template>
 			</NavRail>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
 			<div class="quick-instance-scroll flex-1 min-h-0 overflow-x-hidden overflow-y-auto">
@@ -2798,7 +2839,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		class="app-contents"
 		:class="{
 			'sidebar-enabled': sidebarVisible,
-			'studio-mode': route.name === 'FileStudio' || route.name === 'MultiplayerServerFileStudio',
+			'studio-mode': route.name === 'FileStudio',
 			'disable-advanced-rendering': !themeStore.advancedRendering,
 			'has-custom-background': themeStore.customBackgroundPath && !themeStore.transparentBackground,
 			'has-transparent-background': themeStore.transparentBackground,

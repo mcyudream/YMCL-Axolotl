@@ -202,33 +202,12 @@
 									class="animate-spin"
 								/>
 								<DownloadIcon
-									v-else-if="
-										!installButtonInstalled && !serverProjectSelected && !cartProjectSelected
-									"
+									v-else-if="!installButtonInstalled && !cartProjectSelected"
 								/>
 								<CheckIcon v-else />
 								{{ installButtonLabel }}
 							</button>
 						</ButtonStyled>
-						<!-- 开服功能暂有问题，隐藏该按钮
-						<Transition name="start-server">
-							<ButtonStyled
-								v-if="serverCapableModpack"
-								key="modpack-start-server"
-								size="large"
-								type="outlined"
-							>
-								<button
-									v-tooltip="formatMessage(messages.startServer)"
-									type="button"
-									@click="openModpackServerFlow"
-								>
-									<ServerIcon />
-									{{ formatMessage(messages.startServer) }}
-								</button>
-							</ButtonStyled>
-						</Transition>
-						-->
 						<ButtonStyled size="large" circular type="transparent">
 							<OverflowMenu
 								:tooltip="`More options`"
@@ -339,7 +318,6 @@
 					:translations="translations"
 					:translation-mode="translationMode"
 					:translation-style="translationStyle"
-					:start-server="(version) => openModpackServerFlow(version)"
 				/>
 			</template>
 			<template v-else> Project data couldn't not be loaded. </template>
@@ -368,25 +346,6 @@
 				<ClipboardCopyIcon /> {{ formatMessage(commonMessages.copyLinkButton) }}
 			</template>
 		</ContextMenu>
-		<CreationFlowModal
-			v-if="serverInstallContent.isServerContext.value && data?.project_type === 'modpack'"
-			ref="serverSetupModalRef"
-			:type="
-				serverInstallContent.serverFlowFrom.value === 'reset-server'
-					? 'reset-server'
-					: 'server-onboarding'
-			"
-			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper', 'purpur']"
-			:show-snapshot-toggle="true"
-			:on-back="serverInstallContent.onServerFlowBack"
-			:search-modpacks="serverInstallContent.searchServerModpacks"
-			:get-project-versions="serverInstallContent.getServerProjectVersions"
-			:get-loader-manifest="getLoaderManifest"
-			@hide="() => {}"
-			@browse-modpacks="() => {}"
-			@create="serverInstallContent.handleServerModpackFlowCreate"
-		/>
-		<CreateModpackServerModal ref="modpackServerModal" @created="handleModpackServerCreated" />
 	</div>
 </template>
 
@@ -418,14 +377,12 @@ import {
 	ButtonStyled,
 	commonMessages,
 	commonProjectSettingsMessages,
-	CreationFlowModal,
 	defineMessages,
 	formatDependencyProjectFilterOption,
 	formatProjectTypeSentence,
 	getLatestMatchingInstallVersion,
 	getTargetInstallPreferences,
 	injectNotificationManager,
-	injectPopupNotificationManager,
 	NavTabs,
 	OverflowMenu,
 	ProjectBackgroundGradient,
@@ -436,7 +393,6 @@ import {
 	ProjectSidebarLinks,
 	ProjectSidebarServerInfo,
 	ProjectSidebarTags,
-	requestInstall,
 	SelectedProjectsFloatingBar,
 	usesTargetGameVersion,
 	useVIntl,
@@ -450,7 +406,6 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { SwapIcon } from '@/assets/icons/index.js'
 import BrowseInstanceSelector from '@/components/browse/BrowseInstanceSelector.vue'
-import CreateModpackServerModal from '@/components/multiplayer/servers/modpack/CreateModpackServerModal.vue'
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import InstanceIndicator from '@/components/ui/InstanceIndicator.vue'
 import {
@@ -476,7 +431,6 @@ import {
 	list as listInstances,
 } from '@/helpers/instance'
 import { getDisplayInstanceIcon } from '@/helpers/instance-icons'
-import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get_by_instance_id } from '@/helpers/process'
 import { projectGalleryTranslationSegments } from '@/helpers/project-gallery'
 import { createProjectBrowseLocation } from '@/helpers/project-links'
@@ -495,7 +449,6 @@ import i18n from '@/i18n.config'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectContentSelection, makeContentSelectionKey } from '@/providers/content-selection'
 import { injectServerInstall } from '@/providers/server-install'
-import { createServerInstallContent } from '@/providers/setup/server-install-content'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useTheming } from '@/store/state.js'
 
@@ -504,7 +457,6 @@ import UpgradeProjectReturnBar from './UpgradeProjectReturnBar.vue'
 dayjs.extend(relativeTime)
 
 const { addNotification, handleError } = injectNotificationManager()
-const popupNotificationManager = injectPopupNotificationManager()
 const { install: installVersion } = injectContentInstall()
 const contentSelection = injectContentSelection()
 const route = useRoute()
@@ -645,46 +597,6 @@ const favoriteSaved = computed(() =>
 	data.value ? contentFavorites.isFavorite('modrinth', data.value.id) : false,
 )
 
-// Used by the temporarily commented start-server button.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const serverCapableModpack = computed(
-	() => data.value?.project_type === 'modpack' && data.value.server_side !== 'unsupported',
-)
-const modpackServerModal = ref()
-
-async function openModpackServerFlow(targetVersion) {
-	if (!data.value) return
-	// The version handed in by the UI can be an incomplete object that is missing
-	// `id`/`loaders`/`game_versions`/`files`. Re-fetch a complete version from the
-	// API so the modpack server flow has the data it needs (otherwise it misdetects
-	// the loader as Vanilla and fails with "No server launcher available").
-	let version = targetVersion
-	const isComplete = (v) => !!v && Array.isArray(v.game_versions) && Array.isArray(v.files)
-	if (!isComplete(version)) {
-		const versionId = version?.id ?? data.value.versions?.[0]
-		version = versionId ? await get_version(versionId, 'bypass').catch(() => null) : null
-	}
-	if (!version) return
-	modpackServerModal.value?.show(data.value, version)
-}
-
-function handleModpackServerCreated(serverId) {
-	popupNotificationManager.addPopupNotification({
-		title: formatMessage(messages.serverCreated),
-		text: formatMessage(messages.serverCreatedDescription, { name: data.value?.title ?? '' }),
-		type: 'success',
-		buttons: [
-			{
-				label: formatMessage(messages.openServer),
-				color: 'brand',
-				action: () => {
-					void router.push(`/multiplayer/servers/${encodeURIComponent(serverId)}`)
-				},
-			},
-		],
-	})
-}
-
 async function toggleFavorite() {
 	if (!data.value || !favoriteSupported.value || favoritePending.value) return
 	await contentFavorites
@@ -714,17 +626,12 @@ const serverPing = ref(undefined)
 const serverStatusOnline = ref(false)
 const serverInstancePath = ref(null)
 const serverPlaying = ref(false)
-const serverSetupModalRef = ref(null)
-const serverInstallContent = createServerInstallContent({ serverSetupModalRef })
 const translationActive = ref(false)
 const translationLoading = ref(false)
 const translations = ref({})
 const translationMode = ref('bilingual')
 const translationStyle = ref('weakened')
 let translationRequestVersion = 0
-
-serverInstallContent.watchServerContextChanges()
-await serverInstallContent.initServerContext()
 
 const instanceFilters = computed(() => {
 	if (!instance.value) {
@@ -820,29 +727,6 @@ async function syncContentSelectionTarget() {
 }
 
 const projectInstallContext = computed(() => {
-	const serverData = serverInstallContent.serverContextServerData.value
-	if (serverData) {
-		return {
-			name: serverData.name,
-			loader: serverData.loader ?? '',
-			gameVersion: serverData.mc_version ?? '',
-			serverId: serverInstallContent.serverIdQuery.value,
-			upstream: serverData.upstream,
-			iconSrc: null,
-			isMedal: serverData.is_medal,
-			backUrl: projectBrowseBackUrl.value,
-			backLabel: projectBackLabel.value,
-			heading: serverInstallContent.serverBrowseHeading.value,
-			queuedCount: serverInstallContent.queuedServerInstallCount.value,
-			selectedProjects: serverInstallContent.selectedServerInstallProjects.value,
-			isInstallingSelected: serverInstallContent.isInstallingQueuedServerInstalls.value,
-			installProgress: serverInstallContent.queuedInstallProgress.value,
-			clearQueued: serverInstallContent.clearQueuedServerInstalls,
-			clearSelected: serverInstallContent.clearQueuedServerInstalls,
-			discardSelectedAndBack: serverInstallContent.discardQueuedServerInstallsAndBack,
-			installSelected: serverInstallContent.installQueuedServerInstallsAndBack,
-		}
-	}
 
 	if (cartEligible.value && cartTarget.value) {
 		const target = cartTarget.value
@@ -883,36 +767,10 @@ const projectInstallContext = computed(() => {
 	return null
 })
 
-const serverProjectInstallContext = computed(
-	() =>
-		!!serverInstallContent.serverContextServerData.value &&
-		['modpack', 'mod', 'plugin', 'datapack'].includes(data.value?.project_type),
-)
-const serverProjectSelected = computed(
-	() => !!data.value && serverInstallContent.queuedServerInstallProjectIds.value.has(data.value.id),
-)
-const serverProjectInstalled = computed(
-	() =>
-		!!data.value &&
-		(serverInstallContent.serverContentProjectIds.value.has(data.value.id) ||
-			serverInstallContent.serverContextServerData.value?.upstream?.project_id === data.value.id),
-)
 const installButtonLoading = computed(
-	() =>
-		installing.value ||
-		serverInstallContent.isInstallingQueuedServerInstalls.value ||
-		(cartProjectKey.value ? contentSelection.isInstalling(cartProjectKey.value) : false),
+	() => installing.value || (cartProjectKey.value ? contentSelection.isInstalling(cartProjectKey.value) : false),
 )
-const installButtonValidating = computed(
-	() =>
-		serverProjectInstallContext.value &&
-		installing.value &&
-		data.value?.project_type !== 'modpack' &&
-		!serverInstallContent.isInstallingQueuedServerInstalls.value,
-)
-const installButtonInstalled = computed(() =>
-	serverProjectInstallContext.value ? serverProjectInstalled.value : installed.value,
-)
+const installButtonInstalled = computed(() => installed.value)
 const installButtonDisabled = computed(
 	() => installButtonInstalled.value || installButtonLoading.value,
 )
@@ -920,7 +778,6 @@ const installButtonLabel = computed(() => {
 	if (installButtonInstalled.value) return formatMessage(commonMessages.installedLabel)
 	if (installButtonValidating.value) return formatMessage(commonMessages.validatingLabel)
 	if (installButtonLoading.value) return formatMessage(commonMessages.installingLabel)
-	if (serverProjectSelected.value) return formatMessage(commonMessages.selectedLabel)
 	if (cartProjectSelected.value) return formatMessage(commonMessages.selectedLabel)
 	return formatMessage(commonMessages.installButton)
 })
@@ -1267,54 +1124,6 @@ watch(
 )
 
 async function install(version) {
-	if (serverProjectInstallContext.value && data.value) {
-		if (serverProjectSelected.value) {
-			serverInstallContent.removeQueuedServerInstall(data.value.id)
-			return
-		}
-		if (installButtonDisabled.value) return
-
-		installing.value = true
-		try {
-			const contentType = data.value.project_type
-			await requestInstall({
-				project: {
-					...data.value,
-					project_id: data.value.id,
-					icon_url: data.value.icon_url,
-				},
-				contentType,
-				mode: contentType === 'modpack' ? 'immediate' : 'queue',
-				selectedFilters: [],
-				providedFilters: [],
-				overriddenProvidedFilterTypes: [],
-				targetPreferences: getTargetInstallPreferences(
-					{
-						gameVersion: serverInstallContent.serverContextServerData.value?.mc_version,
-						loader: serverInstallContent.serverContextServerData.value?.loader,
-					},
-					contentType,
-				),
-				getProjectVersions: async () => versions.value,
-				queue: {
-					get: serverInstallContent.getQueuedServerInstallPlans,
-					set: serverInstallContent.setQueuedServerInstallPlans,
-				},
-				install: (plan) =>
-					serverInstallContent.openServerModpackInstallFlow({
-						projectId: plan.projectId,
-						versionId: plan.versionId,
-						name: plan.project.title ?? plan.project.name ?? data.value.title,
-						iconUrl: plan.project.icon_url ?? undefined,
-					}),
-			})
-		} catch (err) {
-			handleError(err)
-		} finally {
-			installing.value = false
-		}
-		return
-	}
 	if (cartEligible.value && !cartTarget.value) {
 		await contentSelection.refreshInstances()
 		browseInstanceSelector.value?.show()

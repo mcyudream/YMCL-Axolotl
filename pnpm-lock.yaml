@@ -89,9 +89,6 @@ importers:
       '@modrinth/assets':
         specifier: workspace:*
         version: link:../../packages/assets
-      '@modrinth/server':
-        specifier: workspace:*
-        version: link:../../packages/server
       '@modrinth/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -443,12 +440,6 @@ importers:
         version: 3.5.42(typescript@5.9.3)
 
   packages/daedalus: {}
-
-  packages/server:
-    devDependencies:
-      '@modrinth/tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
 
   packages/tooling-config:
     dependencies:

@@ -34,7 +34,7 @@ const props = defineProps({
 		type: String,
 		default: 'content-downloads',
 		validator: (value) =>
-			['content-downloads', 'network-multiplayer', 'storage-backups'].includes(value),
+			['content-downloads', 'network', 'storage-backups'].includes(value),
 	},
 })
 
@@ -985,7 +985,7 @@ function validateMinecraftDirectory(value) {
 			</SettingsRow>
 		</SettingsSection>
 
-		<SettingsSection v-if="props.scope === 'network-multiplayer'">
+		<SettingsSection v-if="props.scope === 'network'">
 			<SettingsRow>
 				<template #label>
 					<span id="settings-target-network-mojang-auth-source" tabindex="-1">
@@ -1001,7 +1001,7 @@ function validateMinecraftDirectory(value) {
 			</SettingsRow>
 		</SettingsSection>
 
-		<SettingsSection v-if="props.scope === 'network-multiplayer'">
+		<SettingsSection v-if="props.scope === 'network'">
 			<template #header>
 				<h2
 					id="settings-target-resources-proxy"

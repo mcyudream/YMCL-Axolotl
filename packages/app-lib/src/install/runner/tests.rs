@@ -737,6 +737,7 @@ fn manifest_and_override_errors_remain_fatal() {
 /// reuse it so `State::get()` resolves inside these APIs. The state root
 /// is intentionally leaked (`.keep()`) because the shared state outlives
 /// this function.
+#[cfg(not(feature = "tauri"))]
 async fn global_state() -> std::sync::Arc<State> {
     if !State::initialized() {
         let root = tempfile::tempdir().unwrap().keep();
@@ -745,6 +746,7 @@ async fn global_state() -> std::sync::Arc<State> {
     State::get().await.unwrap()
 }
 
+#[cfg(not(feature = "tauri"))]
 #[tokio::test]
 async fn direct_link_instances_cannot_be_duplicated() {
     let state = global_state().await;

@@ -6,6 +6,7 @@ import {
 	FileTextIcon,
 	GameIcon,
 	GaugeIcon,
+	GlobeIcon,
 	InfoIcon,
 	KeyboardIcon,
 	LanguagesIcon,
@@ -14,7 +15,6 @@ import {
 	RefreshCwIcon,
 	ShieldIcon,
 	ToggleRightIcon,
-	UsersIcon,
 } from '@modrinth/assets'
 import { commonMessages, defineMessages, type MessageDescriptor } from '@modrinth/ui'
 import { type Component, defineAsyncComponent } from 'vue'
@@ -67,13 +67,17 @@ const categoryContent: Record<SettingsCategoryId, Pick<SettingsCategory, 'icon' 
 		icon: GameIcon,
 		content: defineAsyncComponent(() => import('./DefaultInstanceSettings.vue')),
 	},
+	'ymcl-domains': {
+		icon: GlobeIcon,
+		content: defineAsyncComponent(() => import('@/pages/ymcl/DomainManage.vue')),
+	},
 	'content-downloads': {
 		icon: GaugeIcon,
 		content: defineAsyncComponent(() => import('./ContentDownloadSettings.vue')),
 	},
-	'network-multiplayer': {
-		icon: UsersIcon,
-		content: defineAsyncComponent(() => import('./NetworkMultiplayerSettings.vue')),
+	network: {
+		icon: GlobeIcon,
+		content: defineAsyncComponent(() => import('./NetworkSettings.vue')),
 	},
 	'storage-backups': {
 		icon: ArchiveIcon,
