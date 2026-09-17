@@ -4,6 +4,8 @@ import {
 	ChevronLeftIcon,
 	ChevronRightIcon,
 	CollectionIcon,
+	CompassIcon,
+	DatabaseIcon,
 	GameIcon,
 	GridIcon,
 	HistoryIcon,
@@ -14,9 +16,15 @@ import {
 	UserIcon,
 } from '@modrinth/assets'
 import { ButtonStyled, defineMessages, NewModal, StyledInput, useVIntl } from '@modrinth/ui'
+import type { Component } from 'vue'
 import { computed, nextTick, ref } from 'vue'
 
-import type { HomeWidgetKind, HomeWidgetPlacement } from '@/components/home/home-dashboard'
+import type {
+	HomeDataCardSource,
+	HomeShortcutTarget,
+	HomeWidgetKind,
+	HomeWidgetPlacement,
+} from '@/components/home/home-dashboard'
 import {
 	HOME_GREETING_DEFAULT_MODE,
 	HOME_RECENT_DEFAULT_LIMIT,
@@ -26,6 +34,9 @@ import { useHomeDashboardRuntime } from '@/components/home/home-dashboard-runtim
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
 import type { GameInstance } from '@/helpers/types'
 import type { World } from '@/helpers/worlds'
+import { domainRendererIcon } from '@/helpers/ymcl-domain'
+import { resolveDataSourceTitle } from '@/helpers/ymcl-home'
+import { useYmclStore } from '@/store/ymcl'
 
 const props = defineProps<{
 	instances: GameInstance[]
@@ -37,6 +48,7 @@ const emit = defineEmits<{
 
 const { formatMessage, locale } = useVIntl()
 const runtime = useHomeDashboardRuntime()
+const ymclStore = useYmclStore()
 const modal = ref<InstanceType<typeof NewModal>>()
 const searchInput = ref<InstanceType<typeof StyledInput>>()
 const searchQuery = ref('')
@@ -99,6 +111,14 @@ const messages = defineMessages({
 		id: 'app.home.widgets.pinned-servers-description',
 		defaultMessage: 'Automatically collects favorite multiplayer servers.',
 	},
+	domainPacks: {
+		id: 'app.home.widgets.domain-servers',
+		defaultMessage: '服务器',
+	},
+	domainPacksDescription: {
+		id: 'app.home.widgets.domain-servers-description',
+		defaultMessage: '域内全部服务器：地址、备用线路、在线人数、整合包与本地实例。',
+	},
 	instance: { id: 'app.home.widgets.instance', defaultMessage: 'Single instance' },
 	instanceDescription: {
 		id: 'app.home.widgets.instance-description',
@@ -120,6 +140,103 @@ const messages = defineMessages({
 	},
 	chooseWorld: { id: 'app.home.widgets.choose-world', defaultMessage: 'Choose a world' },
 	chooseServer: { id: 'app.home.widgets.choose-server', defaultMessage: 'Choose a server' },
+	domainGroup: { id: 'app.home.widgets.group.domain', defaultMessage: '域卡片' },
+	domainPageDescription: {
+		id: 'app.home.widgets.domain-page-description',
+		defaultMessage: '为域页面创建首页快捷入口（{renderer}）。',
+	},
+	domainDataDescription: {
+		id: 'app.home.widgets.domain-data-description',
+		defaultMessage: '绑定域数据源 {id} 的数据卡片。',
+	},
+})
+
+/** A catalog entry: native kinds add by kind alone; domain kinds carry payload. */
+interface PickerItem {
+	kind: HomeWidgetKind
+	label: string
+	description: string
+	icon: Component
+	shortcut?: HomeShortcutTarget
+	dataSource?: HomeDataCardSource
+}
+
+/**
+ * Adapter card contributions (YAP §6.5): every domain page becomes a
+ * page-shortcut entry and every declared dataSource a data-card entry.
+ * Hidden entirely for the personal domain.
+ */
+const domainSection = computed(() => {
+	const manifest = ymclStore.manifest
+	if (ymclStore.isPersonal || !manifest) return null
+	const items: PickerItem[] = []
+	for (const page of manifest.pages ?? []) {
+		items.push({
+			kind: 'page-shortcut',
+			label: page.title ?? page.id,
+			description: formatMessage(messages.domainPageDescription, {
+				renderer: page.renderer ?? '?',
+			}),
+			icon: domainRendererIcon(page.renderer),
+			shortcut: { target: `page:${page.id}`, ...(page.title ? { title: page.title } : {}) },
+		})
+	}
+	for (const source of manifest.data_sources ?? []) {
+		// 适配器 manifest 方言为 snake_case；无路由对的条目无法拉取，直接不展示。
+		const providerCode = source.provider_code ?? source.providerCode
+		const sourceCode = source.source_code ?? source.sourceCode
+		if (!providerCode || !sourceCode) continue
+		const boundPage = manifest.pages?.find((page) => page.data_source === source.id)
+		const boundTitle = boundPage?.title
+		const declarationTitle = source.title ?? source.name ?? source.label
+		const navigationTitle = (() => {
+			if (!boundPage?.id) return null
+			const stack = [...(manifest.navigation ?? [])]
+			while (stack.length) {
+				const item = stack.shift()
+				if (!item) continue
+				if (item.page_id === boundPage.id && item.title?.trim()) return item.title.trim()
+				if (item.children?.length) stack.push(...item.children)
+			}
+			return null
+		})()
+		const label = resolveDataSourceTitle({
+			id: source.id,
+			cardTitle: null,
+			declarationTitle,
+			pageTitle: boundTitle,
+			navigationTitle,
+		})
+		items.push({
+			kind: 'data-card',
+			label,
+			description: formatMessage(messages.domainDataDescription, { id: source.id }),
+			icon: sourceCode === 'servers' || sourceCode === 'servers.list' ? ServerIcon : DatabaseIcon,
+			dataSource: {
+				id: source.id,
+				providerCode,
+				sourceCode,
+				variant: 'list',
+				// Adapter-provided titles so the card header reads like the domain.
+				// Fallback labels are resolved at render time from the live manifest.
+				...(declarationTitle || boundTitle
+					? { title: (declarationTitle ?? boundTitle)! }
+					: {}),
+			},
+		})
+	}
+	if (items.length === 0) return null
+	return {
+		id: 'domain',
+		label: formatMessage(messages.domainGroup),
+		icon: CompassIcon as Component,
+		items,
+	}
+})
+
+const allSections = computed(() => {
+	const section = domainSection.value
+	return section ? [...catalogSections.value, section] : catalogSections.value
 })
 
 const catalogSections = computed(() => [
@@ -171,6 +288,17 @@ const catalogSections = computed(() => [
 				description: formatMessage(messages.pinnedServersDescription),
 				icon: ServerIcon,
 			},
+			// 服务器卡片是启动器内建的域硬依赖卡片：仅非个人域可选，无 MIP 面显示空态。
+			...(ymclStore.isPersonal
+				? []
+				: [
+						{
+							kind: 'domain-servers' as const,
+							label: formatMessage(messages.domainPacks),
+							description: formatMessage(messages.domainPacksDescription),
+							icon: ServerIcon,
+						},
+					]),
 		],
 	},
 	{
@@ -238,18 +366,38 @@ function addWidget(widget: HomeWidgetPlacement) {
 	modal.value?.hide()
 }
 
-function chooseKind(kind: HomeWidgetKind) {
-	if (kind !== 'instance' && kind !== 'world' && kind !== 'server') {
+function chooseKind(item: PickerItem) {
+	if (item.kind === 'page-shortcut' && item.shortcut) {
 		addWidget({
 			id: crypto.randomUUID(),
-			kind,
-			size: HOME_WIDGET_DEFAULT_SIZE[kind],
-			...(kind === 'recent' ? { options: { recentLimit: HOME_RECENT_DEFAULT_LIMIT } } : {}),
-			...(kind === 'greeting' ? { options: { greetingMode: HOME_GREETING_DEFAULT_MODE } } : {}),
+			kind: 'page-shortcut',
+			size: HOME_WIDGET_DEFAULT_SIZE['page-shortcut'],
+			shortcut: item.shortcut,
 		})
 		return
 	}
-	selectedKind.value = kind
+	if (item.kind === 'data-card' && item.dataSource) {
+		addWidget({
+			id: crypto.randomUUID(),
+			kind: 'data-card',
+			size: HOME_WIDGET_DEFAULT_SIZE['data-card'],
+			dataSource: item.dataSource,
+		})
+		return
+	}
+	if (item.kind !== 'instance' && item.kind !== 'world' && item.kind !== 'server') {
+		addWidget({
+			id: crypto.randomUUID(),
+			kind: item.kind,
+			size: HOME_WIDGET_DEFAULT_SIZE[item.kind],
+			...(item.kind === 'recent' ? { options: { recentLimit: HOME_RECENT_DEFAULT_LIMIT } } : {}),
+			...(item.kind === 'greeting'
+				? { options: { greetingMode: HOME_GREETING_DEFAULT_MODE } }
+				: {}),
+		})
+		return
+	}
+	selectedKind.value = item.kind
 	searchQuery.value = ''
 	void nextTick(() => searchInput.value?.focus())
 }
@@ -335,7 +483,7 @@ defineExpose({ show })
 			</div>
 
 			<div v-if="!selectedKind" class="flex min-w-0 flex-col gap-5">
-				<section v-for="section in catalogSections" :key="section.id" class="min-w-0">
+				<section v-for="section in allSections" :key="section.id" class="min-w-0">
 					<h3 class="mb-2 mt-0 flex items-center gap-2 px-1 text-sm font-semibold text-secondary">
 						<component :is="section.icon" class="size-4" aria-hidden="true" />
 						{{ section.label }}
@@ -343,10 +491,10 @@ defineExpose({ show })
 					<div class="overflow-hidden rounded-lg border border-solid border-divider bg-bg-raised">
 						<button
 							v-for="item in section.items"
-							:key="item.kind"
+							:key="`${item.kind}-${item.label}`"
 							type="button"
 							class="group flex min-h-16 w-full cursor-pointer items-center gap-3 border-0 border-b border-solid border-divider bg-transparent px-3 py-2 text-left text-primary transition-colors last:border-b-0 hover:bg-button-bg focus-visible:z-[1] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-shadow"
-							@click="chooseKind(item.kind)"
+							@click="chooseKind(item)"
 						>
 							<span
 								class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-button-bg text-secondary transition-colors group-hover:text-brand"

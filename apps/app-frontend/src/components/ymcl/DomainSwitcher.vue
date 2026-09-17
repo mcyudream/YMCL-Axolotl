@@ -24,13 +24,16 @@
 					class="flex w-full items-center gap-2 rounded-lg p-2 text-left hover:bg-button-bg"
 					@click="activate(domain)"
 				>
-					<img
-						v-if="domain.logo_url"
+					<DomainImg
 						:src="domain.logo_url"
+						:origin="domain.origin"
 						:alt="domain.display_name"
 						class="size-5 shrink-0 rounded object-contain"
-					/>
-					<GlobeIcon v-else class="size-5 shrink-0 text-secondary" />
+					>
+						<template #fallback>
+							<GlobeIcon class="size-5 shrink-0 text-secondary" />
+						</template>
+					</DomainImg>
 					<span class="min-w-0 flex-1 truncate text-sm text-contrast">
 						{{ domain.is_personal ? formatMessage(messages.personalDomain) : domain.display_name }}
 					</span>
@@ -51,10 +54,12 @@
 
 <script setup lang="ts">
 import { CheckIcon, DropdownIcon, GlobeIcon, SettingsIcon } from '@modrinth/assets'
-import { ButtonStyled, defineMessages, Dropdown, useVIntl } from '@modrinth/ui'
+import { Dropdown } from 'floating-vue'
+import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import DomainImg from '@/components/ymcl/DomainImg.vue'
 import type { YmclDomainSummary } from '@/helpers/ymcl'
 import { useYmclStore } from '@/store/ymcl'
 

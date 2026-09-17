@@ -8,6 +8,7 @@ import {
 	UploadIcon,
 } from '@modrinth/assets'
 import {
+	Admonition,
 	Combobox,
 	defineMessages,
 	injectNotificationManager,
@@ -42,6 +43,8 @@ import {
 	hslToHex,
 	parseCustomAccentColor,
 } from '@/store/theme.ts'
+import { useYmclStore } from '@/store/ymcl'
+import { useYmclThemeStore } from '@/store/ymcl-theme'
 
 import SettingsRow from './SettingsRow.vue'
 import SettingsSection from './SettingsSection.vue'
@@ -66,13 +69,18 @@ const pageTransitionsFlag: FeatureFlag = 'page_transitions'
 const autoInstallDependenciesFlag: FeatureFlag = 'auto_install_dependencies'
 
 const messages = defineMessages({
+	domainManagedNotice: {
+		id: 'app.appearance-settings.domain-managed.notice',
+		defaultMessage:
+			'外观主题当前由域 {domain} 统一管理，域内不可自行修改；切换回个人域后可恢复自定义。',
+	},
 	colorThemeTitle: {
 		id: 'app.appearance-settings.color-theme.title',
 		defaultMessage: 'Color theme',
 	},
 	colorThemeDescription: {
 		id: 'app.appearance-settings.color-theme.description',
-		defaultMessage: 'Select your preferred color theme for Axolotl Launcher.',
+		defaultMessage: 'Select your preferred color theme for YMCL (YuDream Launcher).',
 	},
 	accentColorTitle: {
 		id: 'app.appearance-settings.accent-color.title',
@@ -257,7 +265,7 @@ const messages = defineMessages({
 	},
 	closeBehaviorTitle: {
 		id: 'app.appearance-settings.close-behavior.title',
-		defaultMessage: 'Choose how to close Axolotl Launcher',
+		defaultMessage: 'Choose how to close YMCL (YuDream Launcher)',
 	},
 	closeBehaviorDescription: {
 		id: 'app.appearance-settings.close-behavior.description',
@@ -378,36 +386,126 @@ const messages = defineMessages({
 
 const os = ref(await getOS())
 const settings = ref(await get())
-const customBackgroundPreview = computed(() =>
-	settings.value.custom_background_path
-		? convertFileSrc(settings.value.custom_background_path)
-		: null,
+
+// YAP §6.9: a non-personal domain with a theme profile manages the whole
+// appearance set — its controls render read-only and display the effective
+// (domain ⊕ personal) values from the theme engine instead of the persisted
+// personal settings.
+const ymclThemeStore = useYmclThemeStore()
+const ymclStore = useYmclStore()
+const domainManaged = computed(() => ymclThemeStore.isAppearanceManaged)
+
+const effectiveTheme = computed(() =>
+	domainManaged.value ? themeStore.selectedTheme : settings.value.theme,
 )
+const effectiveAccentColor = computed(() =>
+	domainManaged.value ? themeStore.selectedAccentColor : settings.value.accent_color,
+)
+const isCustomAccent = computed(() => effectiveAccentColor.value.startsWith('custom:'))
+const isSystemAccent = computed(() => effectiveAccentColor.value === 'system')
+
+const effectiveBackgroundPath = computed(() =>
+	domainManaged.value ? themeStore.customBackgroundPath : settings.value.custom_background_path,
+)
+const customBackgroundPreview = computed(() => {
+	const path = effectiveBackgroundPath.value
+	if (!path) return null
+	return /^https?:\/\//i.test(path) ? path : convertFileSrc(path)
+})
+
+/** Managed fields read the theme engine; writes are dropped while managed. */
+const backgroundBlurModel = computed({
+	get: () =>
+		domainManaged.value ? themeStore.customBackgroundBlur : settings.value.custom_background_blur,
+	set: (value) => {
+		if (domainManaged.value) return
+		settings.value.custom_background_blur = value
+	},
+})
+const backgroundOpacityModel = computed({
+	get: () =>
+		domainManaged.value
+			? themeStore.customBackgroundOpacity
+			: settings.value.custom_background_opacity,
+	set: (value) => {
+		if (domainManaged.value) return
+		settings.value.custom_background_opacity = value
+	},
+})
+const transparentBackgroundModel = computed({
+	get: () =>
+		domainManaged.value ? themeStore.transparentBackground : settings.value.transparent_background,
+	set: (value) => {
+		if (domainManaged.value) return
+		settings.value.transparent_background = !!value
+	},
+})
+const transparentBackgroundOpacityModel = computed({
+	get: () =>
+		domainManaged.value
+			? themeStore.transparentBackgroundOpacity
+			: settings.value.transparent_background_opacity,
+	set: (value) => {
+		if (domainManaged.value) return
+		settings.value.transparent_background_opacity = value
+	},
+})
+const transparentBackgroundBlurModel = computed({
+	get: () =>
+		domainManaged.value
+			? themeStore.transparentBackgroundBlur
+			: settings.value.transparent_background_blur,
+	set: (value) => {
+		if (domainManaged.value) return
+		settings.value.transparent_background_blur = !!value
+	},
+})
+const advancedRenderingModel = computed({
+	get: () => themeStore.advancedRendering,
+	set: (value) => {
+		if (domainManaged.value) return
+		themeStore.advancedRendering = !!value
+		settings.value.advanced_rendering = themeStore.advancedRendering
+	},
+})
+const pageTransitionsModel = computed({
+	get: () => themeStore.getFeatureFlag(pageTransitionsFlag),
+	set: (value) => {
+		if (domainManaged.value) return
+		themeStore.featureFlags[pageTransitionsFlag] = !!value
+		settings.value.feature_flags[pageTransitionsFlag] = !!value
+	},
+})
 
 const accentColorOptions: Array<{
 	value: AccentColor
 	color: string
 	label: MessageDescriptor
 }> = [
+	{ value: 'blue', color: 'var(--color-blue)', label: messages.accentColorBlue },
 	{ value: 'pink', color: 'var(--color-pink)', label: messages.accentColorPink },
 	{ value: 'orange', color: 'var(--color-orange)', label: messages.accentColorOrange },
 	{ value: 'green', color: 'var(--color-green)', label: messages.accentColorGreen },
-	{ value: 'blue', color: 'var(--color-blue)', label: messages.accentColorBlue },
 	{ value: 'purple', color: 'var(--color-purple)', label: messages.accentColorPurple },
 ]
 
-const isCustomAccent = computed(() => settings.value.accent_color.startsWith('custom:'))
-const isSystemAccent = computed(() => settings.value.accent_color === 'system')
-const customAccentHex = ref(
+const customAccentHexRef = ref(
 	parseCustomAccentColor(settings.value.accent_color) ?? DEFAULT_CUSTOM_ACCENT_COLOR,
 )
-const customAccentHexInput = ref(customAccentHex.value)
+const customAccentHexInput = ref(customAccentHexRef.value)
+/** While managed, the domain's custom accent is displayed read-only. */
+const customAccentHex = computed(() =>
+	domainManaged.value
+		? (parseCustomAccentColor(effectiveAccentColor.value) ?? DEFAULT_CUSTOM_ACCENT_COLOR)
+		: customAccentHexRef.value,
+)
 const customAccentHue = computed(() => Math.round(hexToHsl(customAccentHex.value).h))
 const customAccentPreview = computed(() => deriveAccentVariants(customAccentHex.value))
 
 function applyCustomAccent(hex: string) {
+	if (domainManaged.value) return
 	const normalized = hex.toLowerCase()
-	customAccentHex.value = normalized
+	customAccentHexRef.value = normalized
 	customAccentHexInput.value = normalized
 	const value = `custom:${normalized}` as `custom:#${string}`
 	themeStore.setAccentColor(value)
@@ -439,6 +537,7 @@ function isCustomBackgroundImagePath(path: string) {
 }
 
 async function storeCustomBackgroundBytes(bytes: Uint8Array, extension: string) {
+	if (domainManaged.value) return
 	const backgroundDirectory = await join(await appDataDir(), 'backgrounds')
 	const storedPath = await join(
 		backgroundDirectory,
@@ -480,6 +579,7 @@ async function storeCustomBackgroundFromDroppedPath(path: string) {
 }
 
 async function chooseCustomBackground() {
+	if (domainManaged.value) return
 	const selectedPath = await open({
 		multiple: false,
 		filters: [
@@ -496,6 +596,7 @@ async function chooseCustomBackground() {
 }
 
 async function removeCustomBackground() {
+	if (domainManaged.value) return
 	const backgroundPath = settings.value.custom_background_path
 	settings.value.custom_background_path = null
 
@@ -529,6 +630,10 @@ async function setupNativeBackgroundDrop() {
 			(event: { payload: DragDropEvent }) => {
 				const payload = event.payload
 				if (payload.type === 'leave') {
+					isBackgroundDragActive.value = false
+					return
+				}
+				if (domainManaged.value) {
 					isBackgroundDragActive.value = false
 					return
 				}
@@ -606,6 +711,13 @@ watch(
 </script>
 <template>
 	<div class="flex flex-col gap-6">
+		<Admonition v-if="props.scope === 'interface' && domainManaged" type="info">
+			{{
+				formatMessage(messages.domainManagedNotice, {
+					domain: ymclStore.activeDomain?.display_name ?? '',
+				})
+			}}
+		</Admonition>
 		<SettingsSection v-if="props.scope === 'interface'">
 			<template #header>
 				<h2
@@ -619,15 +731,19 @@ watch(
 					{{ formatMessage(messages.colorThemeDescription) }}
 				</p>
 			</template>
-			<div class="flex flex-col gap-4 p-4">
+			<div
+				class="flex flex-col gap-4 p-4"
+				:class="{ 'pointer-events-none opacity-60': domainManaged }"
+			>
 				<ThemeSelector
 					:update-color-theme="
 						(theme: ColorTheme) => {
+							if (domainManaged) return
 							themeStore.setThemeState(theme)
 							settings.theme = theme
 						}
 					"
-					:current-theme="settings.theme"
+					:current-theme="effectiveTheme"
 					:theme-options="themeStore.getThemeOptions()"
 					system-theme-color="system"
 				/>
@@ -647,7 +763,10 @@ watch(
 					{{ formatMessage(messages.accentColorDescription) }}
 				</p>
 			</template>
-			<div class="flex flex-col gap-4 p-4 @container">
+			<div
+				class="flex flex-col gap-4 p-4 @container"
+				:class="{ 'pointer-events-none opacity-60': domainManaged }"
+			>
 				<!-- flex-wrap + per-chip basis: long i18n labels reflow instead of colliding -->
 				<div
 					class="flex flex-wrap gap-2"
@@ -659,10 +778,11 @@ watch(
 						:key="accentColor.value"
 						type="button"
 						role="radio"
-						:aria-checked="settings.accent_color === accentColor.value"
+						:disabled="domainManaged"
+						:aria-checked="effectiveAccentColor === accentColor.value"
 						class="relative flex min-w-0 flex-1 basis-[5.75rem] items-center justify-center gap-2 overflow-hidden rounded-lg border border-solid px-2 py-2.5 @xl:pe-5 @4xl:ps-3 font-semibold transition-all active:scale-[0.97]"
 						:class="
-							settings.accent_color === accentColor.value
+							effectiveAccentColor === accentColor.value
 								? 'border-brand bg-brand-highlight text-brand'
 								: 'border-surface-4 bg-surface-3 text-secondary hover:border-surface-5 hover:text-contrast'
 						"
@@ -681,14 +801,14 @@ watch(
 							formatMessage(accentColor.label)
 						}}</span>
 						<CheckIcon
-							v-if="settings.accent_color === accentColor.value"
+							v-if="effectiveAccentColor === accentColor.value"
 							class="absolute end-2 top-1/2 hidden size-3.5 shrink-0 -translate-y-1/2 @xl:block"
 						/>
 					</button>
 					<button
 						type="button"
 						role="radio"
-						:disabled="themeStore.systemAccentSupported !== true"
+						:disabled="domainManaged || themeStore.systemAccentSupported !== true"
 						:aria-checked="isSystemAccent"
 						:aria-label="
 							formatMessage(
@@ -715,7 +835,7 @@ watch(
 						<span
 							class="size-4 shrink-0 rounded-full ring-2 ring-white/20"
 							:style="{
-								backgroundColor: themeStore.systemAccentColor ?? 'var(--color-pink)',
+								backgroundColor: themeStore.systemAccentColor ?? 'var(--color-blue)',
 							}"
 						/>
 						<span class="hidden min-w-0 flex-col text-start leading-tight @xl:flex">
@@ -735,6 +855,7 @@ watch(
 					<button
 						type="button"
 						role="radio"
+						:disabled="domainManaged"
 						:aria-checked="isCustomAccent"
 						class="relative flex min-w-0 flex-1 basis-[6.75rem] items-center justify-center gap-2 overflow-hidden rounded-lg border border-solid px-2 py-2.5 @xl:pe-5 @4xl:ps-3 font-semibold transition-all active:scale-[0.97]"
 						:class="
@@ -763,7 +884,7 @@ watch(
 				</div>
 
 				<div
-					v-if="isCustomAccent"
+					v-if="isCustomAccent && !domainManaged"
 					class="rounded-lg border border-solid border-surface-4 bg-surface-3 p-4"
 				>
 					<label class="block">
@@ -833,7 +954,10 @@ watch(
 					{{ formatMessage(messages.customBackgroundDescription) }}
 				</p>
 			</template>
-			<div class="flex flex-col gap-4 p-4 appearance-panel--divided">
+			<div
+				class="flex flex-col gap-4 p-4 appearance-panel--divided"
+				:class="{ 'pointer-events-none opacity-60': domainManaged }"
+			>
 				<div
 					ref="backgroundPreviewRef"
 					class="group relative h-44 cursor-pointer overflow-hidden rounded-lg border border-solid transition-colors"
@@ -852,8 +976,8 @@ watch(
 						class="absolute -inset-10 bg-cover bg-center"
 						:style="{
 							backgroundImage: `url(&quot;${customBackgroundPreview}&quot;)`,
-							filter: `blur(${settings.custom_background_blur}px)`,
-							opacity: settings.custom_background_opacity / 100,
+							filter: `blur(${backgroundBlurModel}px)`,
+							opacity: backgroundOpacityModel / 100,
 						}"
 					/>
 					<div class="absolute inset-0 bg-surface-1/35" />
@@ -881,7 +1005,7 @@ watch(
 							</span>
 						</div>
 						<div
-							v-if="customBackgroundPreview && !isBackgroundDragActive"
+							v-if="customBackgroundPreview && !isBackgroundDragActive && !domainManaged"
 							class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 bg-surface-1/80 p-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						>
 							<Button type="base" native-type="button" @click.stop="chooseCustomBackground">
@@ -908,11 +1032,12 @@ watch(
 						</h3>
 						<Slider
 							id="custom-background-blur"
-							v-model="settings.custom_background_blur"
+							v-model="backgroundBlurModel"
 							:min="0"
 							:max="40"
 							:step="1"
 							unit="px"
+							:disabled="domainManaged"
 						/>
 						<p class="m-0 text-sm text-secondary">
 							{{ formatMessage(messages.customBackgroundBlurDescription) }}
@@ -924,11 +1049,12 @@ watch(
 						</h3>
 						<Slider
 							id="custom-background-opacity"
-							v-model="settings.custom_background_opacity"
+							v-model="backgroundOpacityModel"
 							:min="10"
 							:max="100"
 							:step="5"
 							unit="%"
+							:disabled="domainManaged"
 						/>
 						<p class="m-0 text-sm text-secondary">
 							{{ formatMessage(messages.customBackgroundOpacityDescription) }}
@@ -951,12 +1077,13 @@ watch(
 				<template #control>
 					<Toggle
 						id="transparent-background"
-						:model-value="settings.transparent_background"
-						@update:model-value="(e) => (settings.transparent_background = !!e)"
+						:model-value="transparentBackgroundModel"
+						:disabled="domainManaged"
+						@update:model-value="(e) => (transparentBackgroundModel = !!e)"
 					/>
 				</template>
 			</SettingsRow>
-			<SettingsRow v-if="settings.transparent_background" stacked>
+			<SettingsRow v-if="transparentBackgroundModel" stacked>
 				<template #label>{{ formatMessage(messages.transparentBackgroundOpacity) }}</template>
 				<template #description>
 					{{ formatMessage(messages.transparentBackgroundOpacityDescription) }}
@@ -965,16 +1092,17 @@ watch(
 					<div class="w-full">
 						<Slider
 							id="transparent-background-opacity"
-							v-model="settings.transparent_background_opacity"
+							v-model="transparentBackgroundOpacityModel"
 							:min="0"
 							:max="100"
 							:step="5"
 							unit="%"
+							:disabled="domainManaged"
 						/>
 					</div>
 				</template>
 			</SettingsRow>
-			<SettingsRow v-if="settings.transparent_background && os !== 'Linux'">
+			<SettingsRow v-if="transparentBackgroundModel && os !== 'Linux'">
 				<template #label>{{ formatMessage(messages.transparentBackgroundBlurTitle) }}</template>
 				<template #description>
 					{{ formatMessage(messages.transparentBackgroundBlurDescription) }}
@@ -982,8 +1110,9 @@ watch(
 				<template #control>
 					<Toggle
 						id="transparent-background-blur"
-						:model-value="settings.transparent_background_blur"
-						@update:model-value="(e) => (settings.transparent_background_blur = !!e)"
+						:model-value="transparentBackgroundBlurModel"
+						:disabled="domainManaged"
+						@update:model-value="(e) => (transparentBackgroundBlurModel = !!e)"
 					/>
 				</template>
 			</SettingsRow>
@@ -1158,13 +1287,9 @@ watch(
 				<template #control>
 					<Toggle
 						id="advanced-rendering"
-						:model-value="themeStore.advancedRendering"
-						@update:model-value="
-							(e) => {
-								themeStore.advancedRendering = !!e
-								settings.advanced_rendering = themeStore.advancedRendering
-							}
-						"
+						:model-value="advancedRenderingModel"
+						:disabled="domainManaged"
+						@update:model-value="(e) => (advancedRenderingModel = !!e)"
 					/>
 				</template>
 			</SettingsRow>
@@ -1178,14 +1303,9 @@ watch(
 				<template #control>
 					<Toggle
 						id="page-transitions"
-						:model-value="themeStore.getFeatureFlag(pageTransitionsFlag)"
-						@update:model-value="
-							(value) => {
-								const enabled = !!value
-								themeStore.featureFlags[pageTransitionsFlag] = enabled
-								settings.feature_flags[pageTransitionsFlag] = enabled
-							}
-						"
+						:model-value="pageTransitionsModel"
+						:disabled="domainManaged"
+						@update:model-value="(value) => (pageTransitionsModel = !!value)"
 					/>
 				</template>
 			</SettingsRow>

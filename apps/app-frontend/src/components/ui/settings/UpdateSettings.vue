@@ -27,20 +27,44 @@ import {
 } from '@/helpers/settings.ts'
 import { isDev, restartApp } from '@/helpers/utils.js'
 import { type AppUpdateCheckResult, checkForAppUpdate } from '@/providers/app-update.ts'
+import {
+	fetchYmclUpdateLatest,
+	getYmclUpdateApiBase,
+	isYmclUpdateConfigured,
+} from '@/helpers/ymcl-content'
+import { getUpdatePlatformLabel } from '@/helpers/ymcl-update-history'
 
 import SettingsRow from './SettingsRow.vue'
 import SettingsSection from './SettingsSection.vue'
 
 const { formatMessage } = useVIntl()
 const { addNotification, handleError } = injectNotificationManager()
-const [activeChannel, initialUpdatePreferences, currentVersion, isDevEnvironment, databasePath] =
-	await Promise.all([
-		getUpdateChannel(),
-		getUpdatePreferences(),
-		getVersion(),
-		isDev(),
-		getCurrentAppDatabasePath().catch(() => ''),
-	])
+
+// Settings 页本身是 async setup：任一本地 API 失败都不能让「更新」整页进不去。
+async function loadUpdatePageBootstrap() {
+	const [activeChannel, initialUpdatePreferences, currentVersion, isDevEnvironment, databasePath] =
+		await Promise.all([
+			getUpdateChannel().catch(() => 'release' as UpdateChannel),
+			getUpdatePreferences().catch(() => ({
+				immediateUpdateFetch: false,
+				updatesPaused: false,
+			})),
+			getVersion().catch(() => ''),
+			isDev().catch(() => false),
+			getCurrentAppDatabasePath().catch(() => ''),
+		])
+	return {
+		activeChannel,
+		initialUpdatePreferences,
+		currentVersion,
+		isDevEnvironment,
+		databasePath,
+	}
+}
+
+const bootstrap = await loadUpdatePageBootstrap()
+const { activeChannel, initialUpdatePreferences, currentVersion, isDevEnvironment, databasePath } =
+	bootstrap
 const selectedChannel = ref<UpdateChannel>(activeChannel)
 const updatePreferences = ref(initialUpdatePreferences)
 const checking = ref(false)
@@ -72,7 +96,7 @@ const messages = defineMessages({
 	},
 	description: {
 		id: 'app.settings.updates.channel.description',
-		defaultMessage: 'Choose which launcher versions Axolotl receives.',
+		defaultMessage: 'Choose which launcher versions YMCL receives.',
 	},
 	channelLabel: {
 		id: 'app.settings.updates.channel.label',
@@ -112,7 +136,7 @@ const messages = defineMessages({
 	},
 	upToDate: {
 		id: 'app.settings.updates.up-to-date',
-		defaultMessage: 'Axolotl is up to date.',
+		defaultMessage: 'YMCL is up to date.',
 	},
 	disabled: {
 		id: 'app.settings.updates.disabled',
@@ -133,6 +157,10 @@ const messages = defineMessages({
 	currentVersion: {
 		id: 'app.settings.updates.current-version',
 		defaultMessage: 'Current version {version}',
+	},
+	updateSource: {
+		id: 'app.settings.updates.source',
+		defaultMessage: 'Update source',
 	},
 	latestVersion: {
 		id: 'app.settings.updates.latest-version',
@@ -157,7 +185,7 @@ const messages = defineMessages({
 	restartDescription: {
 		id: 'app.settings.updates.channel.restart-description',
 		defaultMessage:
-			'Restart Axolotl now to start using the new update channel, or restart manually later.',
+			'Restart YMCL now to start using the new update channel, or restart manually later.',
 	},
 	restartDevelopmentDescription: {
 		id: 'app.settings.updates.channel.restart-development-description',
@@ -264,12 +292,12 @@ const messages = defineMessages({
 	databaseOperationActiveTarget: {
 		id: 'app.settings.updates.database-operation.active-target',
 		defaultMessage:
-			'Cannot overwrite the database currently in use. Restart Axolotl and switch channels first.',
+			'Cannot overwrite the database currently in use. Restart YMCL and switch channels first.',
 	},
 	databaseOperationFailed: {
 		id: 'app.settings.updates.database-operation.failed',
 		defaultMessage:
-			'The database could not be copied. Please make sure Axolotl is not using the target database.',
+			'The database could not be copied. Please make sure YMCL is not using the target database.',
 	},
 	databaseOperationSuccess: {
 		id: 'app.settings.updates.database-operation.success',
@@ -282,9 +310,14 @@ const messages = defineMessages({
 })
 
 async function loadLatestChannelVersions() {
+	// 优先 YMCL 自有更新平台（env 可配）；未配置时回退 Axolotl 更新服。
 	const versions = await Promise.all(
 		(['release', 'beta'] as const).map(async (channel) => {
 			try {
+				if (isYmclUpdateConfigured()) {
+					const payload = await fetchYmclUpdateLatest(channel)
+					return [channel, payload?.version ?? undefined] as const
+				}
 				const response = await tauriFetch(`https://update.axlmc.org/latest?channel=${channel}`)
 				if (!response.ok) return [channel, undefined] as const
 				const payload = (await response.json()) as { version?: string }
@@ -617,6 +650,16 @@ function onDatabaseOperationModalHide() {
 				<div class="update-check-heading">
 					<p class="m-0 text-sm text-secondary">
 						{{ formatMessage(messages.currentVersion, { version: currentVersion }) }}
+					</p>
+					<p class="m-0 text-sm text-secondary">
+						{{ formatMessage(messages.updateSource) }}：
+						<strong v-if="isYmclUpdateConfigured()" class="text-contrast">
+							{{ getUpdatePlatformLabel() || 'YMCL 更新平台' }}
+						</strong>
+						<strong v-else class="text-contrast">Axolotl update.axlmc.org（回退）</strong>
+					</p>
+					<p v-if="isYmclUpdateConfigured()" class="m-0 break-all text-xs text-secondary">
+						{{ getYmclUpdateApiBase() }}
 					</p>
 					<p class="m-0 text-sm text-secondary">{{ formatMessage(messages.security) }}</p>
 				</div>

@@ -17,7 +17,12 @@ import {
 	ToggleRightIcon,
 } from '@modrinth/assets'
 import { commonMessages, defineMessages, type MessageDescriptor } from '@modrinth/ui'
-import { type Component, defineAsyncComponent } from 'vue'
+import {
+	type Component,
+	defineAsyncComponent,
+	defineComponent,
+	h,
+} from 'vue'
 
 import {
 	getVisibleSettingsCategoryDefinitions,
@@ -95,7 +100,32 @@ const categoryContent: Record<SettingsCategoryId, Pick<SettingsCategory, 'icon' 
 		icon: FileTextIcon,
 		content: defineAsyncComponent(() => import('./LogsSettings.vue')),
 	},
-	about: { icon: InfoIcon, content: defineAsyncComponent(() => import('./AboutSettings.vue')) },
+	about: {
+		icon: InfoIcon,
+		// About pulls three.js / merge-game graphs; surface a readable fallback
+		// instead of an empty Suspense slot when a dep fails to load.
+		content: defineAsyncComponent({
+			loader: () => import('./AboutSettings.vue'),
+			errorComponent: defineComponent({
+				name: 'AboutSettingsLoadError',
+				setup() {
+					return () =>
+						h(
+							'div',
+							{
+								class:
+									'mx-auto max-w-5xl rounded-xl bg-bg-raised p-6 text-center text-sm text-secondary',
+							},
+							'关于页模块加载失败，请重启应用开发服务（Vite）后重试。',
+						)
+				},
+			}),
+			onError(error, _retry, fail) {
+				console.error('[settings] AboutSettings failed to load', error)
+				fail()
+			},
+		}),
+	},
 	'feature-flags': {
 		icon: ToggleRightIcon,
 		content: defineAsyncComponent(() => import('./FeatureFlagSettings.vue')),

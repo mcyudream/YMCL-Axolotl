@@ -43,7 +43,10 @@ const route = useRoute()
 const { formatMessage } = useVIntl()
 const { progress, version: downloadingVersion } = injectAppUpdateDownloadProgress()
 
-const [version, loadedSettings] = await Promise.all([getVersion(), get()])
+const [version, loadedSettings] = await Promise.all([
+	getVersion().catch(() => ''),
+	get().catch(() => null),
+])
 const osPlatform = getOsPlatform()
 const osVersion = getOsVersion()
 const settings = ref(loadedSettings)
@@ -258,15 +261,21 @@ function toggleDeveloperMode() {
 	if (devModeCounter.value <= 5) return
 
 	themeStore.devMode = !themeStore.devMode
-	settings.value.developer_mode = !!themeStore.devMode
+	if (settings.value) settings.value.developer_mode = !!themeStore.devMode
 	devModeCounter.value = 0
 }
 
 function categoryName(category: SettingsCategory): string {
+	if (!category?.name || typeof category.name !== 'object' || typeof category.name.id !== 'string') {
+		return category?.id ?? ''
+	}
 	return formatMessage(category.name)
 }
 
 function entryName(entry: SettingsSearchEntry): string {
+	if (!entry?.label || typeof entry.label !== 'object' || typeof entry.label.id !== 'string') {
+		return entry?.id ?? ''
+	}
 	return formatMessage(entry.label)
 }
 

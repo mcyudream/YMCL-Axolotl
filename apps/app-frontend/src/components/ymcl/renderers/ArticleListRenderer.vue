@@ -2,6 +2,8 @@
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed } from 'vue'
 
+import DomainImg from '@/components/ymcl/DomainImg.vue'
+
 /**
  * article-list renderer (YAP §6.6): image + title + summary rows linking
  * out to the domain's site. URL must be https.
@@ -26,9 +28,8 @@ function open(record: Record<string, unknown>) {
 			class="flex cursor-pointer items-center gap-3 rounded-xl border-0 bg-bg-raised p-3 text-left transition-colors hover:bg-button-bg"
 			@click="open(record)"
 		>
-			<img
-				v-if="record.cover"
-				:src="String(record.cover)"
+			<DomainImg
+				:src="typeof record.cover === 'string' ? record.cover : null"
 				:alt="String(record.title ?? '')"
 				class="h-16 w-24 shrink-0 rounded-lg object-cover"
 			/>

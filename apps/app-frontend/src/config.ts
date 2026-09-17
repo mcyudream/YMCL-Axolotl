@@ -1,11 +1,11 @@
 const trimTrailingSlash = (url: string) => url.replace(/\/$/, '')
 
 export const AxolotlBrandConfig = Object.freeze({
-	productName: 'Axolotl Launcher',
-	shortProductName: 'Axolotl',
+	productName: 'YMCL (YuDream Launcher)',
+	shortProductName: 'YMCL',
 	website: 'https://www.axlmc.org/',
-	repositoryUrl: 'https://github.com/Mystic-Stars/Axolotl',
-	supportUrl: 'https://github.com/Mystic-Stars/Axolotl/issues',
+	repositoryUrl: 'https://github.com/mcyudream/YMCL-Axolotl',
+	supportUrl: 'https://github.com/mcyudream/YMCL-Axolotl/issues',
 	qqGroupNumber: '737601250',
 	qqChannelUrl: 'https://pd.qq.com/s/9nfp5rlz0',
 	sponsorUrl: 'https://afdian.com/a/Mystic-Stars',

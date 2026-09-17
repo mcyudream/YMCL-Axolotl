@@ -308,6 +308,12 @@ export function useVIntl(): VIntlFormatters & { locale: Ref<string> } {
 		// when formatMessage is called during component render
 		void locale.value
 
+		// Malformed descriptors (HMR leftovers, optional maps, registry gaps)
+		// must not abort Settings / About / Updates page renders.
+		if (!descriptor || typeof descriptor !== 'object' || typeof descriptor.id !== 'string') {
+			return (descriptor as { defaultMessage?: string } | undefined)?.defaultMessage ?? ''
+		}
+
 		const key = descriptor.id
 		const translation = t(key, values ?? {})
 

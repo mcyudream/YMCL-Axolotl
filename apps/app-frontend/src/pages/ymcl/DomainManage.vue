@@ -18,7 +18,10 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
+import AddDomainModal from '@/components/ymcl/AddDomainModal.vue'
+import DomainImg from '@/components/ymcl/DomainImg.vue'
 import {
 	PERSONAL_DOMAIN_ID,
 	type YmclDomainSummary,
@@ -30,11 +33,23 @@ const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 const ymclStore = useYmclStore()
 
-const newOrigin = ref('')
+const addDomainModal = ref<InstanceType<typeof AddDomainModal>>()
 const username = ref('')
 const password = ref('')
 const externalProviders = ref<YmclExternalProvider[] | null>(null)
 const showLogin = ref(false)
+
+const route = useRoute()
+// ymcl://add-site?url={origin} lands here via /settings?add_site={origin}#ymcl-domains
+watch(
+	() => route.query.add_site,
+	(url) => {
+		if (typeof url === 'string' && url.trim()) {
+			addDomainModal.value?.show(url.trim())
+		}
+	},
+	{ immediate: true },
+)
 
 const messages = defineMessages({
 	title: {
@@ -49,10 +64,6 @@ const messages = defineMessages({
 	addLabel: {
 		id: 'app.settings.ymcl-domains.add',
 		defaultMessage: '添加域',
-	},
-	addPlaceholder: {
-		id: 'app.settings.ymcl-domains.add-placeholder',
-		defaultMessage: '域地址，例如 yda.example.com',
 	},
 	personalDomain: {
 		id: 'app.settings.ymcl-domains.personal',
@@ -76,7 +87,7 @@ const messages = defineMessages({
 	},
 	noDomains: {
 		id: 'app.settings.ymcl-domains.none',
-		defaultMessage: '还没有加入任何域。在上方输入域地址即可开始。',
+		defaultMessage: '还没有加入任何域。点击“添加域”输入域地址即可开始。',
 	},
 	adapterVersion: {
 		id: 'app.settings.ymcl-domains.adapter-version',
@@ -164,17 +175,6 @@ watch(showLogin, (visible) => {
 	if (visible) void loadExternalProviders()
 })
 
-async function addDomain() {
-	const origin = newOrigin.value.trim()
-	if (!origin || ymclStore.adding) return
-	try {
-		await ymclStore.addDomain(origin)
-		newOrigin.value = ''
-	} catch (error) {
-		handleError(error)
-	}
-}
-
 async function activate(domain: YmclDomainSummary) {
 	try {
 		await ymclStore.activateDomain(domain.id)
@@ -259,16 +259,9 @@ async function switchRole(roleId: string) {
 			{{ formatMessage(messages.description) }}
 		</p>
 
-		<div class="flex gap-2">
-			<StyledInput
-				v-model="newOrigin"
-				:placeholder="formatMessage(messages.addPlaceholder)"
-				:disabled="ymclStore.adding"
-				class="w-full"
-				@keyup.enter="addDomain"
-			/>
+		<div class="flex">
 			<ButtonStyled>
-				<button :disabled="ymclStore.adding || !newOrigin.trim()" @click="addDomain">
+				<button :disabled="ymclStore.adding" @click="addDomainModal?.show()">
 					<PlusIcon />
 					{{ formatMessage(messages.addLabel) }}
 				</button>
@@ -303,13 +296,16 @@ async function switchRole(roleId: string) {
 				:key="domain.id"
 				class="flex items-center gap-3 rounded-xl border border-solid border-surface-5 bg-bg-raised p-3"
 			>
-				<img
-					v-if="domain.logo_url"
+				<DomainImg
 					:src="domain.logo_url"
+					:origin="domain.origin"
 					:alt="domain.display_name"
 					class="h-8 w-8 shrink-0 rounded-lg object-contain"
-				/>
-				<GlobeIcon v-else class="h-8 w-8 shrink-0 text-secondary" />
+				>
+					<template #fallback>
+						<GlobeIcon class="h-8 w-8 shrink-0 text-secondary" />
+					</template>
+				</DomainImg>
 				<div class="min-w-0 flex-1">
 					<div class="truncate font-semibold text-contrast">{{ domain.display_name }}</div>
 					<div class="truncate text-xs text-secondary">{{ domain.origin }}</div>
@@ -378,13 +374,15 @@ async function switchRole(roleId: string) {
 
 			<div v-if="ymclStore.session" class="flex flex-col gap-3">
 				<div class="flex items-center gap-3">
-					<img
-						v-if="ymclStore.session.session.avatar"
+					<DomainImg
 						:src="ymclStore.session.session.avatar"
 						:alt="ymclStore.session.session.username"
 						class="h-10 w-10 shrink-0 rounded-full object-cover"
-					/>
-					<UserIcon v-else class="h-10 w-10 shrink-0 text-secondary" />
+					>
+						<template #fallback>
+							<UserIcon class="h-10 w-10 shrink-0 text-secondary" />
+						</template>
+					</DomainImg>
 					<div class="min-w-0 flex-1">
 						<div class="truncate font-semibold text-contrast">
 							{{ ymclStore.session.session.nickname ?? ymclStore.session.session.username }}
@@ -496,4 +494,5 @@ async function switchRole(roleId: string) {
 			</p>
 		</template>
 	</div>
+	<AddDomainModal ref="addDomainModal" />
 </template>

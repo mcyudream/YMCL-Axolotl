@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { CalendarIcon, HistoryIcon } from '@modrinth/assets'
 import { Accordion, defineMessages, TagItem, useVIntl } from '@modrinth/ui'
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import {
 	getAnnouncementByVersion,
 	getAnnouncements,
 	getLocalizedAnnouncementText,
+	type LauncherAnnouncement,
 } from '@/announcements/catalog'
 import { AxolotlBrandConfig } from '@/config'
+import {
+	findYmclAnnouncementByVersion,
+	getUpdatePlatformLabel,
+	loadYmclUpdateAnnouncements,
+	resolveUpdateChangelogUrl,
+} from '@/helpers/ymcl-update-history'
+import { isYmclUpdateConfigured } from '@/helpers/ymcl-content'
 import i18n from '@/i18n.config'
 
 import UpdateAnnouncementContent from './UpdateAnnouncementContent.vue'
@@ -34,16 +42,77 @@ const messages = defineMessages({
 	},
 	empty: {
 		id: 'app.settings.updates.announcements.empty',
-		defaultMessage: 'No bundled update announcements are available.',
+		defaultMessage: 'No update announcements are available yet.',
+	},
+	sourceLocal: {
+		id: 'app.settings.updates.announcements.source.local',
+		defaultMessage: 'Source: bundled Axolotl catalog',
+	},
+	sourceYmcl: {
+		id: 'app.settings.updates.announcements.source.ymcl',
+		defaultMessage: 'Source: YMCL update platform (ymcl-content)',
+	},
+	loading: {
+		id: 'app.settings.updates.announcements.loading',
+		defaultMessage: 'Loading release history from YMCL update platform…',
 	},
 })
 
 const locale = computed(() => i18n.global.locale.value)
-const launcherAnnouncements = getAnnouncements()
-const currentAnnouncement = computed(() => getAnnouncementByVersion(props.currentVersion))
+const remoteAnnouncements = ref<LauncherAnnouncement[] | null>(null)
+const loadingRemote = ref(false)
+
+const usingYmclPlatform = computed(() => isYmclUpdateConfigured() && remoteAnnouncements.value !== null)
+
+const launcherAnnouncements = computed<readonly LauncherAnnouncement[]>(() => {
+	if (remoteAnnouncements.value) return remoteAnnouncements.value
+	return getAnnouncements()
+})
+
+const currentAnnouncement = computed(() => {
+	if (remoteAnnouncements.value) {
+		return findYmclAnnouncementByVersion(remoteAnnouncements.value, props.currentVersion)
+	}
+	return getAnnouncementByVersion(props.currentVersion)
+})
+
 const historyAnnouncements = computed(() =>
-	launcherAnnouncements.filter((announcement) => announcement.id !== currentAnnouncement.value?.id),
+	launcherAnnouncements.value.filter(
+		(announcement) => announcement.id !== currentAnnouncement.value?.id,
+	),
 )
+
+const sourceLabel = computed(() => {
+	if (usingYmclPlatform.value) return formatMessage(messages.sourceYmcl)
+	if (isYmclUpdateConfigured()) return formatMessage(messages.loading)
+	return formatMessage(messages.sourceLocal)
+})
+
+function announcementTitle(announcement: LauncherAnnouncement) {
+	return getLocalizedAnnouncementText(announcement.title, locale.value)
+}
+
+onMounted(async () => {
+	if (!isYmclUpdateConfigured()) return
+	loadingRemote.value = true
+	try {
+		const remote = await loadYmclUpdateAnnouncements({ channel: 'all', limit: 50 })
+		if (remote && remote.length) {
+			remoteAnnouncements.value = remote
+		}
+		else if (remote) {
+			// 平台已配置但暂无发布：仍标记为 YMCL 源，避免误显示 Axolotl 本地目录
+			remoteAnnouncements.value = []
+		}
+	}
+	catch {
+		// 网络失败时保留本地 catalog 回退
+		remoteAnnouncements.value = null
+	}
+	finally {
+		loadingRemote.value = false
+	}
+})
 </script>
 
 <template>
@@ -55,13 +124,17 @@ const historyAnnouncements = computed(() =>
 			<p class="m-0 leading-relaxed text-secondary">
 				{{ formatMessage(messages.description) }}
 			</p>
+			<p class="m-0 text-xs text-secondary">
+				{{ getUpdatePlatformLabel() || sourceLabel }}
+				<span v-if="usingYmclPlatform"> · {{ formatMessage(messages.sourceYmcl) }}</span>
+			</p>
 		</div>
 
 		<div class="min-w-0">
 			<UpdateAnnouncementContent
 				:announcement="currentAnnouncement"
 				:version="currentVersion"
-				:external-url="currentAnnouncement?.externalUrl ?? AxolotlBrandConfig.website"
+				:external-url="currentAnnouncement?.externalUrl ?? resolveUpdateChangelogUrl()"
 			/>
 		</div>
 
@@ -70,7 +143,10 @@ const historyAnnouncements = computed(() =>
 				<HistoryIcon aria-hidden="true" class="size-4 text-secondary" />
 				{{ formatMessage(messages.history) }}
 			</h3>
-			<p v-if="historyAnnouncements.length === 0" class="m-0 text-sm text-secondary">
+			<p v-if="loadingRemote" class="ymcl-muted m-0">
+				{{ formatMessage(messages.loading) }}
+			</p>
+			<p v-else-if="historyAnnouncements.length === 0" class="m-0 text-sm text-secondary">
 				{{ formatMessage(messages.empty) }}
 			</p>
 			<div v-else class="flex min-w-0 flex-col gap-2">
@@ -86,11 +162,11 @@ const historyAnnouncements = computed(() =>
 								<span
 									class="truncate font-semibold text-primary transition-colors group-hover:text-contrast"
 								>
-									{{ getLocalizedAnnouncementText(announcement.title, locale) }}
+									{{ announcementTitle(announcement) }}
 								</span>
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-secondary">
 									<TagItem class="px-1.5 py-0.5 text-xs">v{{ announcement.version }}</TagItem>
-									<span class="flex items-center gap-1">
+									<span v-if="announcement.publishedAt" class="flex items-center gap-1">
 										<CalendarIcon aria-hidden="true" class="size-3.5" />
 										<time :datetime="announcement.publishedAt">{{ announcement.publishedAt }}</time>
 									</span>
@@ -125,7 +201,6 @@ const historyAnnouncements = computed(() =>
 }
 
 .update-announcement-history-item {
-	min-width: 0;
 	overflow: hidden;
 	border: 1px solid
 		var(--settings-card-border, color-mix(in srgb, var(--surface-4) 72%, transparent));

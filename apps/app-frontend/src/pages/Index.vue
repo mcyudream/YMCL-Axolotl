@@ -5,22 +5,27 @@ import {
 	LayoutTemplateIcon,
 	MinimizeIcon,
 	MoveIcon,
+	PaintbrushIcon,
 	PencilIcon,
 	PlusIcon,
+	RocketIcon,
 	RotateCounterClockwiseIcon,
 } from '@modrinth/assets'
 import {
+	ConfirmModal,
 	defineMessages,
 	injectNotificationManager,
 	injectPageContext,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed, onUnmounted, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
 	createDefaultHomeDashboard,
 	createHomeDashboardSaveQueue,
+	HOME_DASHBOARD_VERSION,
 	type HomeDashboardConfig,
 	normalizeHomeDashboard,
 } from '@/components/home/home-dashboard'
@@ -38,12 +43,21 @@ import { instance_listener } from '@/helpers/events'
 import { list } from '@/helpers/instance'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import type { GameInstance } from '@/helpers/types'
+import { DOMAIN_DESIGN_PERMISSION } from '@/helpers/ymcl'
+import { mapDashboardToHomeProfile, type YmclHomeProfile } from '@/helpers/ymcl-home'
+import {
+	applyHomeOverride,
+	clearYmclHomeOverride,
+	loadYmclHomeOverride,
+	saveYmclHomeOverride,
+	type YmclHomeOverride,
+} from '@/helpers/ymcl-home-override'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 import { useTheming } from '@/store/state'
 import type { FeatureFlag, HomeLayout } from '@/store/theme'
 import { useYmclStore } from '@/store/ymcl'
 
-const { handleError } = injectNotificationManager()
+const { handleError, addNotification } = injectNotificationManager()
 const route = useRoute()
 const router = useRouter()
 const breadcrumbs = useBreadcrumbs()
@@ -54,6 +68,22 @@ const pageContext = injectPageContext()
 
 const messages = defineMessages({
 	home: { id: 'app.home.breadcrumb', defaultMessage: 'Home' },
+	designDomainHome: {
+		id: 'app.home.layout.design-domain',
+		defaultMessage: 'Edit domain home',
+	},
+	publishDomainHome: {
+		id: 'app.home.layout.publish-domain',
+		defaultMessage: 'Publish domain layout',
+	},
+	editOwnHome: {
+		id: 'app.home.layout.edit-own-home',
+		defaultMessage: 'Customize your home',
+	},
+	configureDomainHome: {
+		id: 'app.home.layout.configure-domain',
+		defaultMessage: 'Configure domain home',
+	},
 	switchToMinimal: {
 		id: 'app.home.layout.switch-to-minimal',
 		defaultMessage: 'Switch to Minimal Home',
@@ -82,6 +112,10 @@ const messages = defineMessages({
 		id: 'app.home.widgets.reset-confirm',
 		defaultMessage: 'Restore the default widget layout?',
 	},
+	resetWidgetsConfirm: {
+		id: 'app.home.widgets.reset-confirm-description',
+		defaultMessage: 'Your current layout adjustments will be cleared.',
+	},
 	customizeWidgets: {
 		id: 'app.home.widgets.customize',
 		defaultMessage: 'Customize widgets',
@@ -92,7 +126,34 @@ const messages = defineMessages({
 		id: 'app.home.widgets.reset',
 		defaultMessage: 'Restore default widgets',
 	},
+	domainHomePublished: {
+		id: 'app.home.widgets.domain-published',
+		defaultMessage: 'Domain home layout published',
+	},
+	personalHomeSaved: {
+		id: 'app.home.widgets.personal-saved',
+		defaultMessage: 'Your home layout was saved locally',
+	},
+	unmappedWidgetsSkipped: {
+		id: 'app.home.widgets.unmapped-skipped',
+		defaultMessage: '这些小组件没有对应的域卡片类型，未包含在发布：{widgets}',
+	},
 })
+
+/** 不可发布小组件的可读名；文案复用小组件选择器的既有条目。 */
+const SKIPPED_KIND_MESSAGES: Record<string, { id: string; defaultMessage: string }> = {
+	greeting: { id: 'app.home.widgets.greeting', defaultMessage: '问候' },
+	calendar: { id: 'app.home.widgets.calendar', defaultMessage: '日历' },
+	'pinned-worlds': { id: 'app.home.widgets.pinned-worlds', defaultMessage: '固定的世界' },
+	instance: { id: 'app.home.widgets.instance', defaultMessage: '单个实例入口' },
+	world: { id: 'app.home.widgets.world', defaultMessage: '单个世界入口' },
+	server: { id: 'app.home.widgets.server', defaultMessage: '单个服务器入口' },
+}
+
+function skippedKindLabel(kind: string): string {
+	const message = SKIPPED_KIND_MESSAGES[kind]
+	return message ? formatMessage(message) : kind
+}
 
 const recentProjectsInHomeFlag: FeatureFlag = 'worlds_in_home'
 
@@ -105,13 +166,62 @@ const domainDashboard = computed(() =>
 	ymclStore.isPersonal ? null : ymclStore.domainHomeDashboard,
 )
 const domainDashboardLocked = computed(() => !ymclStore.isPersonal && ymclStore.domainHomeLocked)
-const effectiveDashboard = computed(() => domainDashboard.value ?? dashboardConfig.value)
+/** Domain home designer entry (YAP §6.5): signed-in members of a domain. */
+const canDesignDomainHome = computed(() => !ymclStore.isPersonal && !!ymclStore.session)
+/** chrome/home writes need the adapter's design permission (RBAC-checked server-side). */
+const hasDesignPermission = computed(() => {
+	const permissions = ymclStore.session?.session.permissions ?? []
+	// Host grants superadmins the "*" wildcard instead of enumerating codes.
+	return permissions.includes('*') || permissions.includes(DOMAIN_DESIGN_PERMISSION)
+})
+/** Publishes layout changes to the whole domain (server-side chrome/home PUT). */
+const canPublishDomainHome = computed(
+	() => canDesignDomainHome.value && hasDesignPermission.value && domainDashboard.value !== null,
+)
+/** Unlocked domain homes allow members to customize their own view (YAP §6.5 用户覆盖). */
+const canOverrideDomainHome = computed(
+	() =>
+		canDesignDomainHome.value && domainDashboard.value !== null && !domainDashboardLocked.value,
+)
+/** The domain hosts a renderable home layout: the pencil edits it in place. */
+const canEditDomainHome = computed(
+	() => canPublishDomainHome.value || canOverrideDomainHome.value,
+)
+/** No domain home yet: offer bootstrapping one from the current layout. */
+const canBootstrapDomainHome = computed(
+	() => canDesignDomainHome.value && hasDesignPermission.value && domainDashboard.value === null,
+)
+const editingActive = computed(() => dashboardEditing.value || domainEditing.value)
+const domainEditing = ref(false)
+/** true = publishing the domain layout to the server; false = saving a personal override. */
+const domainEditingDesign = ref(true)
+const domainEditingConfig = ref<HomeDashboardConfig | null>(null)
+const savingDomainHome = ref(false)
+/** Member's local customization of the domain home, keyed per domain (YAP §6.5). */
+const domainOverride = ref<YmclHomeOverride | null>(null)
+const overrideDomainId = computed(() => (ymclStore.isPersonal ? null : ymclStore.activeDomainId))
+watch(
+	overrideDomainId,
+	(id) => {
+		domainOverride.value = id ? loadYmclHomeOverride(id) : null
+	},
+	{ immediate: true },
+)
+const memberDashboard = computed(() =>
+	domainDashboard.value ? applyHomeOverride(domainDashboard.value, domainOverride.value) : null,
+)
+const effectiveDashboard = computed(() => memberDashboard.value ?? dashboardConfig.value)
+const renderedDashboard = computed(() =>
+	domainEditing.value && domainEditingConfig.value
+		? domainEditingConfig.value
+		: effectiveDashboard.value,
+)
 const dashboardConfig = ref<HomeDashboardConfig | null>(null)
 const dashboard = ref<InstanceType<typeof HomeDashboard>>()
 const dashboardEditing = ref(false)
 const instancePicker = ref<InstanceType<typeof HomeInstancePickerModal>>()
 const isMinimal = computed(() => themeStore.homeLayout === 'minimal')
-const isFreeWidgetLayout = computed(() => dashboardConfig.value?.layout === 'free')
+const isFreeWidgetLayout = computed(() => renderedDashboard.value?.layout === 'free')
 const switchingLayout = ref(false)
 const dashboardSaveQueue = createHomeDashboardSaveQueue(
 	async (config) => {
@@ -195,9 +305,100 @@ function updateDashboardConfig(config: HomeDashboardConfig) {
 	void dashboardSaveQueue.enqueue(config, previous)
 }
 
+/**
+ * `window.confirm` is dead in Tauri (its dialog command is unavailable), so
+ * the reset gate uses the in-app ConfirmModal instead.
+ */
+const resetConfirmModal = useTemplateRef<InstanceType<typeof ConfirmModal>>('resetConfirmModal')
+
+function requestResetDashboard() {
+	resetConfirmModal.value?.show()
+}
+
 function resetDashboardConfig() {
-	if (!window.confirm(formatMessage(messages.resetWidgets))) return
+	if (domainEditing.value) {
+		if (!domainEditingDesign.value) {
+			// 个人覆盖模式：清空本地覆盖，回到域发布的布局。
+			if (overrideDomainId.value) {
+				clearYmclHomeOverride(overrideDomainId.value)
+				domainOverride.value = null
+			}
+			domainEditingConfig.value = cloneDashboard(
+				domainDashboard.value ?? createDefaultHomeDashboard(),
+			)
+			return
+		}
+		// 域设计模式：丢弃当前草稿，从默认小组件重新开始。
+		domainEditingConfig.value = cloneDashboard(createDefaultHomeDashboard())
+		return
+	}
 	updateDashboardConfig(createDefaultHomeDashboard())
+}
+
+function onDashboardChange(config: HomeDashboardConfig) {
+	if (domainEditing.value) {
+		domainEditingConfig.value = config
+		return
+	}
+	// 域布局的只读渲染不得回写个人配置：问候语设置等控件在非编辑态也会发
+	// change，若放行会把域卡片写进 settings.home_widgets（个人主页被污染）。
+	if (!ymclStore.isPersonal && !dashboardEditing.value) return
+	updateDashboardConfig(config)
+}
+
+function cloneDashboard(config: HomeDashboardConfig): HomeDashboardConfig {
+	return JSON.parse(JSON.stringify(config)) as HomeDashboardConfig
+}
+
+async function finishDomainHomeEditing() {
+	const config = domainEditingConfig.value
+	if (!config || savingDomainHome.value) return
+	// 个人覆盖：只保存在本地，不写域（YAP §6.5 locked:false 用户覆盖）。
+	if (!domainEditingDesign.value) {
+		const domain = domainDashboard.value
+		const domainId = overrideDomainId.value
+		if (domain && domainId) {
+			const removed = domain.widgets
+				.map((widget) => widget.id)
+				.filter((id) => !config.widgets.some((widget) => widget.id === id))
+			saveYmclHomeOverride(domainId, {
+				version: HOME_DASHBOARD_VERSION,
+				layout: config.layout,
+				widgets: config.widgets,
+				removed,
+			})
+			domainOverride.value = loadYmclHomeOverride(domainId)
+		}
+		domainEditing.value = false
+		addNotification({
+			title: formatMessage(messages.personalHomeSaved),
+			type: 'success',
+		})
+		return
+	}
+	savingDomainHome.value = true
+	try {
+		const original = (ymclStore.manifest?.home ?? null) as YmclHomeProfile | null
+		const { profile, skippedKinds } = mapDashboardToHomeProfile(config, original)
+		await invoke('plugin:ymcl|ymcl_chrome_home_put', { config: profile })
+		domainEditing.value = false
+		addNotification({
+			title: formatMessage(messages.domainHomePublished),
+			text: skippedKinds.length
+				? formatMessage(messages.unmappedWidgetsSkipped, {
+						widgets: skippedKinds.map((kind) => skippedKindLabel(kind)).join('、'),
+					})
+				: undefined,
+			type: 'success',
+		})
+		// The adapter rebuilds its manifest on save; re-pull so the rendered
+		// home reflects the published layout (YAP §6.10).
+		await ymclStore.refreshManifest()
+	} catch (error) {
+		handleError(error)
+	} finally {
+		savingDomainHome.value = false
+	}
 }
 
 async function selectMinimalInstance(instance: GameInstance) {
@@ -223,7 +424,10 @@ async function toggleHomeLayout() {
 	const previousEditing = dashboardEditing.value
 	switchingLayout.value = true
 	themeStore.homeLayout = nextLayout
-	if (nextLayout === 'minimal') dashboardEditing.value = false
+	if (nextLayout === 'minimal') {
+		dashboardEditing.value = false
+		domainEditing.value = false
+	}
 
 	try {
 		const settings = await getSettings()
@@ -239,7 +443,38 @@ async function toggleHomeLayout() {
 }
 
 function toggleDashboardEditing() {
-	dashboardEditing.value = !dashboardEditing.value
+	// The pencil personalizes the member's OWN view (YAP §6.5 用户覆盖); the
+	// separate publish button (design permission) edits the domain layout.
+	if (domainEditing.value) {
+		void finishDomainHomeEditing()
+		return
+	}
+	if (dashboardEditing.value) {
+		dashboardEditing.value = false
+		return
+	}
+	if (canOverrideDomainHome.value) {
+		startDomainHomeEditing(false)
+		return
+	}
+	dashboardEditing.value = true
+}
+
+function startDomainHomeEditing(design: boolean) {
+	if (domainEditing.value) return
+	domainEditingDesign.value = design
+	const start = design
+		? domainDashboard.value
+		: (memberDashboard.value ?? domainDashboard.value)
+	domainEditingConfig.value = cloneDashboard(start ?? createDefaultHomeDashboard())
+	domainEditing.value = true
+}
+
+function startDomainHomeBootstrap() {
+	if (domainEditing.value) return
+	domainEditingDesign.value = true
+	domainEditingConfig.value = cloneDashboard(createDefaultHomeDashboard())
+	domainEditing.value = true
 }
 
 function toggleWidgetLayout() {
@@ -277,11 +512,11 @@ onUnmounted(() => {
 		<HomeDashboard
 			v-if="!isMinimal && effectiveDashboard"
 			ref="dashboard"
-			:config="effectiveDashboard"
+			:config="renderedDashboard"
 			:instances="instances"
 			:player-name="playerName"
-			:editing="dashboardEditing"
-			@change="updateDashboardConfig"
+			:editing="editingActive"
+			@change="onDashboardChange"
 		/>
 
 		<HomeMinimal
@@ -294,9 +529,9 @@ onUnmounted(() => {
 		/>
 	</div>
 	<div class="home-floating-controls" :style="floatingControlsStyle">
-		<template v-if="!isMinimal && !domainDashboardLocked">
+		<template v-if="!isMinimal && (!domainDashboardLocked || canEditDomainHome)">
 			<button
-				v-if="dashboardEditing"
+				v-if="editingActive"
 				v-tooltip="formatMessage(messages.addWidget)"
 				type="button"
 				class="home-floating-action"
@@ -306,34 +541,57 @@ onUnmounted(() => {
 				<PlusIcon />
 			</button>
 			<button
-				v-if="dashboardEditing"
+				v-if="editingActive"
 				v-tooltip="formatMessage(messages.resetWidgetLayout)"
 				type="button"
 				class="home-floating-action"
 				:aria-label="formatMessage(messages.resetWidgetLayout)"
-				@click="resetDashboardConfig"
+				@click="requestResetDashboard"
 			>
 				<RotateCounterClockwiseIcon />
 			</button>
 			<button
+				v-if="editingActive || !domainDashboardLocked"
 				v-tooltip="
-					formatMessage(dashboardEditing ? messages.doneEditing : messages.customizeWidgets)
+					formatMessage(
+						editingActive
+							? messages.doneEditing
+							: !ymclStore.isPersonal
+								? messages.editOwnHome
+								: messages.customizeWidgets,
+					)
 				"
 				data-onboarding-id="home-widget-customize"
 				type="button"
 				class="home-floating-action"
-				:class="{ 'is-active': dashboardEditing }"
+				:class="{ 'is-active': editingActive }"
 				:aria-label="
-					formatMessage(dashboardEditing ? messages.doneEditing : messages.customizeWidgets)
+					formatMessage(
+						editingActive
+							? messages.doneEditing
+							: !ymclStore.isPersonal
+								? messages.editOwnHome
+								: messages.customizeWidgets,
+					)
 				"
-				:aria-pressed="dashboardEditing"
+				:aria-pressed="editingActive"
 				@click="toggleDashboardEditing"
 			>
-				<CheckIcon v-if="dashboardEditing" />
+				<CheckIcon v-if="editingActive" />
 				<PencilIcon v-else />
 			</button>
 			<button
-				v-if="dashboardEditing"
+				v-if="canPublishDomainHome && !editingActive"
+				v-tooltip="formatMessage(messages.publishDomainHome)"
+				type="button"
+				class="home-floating-action"
+				:aria-label="formatMessage(messages.publishDomainHome)"
+				@click="startDomainHomeEditing(true)"
+			>
+				<RocketIcon />
+			</button>
+			<button
+				v-if="editingActive"
 				v-tooltip="
 					formatMessage(
 						isFreeWidgetLayout
@@ -359,6 +617,16 @@ onUnmounted(() => {
 			</button>
 			<span class="home-floating-divider" aria-hidden="true" />
 		</template>
+		<button
+			v-if="canBootstrapDomainHome && !editingActive"
+			v-tooltip="formatMessage(messages.configureDomainHome)"
+			type="button"
+			class="home-floating-action"
+			:aria-label="formatMessage(messages.configureDomainHome)"
+			@click="startDomainHomeBootstrap"
+		>
+			<PaintbrushIcon />
+		</button>
 		<button
 			v-tooltip="formatMessage(isMinimal ? messages.switchToInformation : messages.switchToMinimal)"
 			data-onboarding-id="home-layout-switch"
@@ -390,6 +658,16 @@ onUnmounted(() => {
 			<HomeMinecraftNews />
 		</div>
 	</Teleport>
+
+	<ConfirmModal
+		ref="resetConfirmModal"
+		:title="formatMessage(messages.resetWidgets)"
+		:description="formatMessage(messages.resetWidgetsConfirm)"
+		:proceed-icon="RotateCounterClockwiseIcon"
+		:proceed-label="formatMessage(messages.resetWidgetLayout)"
+		:danger="false"
+		@proceed="resetDashboardConfig"
+	/>
 </template>
 
 <style scoped>

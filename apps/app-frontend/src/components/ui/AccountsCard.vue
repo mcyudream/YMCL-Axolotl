@@ -14,29 +14,56 @@
 		</ButtonStyled>
 	</div>
 	<div
-		v-if="accounts.length === 0"
+		v-if="visibleAccounts.length === 0"
 		class="flex flex-col gap-3 bg-button-bg border border-solid border-surface-5 rounded-xl p-3 mt-2"
 	>
 		<span>{{ formatMessage(messages.notSignedIn) }}</span>
-		<ButtonStyled v-if="!offline" color="brand">
-			<button color="primary" :disabled="loginDisabled" @click="login()">
-				<LogInIcon v-if="!loginDisabled" />
-				<SpinnerIcon v-else class="animate-spin" />
-				{{ formatMessage(messages.signInToMinecraft) }}
-			</button>
-		</ButtonStyled>
-		<ButtonStyled v-if="!offline">
-			<button :disabled="loginDisabled" @click="showYggdrasilAccountModal()">
-				<PlusIcon />
-				{{ formatMessage(messages.addThirdPartyAccount) }}
-			</button>
-		</ButtonStyled>
-		<ButtonStyled>
-			<button :disabled="loginDisabled" @click="showOfflineAccountModal()">
-				<PlusIcon />
-				{{ formatMessage(messages.addOfflineAccount) }}
-			</button>
-		</ButtonStyled>
+		<template v-if="!ymclStore.isPersonal">
+			<ButtonStyled v-if="domainSessionName" color="brand">
+				<button :disabled="profileSwitchBusy" @click="showProfileSwitch()">
+					<SpinnerIcon v-if="profileSwitchBusy" class="animate-spin" />
+					<UsersIcon v-else />
+					{{ formatMessage(messages.switchProfile) }}
+				</button>
+			</ButtonStyled>
+			<ButtonStyled v-else color="brand">
+				<button :disabled="loginDisabled" @click="showDomainLogin()">
+					<LogInIcon v-if="!loginDisabled" />
+					<SpinnerIcon v-else class="animate-spin" />
+					{{ domainLoginLabel }}
+				</button>
+			</ButtonStyled>
+			<p v-if="domainSessionName" class="m-0 text-xs text-secondary">
+				{{ formatMessage(messages.domainSessionSignedIn, { name: domainSessionName }) }}
+			</p>
+		</template>
+		<template v-else>
+			<ButtonStyled>
+				<button @click="addDomainModal?.show()">
+					<GlobeIcon />
+					{{ formatMessage(messages.addDomain) }}
+				</button>
+			</ButtonStyled>
+			<ButtonStyled v-if="!offline" color="brand">
+				<button color="primary" :disabled="loginDisabled" @click="login()">
+					<LogInIcon v-if="!loginDisabled" />
+					<SpinnerIcon v-else class="animate-spin" />
+					{{ formatMessage(messages.signInToMinecraft) }}
+				</button>
+			</ButtonStyled>
+			<ButtonStyled v-if="!offline">
+				<button :disabled="loginDisabled" @click="showYggdrasilAccountModal()">
+					<PlusIcon />
+					{{ formatMessage(messages.addThirdPartyAccount) }}
+				</button>
+			</ButtonStyled>
+			<ButtonStyled>
+				<button :disabled="loginDisabled" @click="showOfflineAccountModal()">
+					<PlusIcon />
+					{{ formatMessage(messages.addOfflineAccount) }}
+				</button>
+			</ButtonStyled>
+		</template>
 	</div>
 	<Accordion
 		v-else
@@ -70,8 +97,8 @@
 			</div>
 		</template>
 		<div class="bg-button-bg pt-1 pb-2 border-0 border-t border-solid border-surface-5">
-			<template v-if="accounts.length > 0">
-				<div v-for="account in accounts" :key="account.profile.id" class="flex gap-1 items-center">
+			<template v-if="visibleAccounts.length > 0">
+				<div v-for="account in visibleAccounts" :key="account.profile.id" class="flex gap-1 items-center">
 					<button
 						class="flex items-center flex-shrink flex-grow overflow-clip gap-2 p-2 border-0 bg-transparent cursor-pointer button-base min-w-0"
 						@click="setAccount(account)"
@@ -142,19 +169,59 @@
 				</div>
 			</template>
 			<div class="flex flex-col gap-2 px-2 pt-2">
-				<ButtonStyled v-if="accounts.length > 0 && !offline" class="w-full">
+				<ButtonStyled
+					v-if="!ymclStore.isPersonal && domainSessionName"
+					color="brand"
+					class="w-full"
+				>
+					<button :disabled="profileSwitchBusy" @click="showProfileSwitch()">
+						<SpinnerIcon v-if="profileSwitchBusy" class="animate-spin" />
+						<UsersIcon v-else />
+						{{ formatMessage(messages.switchProfile) }}
+					</button>
+				</ButtonStyled>
+				<ButtonStyled
+					v-else-if="!ymclStore.isPersonal"
+					color="brand"
+					class="w-full"
+				>
+					<button :disabled="loginDisabled" @click="showDomainLogin()">
+						<LogInIcon v-if="!loginDisabled" />
+						<SpinnerIcon v-else class="animate-spin" />
+						{{ domainLoginLabel }}
+					</button>
+				</ButtonStyled>
+				<p
+					v-if="!ymclStore.isPersonal && domainSessionName"
+					class="m-0 px-1 text-xs text-secondary"
+				>
+					{{ formatMessage(messages.domainSessionSignedIn, { name: domainSessionName }) }}
+				</p>
+				<ButtonStyled v-if="ymclStore.isPersonal" class="w-full">
+					<button @click="addDomainModal?.show()">
+						<GlobeIcon />
+						{{ formatMessage(messages.addDomain) }}
+					</button>
+				</ButtonStyled>
+				<ButtonStyled
+					v-if="ymclStore.isPersonal && visibleAccounts.length > 0 && !offline"
+					class="w-full"
+				>
 					<button :disabled="loginDisabled" @click="login()">
 						<PlusIcon />
 						{{ formatMessage(messages.addMicrosoftAccount) }}
 					</button>
 				</ButtonStyled>
-				<ButtonStyled v-if="accounts.length > 0 && !offline" class="w-full">
+				<ButtonStyled
+					v-if="ymclStore.isPersonal && visibleAccounts.length > 0 && !offline"
+					class="w-full"
+				>
 					<button :disabled="loginDisabled" @click="showYggdrasilAccountModal()">
 						<PlusIcon />
 						{{ formatMessage(messages.addThirdPartyAccount) }}
 					</button>
 				</ButtonStyled>
-				<ButtonStyled v-if="accounts.length > 0" class="w-full">
+				<ButtonStyled v-if="ymclStore.isPersonal && visibleAccounts.length > 0" class="w-full">
 					<button :disabled="loginDisabled" @click="showOfflineAccountModal()">
 						<PlusIcon />
 						{{ formatMessage(messages.addOfflineAccount) }}
@@ -164,6 +231,36 @@
 		</div>
 	</Accordion>
 	<MinecraftLoginModal ref="minecraftLoginModal" @complete="onMicrosoftLogin" />
+	<AddDomainModal ref="addDomainModal" />
+	<DomainLoginModal ref="domainLoginModal" @signed-in="onDomainSignedIn" />
+	<ModalWrapper ref="profileSwitchModal" :header="formatMessage(messages.switchProfileTitle)">
+		<div class="flex min-w-[22rem] flex-col gap-2">
+			<p v-if="profileSwitchLoading" class="m-0 flex items-center gap-2 text-secondary">
+				<SpinnerIcon class="animate-spin" />
+				{{ formatMessage(messages.loadingProfiles) }}
+			</p>
+			<p v-else-if="profileSwitchError" class="m-0 text-sm text-red">
+				{{ profileSwitchError }}
+			</p>
+			<template v-else>
+				<ButtonStyled
+					v-for="profile in switchProfiles"
+					:key="profile.id"
+					class="w-full"
+				>
+					<button @click="switchToProfile(profile.name)">
+						{{ profile.name }}
+					</button>
+				</ButtonStyled>
+				<p
+					v-if="switchProfiles.length === 0"
+					class="m-0 text-sm text-secondary"
+				>
+					{{ formatMessage(messages.noProfiles) }}
+				</p>
+			</template>
+		</div>
+	</ModalWrapper>
 	<ModalWrapper ref="offlineAccountModal" :header="formatMessage(messages.offlineModalTitle)">
 		<div class="flex min-w-[22rem] flex-col gap-4">
 			<p class="m-0 text-secondary">{{ formatMessage(messages.offlineModalDescription) }}</p>
@@ -338,6 +435,7 @@
 <script setup lang="ts">
 import {
 	CopyIcon,
+	GlobeIcon,
 	LogInIcon,
 	PlusIcon,
 	RadioButtonCheckedIcon,
@@ -345,6 +443,7 @@ import {
 	RefreshCwIcon,
 	SpinnerIcon,
 	TrashIcon,
+	UsersIcon,
 } from '@modrinth/assets'
 import {
 	Accordion,
@@ -368,9 +467,12 @@ import axolotlLogo from '@/assets/axolotl.png'
 import steveSkinTexture from '@/assets/skins/steve.png?inline'
 import MinecraftLoginModal from '@/components/ui/MinecraftLoginModal.vue'
 import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
+import AddDomainModal from '@/components/ymcl/AddDomainModal.vue'
+import DomainLoginModal from '@/components/ymcl/DomainLoginModal.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { compareMinecraftAccounts } from '@/helpers/accounts'
 import { trackEvent } from '@/helpers/analytics'
+import { ymcl, ymclErrorMessage } from '@/helpers/ymcl'
 import {
 	add_offline_user,
 	begin_yggdrasil_login,
@@ -390,12 +492,14 @@ import { getPlayerHeadUrl } from '@/helpers/rendering/batch-skin-renderer.ts'
 import type { Skin } from '@/helpers/skins'
 import { get_available_skins } from '@/helpers/skins'
 import { handleSevereError } from '@/store/error.js'
+import { useYmclStore } from '@/store/ymcl'
 
 const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
 const { offline, refreshBrowserOffline } = useNetworkStatus()
 const queryClient = useQueryClient()
 const route = useRoute()
+const ymclStore = useYmclStore()
 const refreshingNetwork = ref(false)
 
 /**
@@ -467,6 +571,8 @@ let refreshGeneration = 0
 let headRefreshTimer: ReturnType<typeof setTimeout> | undefined
 let defaultUserUpdateQueue = Promise.resolve()
 const minecraftLoginModal = ref<InstanceType<typeof MinecraftLoginModal> | null>(null)
+const addDomainModal = ref<InstanceType<typeof AddDomainModal>>()
+const domainLoginModal = ref<InstanceType<typeof DomainLoginModal>>()
 const offlineAccountModal = ref<InstanceType<typeof ModalWrapper> | null>(null)
 const offlineUsername = ref('')
 const offlineCustomUuid = ref(false)
@@ -645,8 +751,88 @@ watch(offline, async () => {
 	notifyAccountChange()
 })
 
+/** Personal accounts are everything not owned by a joined domain's
+ * authlib-injector service; a domain account belongs to exactly one domain. */
+const domainYggRoots = computed(() =>
+	ymclStore.domains
+		.filter((domain) => !domain.is_personal && domain.origin)
+		.map((domain) => `${domain.origin}/api/plugins/authlib-injector`),
+)
+
+function isDomainAccount(account: MinecraftCredential): boolean {
+	if (account.account_type !== 'yggdrasil' || !account.yggdrasil) return false
+	return domainYggRoots.value.includes(account.yggdrasil.api_root)
+}
+
+const visibleAccounts = computed(() =>
+	ymclStore.isPersonal
+		? accounts.value.filter((account) => !isDomainAccount(account))
+		: accounts.value.filter((account) => isDomainAccount(account)),
+)
+
 const selectedAccount = computed(() =>
-	accounts.value.find((account) => account.profile.id === defaultUser.value),
+	visibleAccounts.value.find(
+		(account) => account.profile.id === defaultUser.value,
+	),
+)
+
+/** Remembers the selected account per domain so switching domains switches
+ * the active account with it. */
+const ACCOUNT_SELECTIONS_KEY = 'ymcl:account-selection'
+const accountSelections = ref<Record<string, string>>(loadAccountSelections())
+
+function loadAccountSelections(): Record<string, string> {
+	try {
+		const raw = localStorage.getItem(ACCOUNT_SELECTIONS_KEY)
+		return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+	} catch {
+		return {}
+	}
+}
+
+function persistAccountSelections() {
+	try {
+		localStorage.setItem(
+			ACCOUNT_SELECTIONS_KEY,
+			JSON.stringify(accountSelections.value),
+		)
+	} catch {
+		/* storage unavailable (private mode etc.) — selection just won't persist */
+	}
+}
+
+function rememberAccountSelection(userId: string) {
+	accountSelections.value = {
+		...accountSelections.value,
+		[ymclStore.activeDomainId]: userId,
+	}
+	persistAccountSelections()
+}
+
+async function applyDefaultUserId(userId: string) {
+	refreshGeneration += 1
+	defaultUser.value = userId
+	equippedSkin.value = null
+	await persistDefaultUser(userId)
+	if (defaultUser.value !== userId) return
+	await refreshValues()
+	notifyAccountChange()
+}
+
+// Domain switches (and the account list settling after a refresh) re-apply
+// the remembered selection; accounts outside the active domain never stay
+// selected.
+watch(
+	[visibleAccounts, () => ymclStore.activeDomainId],
+	async ([list, domainId]) => {
+		if (list.some((account) => account.profile.id === defaultUser.value)) return
+		const saved = accountSelections.value[domainId]
+		if (saved && list.some((account) => account.profile.id === saved)) {
+			await applyDefaultUserId(saved)
+			return
+		}
+		if (list.length > 0) await applyDefaultUserId(list[0].profile.id)
+	},
 )
 
 function notifyAccountChange() {
@@ -656,7 +842,7 @@ function notifyAccountChange() {
 
 const duplicateAccountNames = computed(() => {
 	const counts = new Map<string, number>()
-	for (const account of accounts.value) {
+	for (const account of visibleAccounts.value) {
 		counts.set(account.profile.name, (counts.get(account.profile.name) ?? 0) + 1)
 	}
 	return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
@@ -756,6 +942,7 @@ async function setAccount(account: MinecraftCredential) {
 	refreshGeneration += 1
 	defaultUser.value = userId
 	equippedSkin.value = null
+	rememberAccountSelection(userId)
 
 	await persistDefaultUser(userId)
 	if (defaultUser.value !== userId) return
@@ -798,6 +985,75 @@ function showOfflineAccountModal() {
 	offlineUuid.value = ''
 	offlineUuidDuplicate.value = false
 	offlineAccountModal.value?.show()
+}
+
+/**
+ * Domain mode replaces the personal account trio with the domain login: one
+ * credential yields both the domain session and the Minecraft account from
+ * the domain's Yggdrasil service (see DomainLoginModal).
+ */
+const domainLoginLabel = computed(() =>
+	formatMessage(messages.domainSignIn, {
+		domain: ymclStore.activeDomain?.display_name ?? '',
+	}),
+)
+const domainSessionName = computed(() => {
+	const session = ymclStore.session?.session
+	if (!session) return null
+	return session.nickname ?? session.username
+})
+
+function showDomainLogin() {
+	domainLoginModal.value?.show()
+}
+
+async function onDomainSignedIn(credential: unknown) {
+	if (credential) {
+		await setAccount(credential as MinecraftCredential)
+		trackEvent('YggdrasilAccountAdd')
+	} else {
+		await refreshValues()
+		notifyAccountChange()
+	}
+}
+
+/** Portable profile switcher: lists the domain user's Minecraft profiles
+ * (session-authenticated, no issuance) and swaps the active account to the
+ * picked one without re-entering credentials. */
+const profileSwitchModal = ref<InstanceType<typeof ModalWrapper> | null>(null)
+const profileSwitchBusy = ref(false)
+const profileSwitchLoading = ref(false)
+const profileSwitchError = ref<string | null>(null)
+const switchProfiles = ref<{ id: string; name: string }[]>([])
+
+async function showProfileSwitch() {
+	profileSwitchError.value = null
+	profileSwitchLoading.value = true
+	switchProfiles.value = []
+	profileSwitchModal.value?.show()
+	try {
+		const profiles = await ymcl.yggProfiles(ymclStore.activeDomainId)
+		switchProfiles.value = Array.isArray(profiles) ? [...profiles] : []
+	} catch (error) {
+		profileSwitchError.value = ymclErrorMessage(error)
+	} finally {
+		profileSwitchLoading.value = false
+	}
+}
+
+async function switchToProfile(profileName: string) {
+	profileSwitchError.value = null
+	profileSwitchBusy.value = true
+	try {
+		const result = await ymcl.yggExchange(ymclStore.activeDomainId, profileName)
+		await setAccount(result.credentials as unknown as MinecraftCredential)
+		trackEvent('YggdrasilAccountAdd')
+		profileSwitchModal.value?.hide()
+	} catch (error) {
+		profileSwitchError.value = ymclErrorMessage(error)
+	} finally {
+		profileSwitchBusy.value = false
+	}
 }
 
 async function showYggdrasilAccountModal() {
@@ -1058,6 +1314,34 @@ const messages = defineMessages({
 	notSignedIn: {
 		id: 'minecraft-account.not-signed-in',
 		defaultMessage: 'Not signed in',
+	},
+	addDomain: {
+		id: 'minecraft-account.add-domain',
+		defaultMessage: '添加域',
+	},
+	domainSignIn: {
+		id: 'minecraft-account.domain-sign-in',
+		defaultMessage: '登录「{domain}」',
+	},
+	domainSessionSignedIn: {
+		id: 'minecraft-account.domain-session-signed-in',
+		defaultMessage: '域会话：{name}',
+	},
+	switchProfile: {
+		id: 'minecraft-account.switch-profile',
+		defaultMessage: '切换角色',
+	},
+	switchProfileTitle: {
+		id: 'minecraft-account.switch-profile.title',
+		defaultMessage: '切换 Minecraft 角色',
+	},
+	loadingProfiles: {
+		id: 'minecraft-account.switch-profile.loading',
+		defaultMessage: '正在获取角色…',
+	},
+	noProfiles: {
+		id: 'minecraft-account.switch-profile.no-profiles',
+		defaultMessage: '该域账号没有可用的 Minecraft 角色',
 	},
 	addMicrosoftAccount: {
 		id: 'minecraft-account.add-microsoft-account',

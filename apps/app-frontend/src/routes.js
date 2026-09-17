@@ -46,14 +46,6 @@ export default new createRouter({
 			},
 		},
 		{
-			path: '/ymcl/publish',
-			name: 'YmclPublishConsole',
-			component: () => import('@/pages/ymcl/PublishConsole.vue'),
-			meta: {
-				breadcrumb: [{ name: 'Publish' }],
-			},
-		},
-		{
 			path: '/ymcl/design',
 			name: 'YmclHomeDesigner',
 			component: () => import('@/pages/ymcl/HomeDesigner.vue'),

@@ -327,3 +327,23 @@ test('accepts and resizes the recent widget to 3-column layouts', () => {
 		'3x1',
 	)
 })
+
+test('migrates legacy domain-packs placements to domain-servers', () => {
+	const normalized = normalizeHomeDashboard({
+		version: 1,
+		layout: 'grid',
+		widgets: [
+			{ id: 'packs', kind: 'domain-packs', size: '2x2' },
+			{ id: 'servers', kind: 'domain-servers', size: '1x2' },
+		],
+	})!
+
+	assert.deepEqual(
+		normalized.widgets.map((widget) => ({ id: widget.id, kind: widget.kind, size: widget.size })),
+		[
+			{ id: 'packs', kind: 'domain-servers', size: '2x2' },
+			{ id: 'servers', kind: 'domain-servers', size: '1x2' },
+		],
+	)
+})
+

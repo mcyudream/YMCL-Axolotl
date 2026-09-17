@@ -16,6 +16,8 @@ import HomeDashboard from '@/components/home/HomeDashboard.vue'
 import {
 	HOME_CARD_TYPE_OPTIONS,
 	mapHomeProfileToDashboard,
+	MAPPABLE_HOME_CARD_TYPES,
+	resolveDataSourceTitle,
 	type YmclHomeProfile,
 } from '@/helpers/ymcl-home'
 import { useYmclStore } from '@/store/ymcl'
@@ -39,23 +41,33 @@ const messages = defineMessages({
 	},
 	description: {
 		id: 'app.ymcl.design.description',
-		defaultMessage:
-			'Configure the home page card layout for everyone in this domain. Saving publishes the layout to all members.',
+		defaultMessage: '为域内所有成员配置首页卡片布局。保存后即发布给全体成员。',
 	},
 	addCard: { id: 'app.ymcl.design.add-card', defaultMessage: '添加卡片' },
-	remove: { id: 'app.ymcl.design.remove', defaultMessage: 'Remove' },
+	remove: { id: 'app.ymcl.design.remove', defaultMessage: '移除' },
 	moveUp: { id: 'app.ymcl.design.move-up', defaultMessage: '上移' },
 	moveDown: { id: 'app.ymcl.design.move-down', defaultMessage: '下移' },
 	save: { id: 'app.ymcl.design.save', defaultMessage: '发布布局' },
 	preview: { id: 'app.ymcl.design.preview', defaultMessage: '预览' },
 	notUnlocked: {
 		id: 'app.ymcl.design.not-unlocked',
-		defaultMessage:
-			'The home designer requires an active domain with a signed-in account that has design permissions.',
+		defaultMessage: '首页设计器需要选择域，并以具备设计权限的账号登录。',
 	},
 	emptyLayout: {
 		id: 'app.ymcl.design.empty-layout',
 		defaultMessage: '还没有卡片。添加一张卡片开始搭建布局。',
+	},
+	domainGroup: {
+		id: 'app.ymcl.design.domain-group',
+		defaultMessage: '域卡片',
+	},
+	domainPageCard: {
+		id: 'app.ymcl.design.domain-page-card',
+		defaultMessage: '页面入口：{title}',
+	},
+	domainDataCard: {
+		id: 'app.ymcl.design.domain-data-card',
+		defaultMessage: '数据卡：{title}',
 	},
 	lockedNote: {
 		id: 'app.ymcl.design.locked-note',
@@ -63,16 +75,16 @@ const messages = defineMessages({
 	},
 	unmappedNote: {
 		id: 'app.ymcl.design.unmapped-note',
-		defaultMessage:
-			'{count} card(s) use types without a native widget and are not shown in the preview.',
+		defaultMessage: '{count} 张卡片使用了没有原生组件的类型，不会显示在预览中。',
 	},
-	saved: { id: 'app.ymcl.design.saved', defaultMessage: 'Layout published' },
+	saved: { id: 'app.ymcl.design.saved', defaultMessage: '布局已发布' },
 })
 
 interface DesignerRow {
 	id: string
 	type: string
 	title?: string
+	params?: Record<string, unknown>
 }
 
 const rows = ref<DesignerRow[]>([])
@@ -80,26 +92,36 @@ const locked = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const dirty = ref(false)
+/** Loaded profile kept verbatim so saving doesn't drop fields the rows don't carry. */
+const sourceProfile = ref<YmclHomeProfile | null>(null)
 
 const instanceList = ref<{ id: string; name: string; icon_path: null; loader: string }[]>([])
 
+/** Adapter-contributed cards the admin can bind: domain pages + dataSources (YAP §6.5). */
+const domainPages = computed(() => ymclStore.manifest?.pages ?? [])
+const domainDataSources = computed(() => ymclStore.manifest?.data_sources ?? [])
+
 const previewConfig = computed<HomeDashboardConfig | null>(() =>
-	mapHomeProfileToDashboard({ cards: rows.value.map((row) => ({ ...row })) }),
+	mapHomeProfileToDashboard(
+		{ cards: rows.value.map((row) => ({ ...row })) },
+		domainDataSources.value,
+	),
 )
 
 const unmappedCount = computed(
-	() =>
-		rows.value.filter((row) => !HOME_CARD_TYPE_OPTIONS.some((o) => o.value === row.type)).length,
+	() => rows.value.filter((row) => !MAPPABLE_HOME_CARD_TYPES.includes(row.type)).length,
 )
 
 async function load() {
 	loading.value = true
 	try {
 		const config = await invoke<YmclHomeProfile>('plugin:ymcl|ymcl_chrome_home_get')
+		sourceProfile.value = config ?? null
 		rows.value = (config.cards ?? []).map((card) => ({
 			id: card.id,
 			type: card.type,
 			title: card.title,
+			params: card.params,
 		}))
 		locked.value = config.locked === true
 		dirty.value = false
@@ -113,12 +135,20 @@ async function load() {
 async function save() {
 	saving.value = true
 	try {
+		const original = sourceProfile.value
+		const originalCards = original?.cards ?? []
+		const cards = rows.value.map((row, index) => ({
+			...(originalCards.find((card) => card.id === row.id) ?? {}),
+			...row,
+			sort: index * 10,
+		}))
 		await invoke('plugin:ymcl|ymcl_chrome_home_put', {
 			config: {
-				schemaVersion: 1,
+				schemaVersion: original?.schemaVersion ?? 1,
 				locked: locked.value,
-				columns: 3,
-				cards: rows.value.map((row, index) => ({ ...row, sort: index * 10 })),
+				columns: original?.columns ?? 3,
+				layout: original?.layout,
+				cards,
 			},
 		})
 		dirty.value = false
@@ -129,14 +159,41 @@ async function save() {
 	}
 }
 
-function addCard(type: string) {
+function addCard(type: string, extra?: Partial<DesignerRow>) {
 	const mapping = HOME_CARD_TYPE_OPTIONS.find((option) => option.value === type)
 	rows.value.push({
-		id: `${type}-${Date.now().toString(36)}`,
+		id: `${type}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
 		type,
 		title: mapping?.label,
+		...extra,
 	})
 	dirty.value = true
+}
+
+function addDomainPageCard(pageId: string, title?: string | null) {
+	addCard('page-shortcut', {
+		title: title ?? pageId,
+		params: { target: `page:${pageId}` },
+	})
+}
+
+function domainDataCardLabel(id: string): string {
+	const page = domainPages.value.find((candidate) => candidate.data_source === id)
+	const declared = domainDataSources.value.find((candidate) => candidate.id === id)
+	return resolveDataSourceTitle({
+		id,
+		cardTitle: null,
+		declarationTitle: declared?.title ?? declared?.name ?? declared?.label,
+		pageTitle: page?.title,
+		navigationTitle: null,
+	})
+}
+
+function addDomainDataCard(id: string) {
+	addCard('data-card', {
+		title: domainDataCardLabel(id),
+		params: { dataSource: id, variant: 'list' },
+	})
 }
 
 function removeRow(index: number) {
@@ -246,6 +303,33 @@ onMounted(async () => {
 						</button>
 					</ButtonStyled>
 				</div>
+				<template v-if="domainPages.length > 0 || domainDataSources.length > 0">
+					<div class="text-xs font-semibold uppercase text-secondary">
+						{{ formatMessage(messages.domainGroup) }}
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<ButtonStyled v-for="page in domainPages" :key="`page-${page.id}`" type="standard">
+							<button @click="addDomainPageCard(page.id, page.title)">
+								<PlusIcon />
+								{{ formatMessage(messages.domainPageCard, { title: page.title ?? page.id }) }}
+							</button>
+						</ButtonStyled>
+						<ButtonStyled
+							v-for="source in domainDataSources"
+							:key="`ds-${source.id}`"
+							type="standard"
+						>
+							<button @click="addDomainDataCard(source.id)">
+								<PlusIcon />
+								{{
+									formatMessage(messages.domainDataCard, {
+										title: domainDataCardLabel(source.id),
+									})
+								}}
+							</button>
+						</ButtonStyled>
+					</div>
+				</template>
 			</div>
 
 			<div class="flex flex-col gap-2">

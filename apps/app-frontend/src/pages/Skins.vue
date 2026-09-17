@@ -31,6 +31,7 @@ import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import type AccountsCard from '@/components/ui/AccountsCard.vue'
 import EditSkinModal from '@/components/ui/skin/EditSkinModal.vue'
 import VirtualSkinSectionList from '@/components/ui/skin/VirtualSkinSectionList.vue'
+import DomainWardrobe from '@/components/ymcl/DomainWardrobe.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { check_reachable, get_default_user, users } from '@/helpers/auth'
 import type { RenderResult } from '@/helpers/rendering/batch-skin-renderer.ts'
@@ -50,7 +51,9 @@ import {
 	save_custom_skin,
 	set_custom_skin_order,
 } from '@/helpers/skins.ts'
+import { PERSONAL_DOMAIN_ID, ymcl, type YmclSkinDomainMatch } from '@/helpers/ymcl'
 import { useTheming } from '@/store/state'
+import { useYmclStore } from '@/store/ymcl'
 
 async function generateSkinPreviews(skins: Skin[], capes: Cape[]) {
 	const { generateSkinPreviews: generate } =
@@ -164,7 +167,7 @@ const messages = defineMessages({
 	},
 	axolotlAlt: {
 		id: 'app.skins.sign-in.axolotl-alt',
-		defaultMessage: 'Axolotl Launcher',
+		defaultMessage: 'YMCL (YuDream Launcher)',
 	},
 	signInTitle: {
 		id: 'app.skins.sign-in.title',
@@ -173,7 +176,7 @@ const messages = defineMessages({
 	signInDescription: {
 		id: 'app.skins.sign-in.description',
 		defaultMessage:
-			'Please sign into your Minecraft account to use the skin management features of Axolotl Launcher.',
+			'Please sign into your Minecraft account to use the skin management features of YMCL (YuDream Launcher).',
 	},
 	signInButton: {
 		id: 'app.skins.sign-in.button',
@@ -195,7 +198,7 @@ const messages = defineMessages({
 	thirdPartyManagementDescription: {
 		id: 'app.skins.third-party-account.description',
 		defaultMessage:
-			'Skins for this account are managed by its Yggdrasil provider. Open the provider website to change skins or capes.',
+			'Skins for this account are served by its Yggdrasil provider. The local skin library applies client-side only via a resource pack — to change the skin online, open the wardrobe of the owning domain.',
 	},
 	savedTab: {
 		id: 'app.skins.tabs.saved',
@@ -315,9 +318,40 @@ const skinVariant = computed(() => selectedSkin.value?.variant)
 const skinNametag = computed(() => (themeStore.hideNametagSkinsPage ? undefined : username.value))
 const isSkinManagementReadOnly = computed(
 	() =>
-		currentAccountType.value === 'yggdrasil' ||
-		(currentAccountType.value !== 'offline' &&
-			(offline.value || (authServerQuery.isError.value && !authServerQuery.isLoading.value))),
+		currentAccountType.value === 'microsoft' &&
+		(offline.value || (authServerQuery.isError.value && !authServerQuery.isLoading.value)),
+)
+const ymclStore = useYmclStore()
+const domainWardrobe = ref<YmclSkinDomainMatch | null>(null)
+
+/** The domain wardrobe shows only while its owning domain is the active one:
+ * domain data must never leak into the personal domain (or another domain).
+ * Yggdrasil accounts outside their domain use the local skin library. */
+async function detectDomainWardrobe() {
+	if (currentAccountType.value !== 'yggdrasil' || ymclStore.activeDomainId === PERSONAL_DOMAIN_ID) {
+		domainWardrobe.value = null
+		return
+	}
+	const apiRoot = currentUser.value?.yggdrasil?.api_root
+	if (!apiRoot) {
+		domainWardrobe.value = null
+		return
+	}
+	try {
+		const match = await ymcl.skinDomainForAccount(apiRoot)
+		domainWardrobe.value =
+			match && match.skins_enabled && match.domain_id === ymclStore.activeDomainId ? match : null
+	} catch (error) {
+		console.warn('Failed to resolve the wardrobe domain for this account', error)
+		domainWardrobe.value = null
+	}
+}
+
+watch(
+	() => ymclStore.activeDomainId,
+	() => {
+		void detectDomainWardrobe()
+	},
 )
 const hasPendingSkinChange = computed(
 	() => !skinsMatch(selectedSkin.value, originalSelectedSkin.value),
@@ -781,6 +815,7 @@ async function loadCurrentUser() {
 		currentUserId.value = undefined
 		currentAccountType.value = undefined
 	}
+	await detectDomainWardrobe()
 }
 
 async function refreshSelectedAccount() {
@@ -1022,7 +1057,7 @@ await loadSkins()
 		@proceed="deleteSkin"
 	/>
 	<Teleport
-		v-if="currentUser && currentAccountType === 'offline'"
+		v-if="currentUser && (currentAccountType === 'offline' || currentAccountType === 'yggdrasil')"
 		to="#sidebar-default-teleport-target"
 	>
 		<section class="p-4">
@@ -1032,10 +1067,16 @@ await loadSkins()
 			<p class="mb-0 mt-2 text-sm leading-6 text-secondary">
 				{{ formatMessage(messages.offlineCompatibility) }}
 			</p>
+			<p
+				v-if="currentAccountType === 'yggdrasil'"
+				class="mb-0 mt-2 text-sm leading-6 text-secondary"
+			>
+				{{ formatMessage(messages.thirdPartyManagementDescription) }}
+			</p>
 		</section>
 	</Teleport>
 	<Teleport
-		v-if="currentUser && currentAccountType === 'yggdrasil'"
+		v-if="currentUser && currentAccountType === 'yggdrasil' && !domainWardrobe"
 		to="#sidebar-default-teleport-target"
 	>
 		<section class="p-4">
@@ -1048,8 +1089,15 @@ await loadSkins()
 		</section>
 	</Teleport>
 
+	<DomainWardrobe
+		v-if="currentUser && domainWardrobe"
+		data-onboarding-id="skins-page"
+		:domain-id="domainWardrobe.domain_id"
+		:domain-name="domainWardrobe.domain_name"
+	/>
+
 	<div
-		v-if="currentUser"
+		v-else-if="currentUser"
 		data-onboarding-id="skins-page"
 		class="skin-layout box-border min-h-full p-4"
 	>

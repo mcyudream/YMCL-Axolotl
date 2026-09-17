@@ -1,13 +1,24 @@
 <script setup lang="ts">
 import { CheckIcon, ClipboardCopyIcon, PlayIcon, RefreshCwIcon } from '@modrinth/assets'
-import { ButtonStyled, useVIntl } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { computed, nextTick, ref } from 'vue'
 
-import { executeAction, renderActionParams, type YmclAction } from '@/helpers/ymcl-actions'
+import DomainImg from '@/components/ymcl/DomainImg.vue'
+import DomainRecordDetailModal from '@/components/ymcl/DomainRecordDetailModal.vue'
+import JoinServerModal from '@/components/ymcl/JoinServerModal.vue'
+import { renderActionParams, type YmclAction } from '@/helpers/ymcl-actions'
+import { ymclRecordCover, ymclRecordTitle } from '@/helpers/ymcl-envelope'
+import { ymclDisplayText } from '@/helpers/ymcl'
+import {
+	createYmclActionRunner,
+	primaryYmclAction,
+	secondaryYmclActions,
+} from '@/helpers/ymcl-item-action'
 
 /**
  * server-list renderer (YAP §6.6): server records with status, current
- * season and declarative join/copy actions.
+ * season and declarative join/copy actions. Rows open a detail surface so
+ * records without an executable action remain inspectable.
  */
 const props = defineProps<{
 	envelope: {
@@ -21,8 +32,7 @@ const props = defineProps<{
 const emit = defineEmits<{ reload: [] }>()
 
 const { formatMessage } = useVIntl()
-
-const refreshing = ref<string | null>(null)
+const { runYmclAction } = createYmclActionRunner()
 
 const messages = defineMessages({
 	join: { id: 'app.ymcl.renderer.join', defaultMessage: 'Join' },
@@ -34,14 +44,34 @@ const messages = defineMessages({
 	offline: { id: 'app.ymcl.renderer.offline', defaultMessage: 'Offline' },
 	season: { id: 'app.ymcl.renderer.season', defaultMessage: 'Season' },
 	empty: { id: 'app.ymcl.renderer.empty', defaultMessage: 'Nothing here yet.' },
+	detail: { id: 'app.ymcl.renderer.detail', defaultMessage: '详情' },
+	actionUnavailable: {
+		id: 'app.ymcl.renderer.action-unavailable',
+		defaultMessage: '该操作暂不可用',
+	},
 })
 
 const records = computed(() => props.envelope.records ?? [])
 const itemActions = computed(() => props.envelope.itemActions ?? [])
 const allow = computed(() => props.envelope.allow ?? [])
 
+const joinModal = ref<InstanceType<typeof JoinServerModal> | null>(null)
+const detailModal = ref<InstanceType<typeof DomainRecordDetailModal> | null>(null)
+const activeRecord = ref<Record<string, unknown> | null>(null)
+
+function openDetail(record: Record<string, unknown>) {
+	activeRecord.value = record
+	void nextTick(() => {
+		detailModal.value?.show()
+	})
+}
+
 function primaryAction(record: Record<string, unknown>): YmclAction | null {
-	return itemActions.value.find((action) => action.primary && isExecutable(action, record)) ?? null
+	return primaryYmclAction(itemActions.value, record, allow.value)
+}
+
+function actionTitle(action: YmclAction): string {
+	return ymclDisplayText(action.title) || ymclDisplayText(action.code) || '操作'
 }
 
 function subtitle(record: Record<string, unknown>): string {
@@ -61,26 +91,49 @@ function subtitle(record: Record<string, unknown>): string {
 }
 
 function secondaryActions(record: Record<string, unknown>): YmclAction[] {
-	return itemActions.value.filter((action) => !action.primary && isExecutable(action, record))
+	return secondaryYmclActions(itemActions.value, record, allow.value, primaryAction(record)).filter(
+		(action) => action.kind !== 'client:open-detail',
+	)
 }
 
-function isExecutable(action: YmclAction, record: Record<string, unknown>): boolean {
+function actionIconKind(action: YmclAction): string {
+	if (action.kind === 'client:copy') return 'copy'
+	if (action.kind === 'client:reload') return 'reload'
+	if (action.kind === 'client:launch-server' || action.kind === 'client:launch-instance')
+		return 'play'
+	return 'check'
+}
+
+function showJoinFallback(action: YmclAction, record: Record<string, unknown>): boolean {
+	if (action.kind !== 'client:launch-server') return false
 	const params = renderActionParams(action, record)
-	if (action.kind === 'client:launch-server') return !!params.address && !!params.instanceId
-	if (action.kind === 'client:open-url') return /^https:\/\//.test(String(params.url ?? ''))
-	if (action.kind === 'client:copy') return !!params.text
-	if (action.kind === 'client:launch-instance') return !!params.instanceId
-	return false
+	return !params.instanceId && !!params.address
 }
 
 async function run(action: YmclAction, record: Record<string, unknown>) {
-	if (action.kind === 'client:reload') {
-		refreshing.value = 'page'
-		emit('reload')
-		refreshing.value = null
+	await runYmclAction(action, {
+		allow: allow.value,
+		record,
+		onReload: () => emit('reload'),
+		onOpenDetail: () => openDetail(record),
+		onLaunchServerWithoutInstance: (address) => {
+			void joinModal.value?.show({ address })
+		},
+		actionUnavailableText: formatMessage(messages.actionUnavailable),
+	})
+}
+
+function onRowClick(record: Record<string, unknown>) {
+	const action = primaryAction(record)
+	if (action && !showJoinFallback(action, record)) {
+		void run(action, record)
 		return
 	}
-	await executeAction(action, { allow: allow.value, record })
+	if (action && showJoinFallback(action, record)) {
+		void run(action, record)
+		return
+	}
+	openDetail(record)
 }
 </script>
 
@@ -89,12 +142,15 @@ async function run(action: YmclAction, record: Record<string, unknown>) {
 		<div
 			v-for="record in records"
 			:key="String(record.id ?? record.title)"
-			class="flex items-center gap-3 rounded-xl border border-solid border-surface-5 bg-bg-raised p-3"
+			class="flex cursor-pointer items-center gap-3 rounded-xl border border-solid border-surface-5 bg-bg-raised p-3 transition-colors hover:bg-button-bg"
+			role="button"
+			tabindex="0"
+			@click="onRowClick(record)"
+			@keydown.enter.prevent="onRowClick(record)"
 		>
-			<img
-				v-if="record.icon"
-				:src="String(record.icon)"
-				:alt="String(record.title ?? '')"
+			<DomainImg
+				:src="ymclRecordCover(record) ?? (typeof record.icon === 'string' ? record.icon : null)"
+				:alt="ymclRecordTitle(record)"
 				class="h-10 w-10 shrink-0 rounded-lg object-contain"
 			/>
 			<div class="min-w-0 flex-1">
@@ -104,7 +160,7 @@ async function run(action: YmclAction, record: Record<string, unknown>) {
 						:class="record.status === 'online' ? 'bg-green' : 'bg-red'"
 					></span>
 					<span class="truncate font-semibold text-contrast">
-						{{ record.title }}
+						{{ ymclRecordTitle(record) }}
 					</span>
 				</div>
 				<div class="truncate text-xs text-secondary">
@@ -114,9 +170,9 @@ async function run(action: YmclAction, record: Record<string, unknown>) {
 			<div class="flex shrink-0 items-center gap-2">
 				<template v-if="primaryAction(record)">
 					<ButtonStyled>
-						<button @click="run(primaryAction(record)!, record)">
+						<button type="button" @click.stop="run(primaryAction(record)!, record)">
 							<PlayIcon />
-							{{ primaryAction(record)!.title }}
+							{{ actionTitle(primaryAction(record)!) }}
 						</button>
 					</ButtonStyled>
 				</template>
@@ -126,10 +182,20 @@ async function run(action: YmclAction, record: Record<string, unknown>) {
 					type="standard"
 					circular
 				>
-					<button v-tooltip="action.title" @click="run(action, record)">
-						<ClipboardCopyIcon v-if="action.kind === 'client:copy'" />
-						<RefreshCwIcon v-else-if="action.kind === 'client:reload'" />
+					<button
+						type="button"
+						v-tooltip="actionTitle(action)"
+						@click.stop="run(action, record)"
+					>
+						<ClipboardCopyIcon v-if="actionIconKind(action) === 'copy'" />
+						<RefreshCwIcon v-else-if="actionIconKind(action) === 'reload'" />
+						<PlayIcon v-else-if="actionIconKind(action) === 'play'" />
 						<CheckIcon v-else />
+					</button>
+				</ButtonStyled>
+				<ButtonStyled type="standard">
+					<button type="button" @click.stop="openDetail(record)">
+						{{ formatMessage(messages.detail) }}
 					</button>
 				</ButtonStyled>
 			</div>
@@ -138,4 +204,12 @@ async function run(action: YmclAction, record: Record<string, unknown>) {
 			{{ formatMessage(messages.empty) }}
 		</p>
 	</div>
+	<JoinServerModal ref="joinModal" />
+	<DomainRecordDetailModal
+		ref="detailModal"
+		:record="activeRecord"
+		:item-actions="itemActions"
+		:allow="allow"
+		@reload="emit('reload')"
+	/>
 </template>

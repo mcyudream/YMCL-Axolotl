@@ -53,6 +53,9 @@ import {
 } from '@/components/home/home-dashboard'
 import { provideHomeDashboardRuntime } from '@/components/home/home-dashboard-runtime'
 import HomeCalendar from '@/components/home/HomeCalendar.vue'
+import HomeDataCardWidget from '@/components/home/HomeDataCardWidget.vue'
+import HomeDomainServers from '@/components/home/HomeDomainServers.vue'
+import HomeDomainShortcutWidget from '@/components/home/HomeDomainShortcutWidget.vue'
 import HomeGreeting from '@/components/home/HomeGreeting.vue'
 import HomeGreetingSettingsModal from '@/components/home/HomeGreetingSettingsModal.vue'
 import HomePinnedInstances from '@/components/home/HomePinnedInstances.vue'
@@ -670,6 +673,20 @@ defineExpose({ openWidgetPicker, setLayout })
 								:instances="instances"
 								:dashboard-size="effectiveSize(widget)"
 								dashboard
+							/>
+							<HomeDomainShortcutWidget
+								v-else-if="widget.kind === 'page-shortcut'"
+								:placement="widget"
+								:dashboard-size="effectiveSize(widget)"
+							/>
+							<HomeDomainServers
+								v-else-if="widget.kind === 'domain-servers'"
+								:dashboard-size="effectiveSize(widget)"
+							/>
+							<HomeDataCardWidget
+								v-else-if="widget.kind === 'data-card'"
+								:placement="widget"
+								:dashboard-size="effectiveSize(widget)"
 							/>
 							<HomeShortcutWidget
 								v-else

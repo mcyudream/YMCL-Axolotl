@@ -2,8 +2,17 @@
 import { ButtonStyled, commonMessages, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
-import { getAnnouncementByVersion } from '@/announcements/catalog'
+import {
+	getAnnouncementByVersion,
+	type LauncherAnnouncement,
+} from '@/announcements/catalog'
 import { AxolotlBrandConfig } from '@/config'
+import { isYmclUpdateConfigured } from '@/helpers/ymcl-content'
+import {
+	findYmclAnnouncementByVersion,
+	loadYmclUpdateAnnouncements,
+	resolveUpdateChangelogUrl,
+} from '@/helpers/ymcl-update-history'
 
 import UpdateAnnouncementContent from './UpdateAnnouncementContent.vue'
 
@@ -14,7 +23,13 @@ const emit = defineEmits<{
 const { formatMessage } = useVIntl()
 const modal = ref<InstanceType<typeof NewModal>>()
 const version = ref<string | null>(null)
-const announcement = computed(() => getAnnouncementByVersion(version.value))
+const remoteAnnouncements = ref<LauncherAnnouncement[] | null>(null)
+const announcement = computed(() => {
+	if (remoteAnnouncements.value) {
+		return findYmclAnnouncementByVersion(remoteAnnouncements.value, version.value)
+	}
+	return getAnnouncementByVersion(version.value)
+})
 
 const messages = defineMessages({
 	header: {
@@ -23,8 +38,17 @@ const messages = defineMessages({
 	},
 })
 
-function show(nextVersion: string) {
+async function show(nextVersion: string) {
 	version.value = nextVersion
+	if (isYmclUpdateConfigured()) {
+		try {
+			const remote = await loadYmclUpdateAnnouncements({ channel: 'all', limit: 50 })
+			if (remote) remoteAnnouncements.value = remote
+		}
+		catch {
+			// 保留本地 catalog 回退
+		}
+	}
 	modal.value?.show()
 }
 
@@ -52,7 +76,7 @@ defineExpose({ show, close })
 		<UpdateAnnouncementContent
 			:announcement="announcement"
 			:version="version"
-			:external-url="announcement?.externalUrl ?? AxolotlBrandConfig.website"
+			:external-url="announcement?.externalUrl ?? resolveUpdateChangelogUrl()"
 		/>
 
 		<template #actions>

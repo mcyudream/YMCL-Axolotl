@@ -7,7 +7,7 @@ import {
 	ExternalIcon,
 	FlaskConicalIcon,
 	FolderOpenIcon,
-	GlobeIcon,
+
 	HomeIcon,
 	LeftArrowIcon,
 	LibraryIcon,
@@ -102,6 +102,7 @@ import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import RemoteAnnouncements from '@/components/ui/RemoteAnnouncements.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
+import DomainLoginModal from '@/components/ymcl/DomainLoginModal.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useDropImport } from '@/composables/useDropImport'
 import { minecraftLaunchErrorKey } from '@/composables/useMinecraftLaunchError'
@@ -125,6 +126,14 @@ import { type DirectLinkSyncReport, get as getInstance, run } from '@/helpers/in
 import { reconcileMojangAuthSourceAtStartup } from '@/helpers/mojang-auth'
 import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
+import { resolveYmclNavIcon } from '@/helpers/ymcl-nav-icon'
+import {
+	isYmclNavDirectory,
+	isYmclNavVisible,
+	ymclNavHasTarget,
+	ymclNativeRoute,
+	ymclNavTo,
+} from '@/helpers/ymcl-domain'
 import { runWhenIdle } from '@/helpers/page-transition'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
@@ -159,6 +168,7 @@ import {
 	isNetworkMetered,
 	setRestartAfterPendingUpdate,
 } from '@/helpers/utils.js'
+import { getYmclChangelogUrl, getYmclUpdateApiBase, isYmclUpdateConfigured } from '@/helpers/ymcl-content'
 import { start_join_server, start_join_singleplayer_world } from '@/helpers/worlds.ts'
 import { applyLocalePreference, setFollowSystemLocale } from '@/i18n.config'
 import {
@@ -185,7 +195,8 @@ import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
 import { useYmclStore } from '@/store/ymcl'
-import { initYmclTheme } from '@/store/ymcl-theme'
+import { initYmclTheme, reapplyYmclTheme } from '@/store/ymcl-theme'
+import { resolveDomainImageUrl } from '@/helpers/ymcl-domain-image'
 
 import { get_available_capes, get_available_skins } from './helpers/skins'
 import { AppNotificationManager } from './providers/app-notifications'
@@ -196,43 +207,150 @@ const ymclStore = useYmclStore()
 void ymclStore.init()
 initYmclTheme()
 void listen('ymcl://event', (event) => {
-	void ymclStore.handleServerEvent((event.payload ?? {}) as { type?: string })
+	const payload = (event.payload ?? {}) as { type?: string; domain_id?: string }
+	if (payload.type === 'session.expired') {
+		void ymclStore.handleSessionExpired(payload.domain_id)
+		return
+	}
+	void ymclStore.handleServerEvent(payload)
 })
+/** Pops the domain sign-in dialog whenever the active domain needs a login
+ * and has none: startup with a signed-out domain, a freshly added/activated
+ * domain, or an unrecoverable session loss (`session.expired` push). */
+const sessionLoginModal = ref<InstanceType<typeof DomainLoginModal>>()
+watch(
+	() => ymclStore.loginPromptAt,
+	(at) => {
+		if (at && !ymclStore.isPersonal) sessionLoginModal.value?.show()
+	},
+)
+async function onSessionLoginSignedIn() {
+	ymclStore.loginPromptAt = 0
+	await ymclStore.refreshManifest().catch(() => {})
+	ymclStore.dataEpoch += 1
+}
 /** While a dialog is open no shortcut fires, including the one being recorded. */
 const { hasModal } = useModalStack()
 const router = useRouter()
 const route = useRoute()
 
-const ymclNavIconMap = {
-	home: HomeIcon,
-	worlds: WorldIcon,
-	discover: CompassIcon,
-	skins: ChangeSkinIcon,
-	library: LibraryIcon,
-	lab: FlaskConicalIcon,
-	downloads: DownloadIcon,
+type YmclNavMenuItem = {
+	key: string
+	title: string
+	/** null = directory header (not clickable). */
+	to: string | null
+	depth: number
+	kind: 'link' | 'directory' | 'divider'
 }
 
-const ymclNavItems = computed(() =>
-	ymclStore.navigation.flatMap((item) => {
+function sortYmclNav<T extends { sort?: number }>(items: readonly T[]): T[] {
+	return [...items].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+}
+
+function liveYmclNavChildren(
+	items: readonly {
+		enabled?: boolean
+		disabled?: boolean
+		type?: string
+	}[],
+) {
+	return (items ?? []).filter((item) => item.type !== 'separator' && isYmclNavVisible(item))
+}
+
+/** Depth-first flatten for OverflowMenu; supports 2nd/3rd-level 目录 children. */
+function flattenYmclNavChildren(
+	items: readonly {
+		id: string
+		type: string
+		page_id?: string | null
+		route?: string | null
+		title?: string | null
+		sort?: number
+		enabled?: boolean
+		disabled?: boolean
+		children?: readonly unknown[]
+	}[],
+	depth = 0,
+): YmclNavMenuItem[] {
+	const result: YmclNavMenuItem[] = []
+	for (const item of sortYmclNav(items)) {
+		if (!isYmclNavVisible(item)) continue
+		if (item.type === 'separator') {
+			result.push({ key: `${item.id}-d${depth}`, title: '', to: null, depth, kind: 'divider' })
+			continue
+		}
+		const children = (item.children ?? []) as typeof items
+		const liveChildren = liveYmclNavChildren(children)
+		const directory = isYmclNavDirectory(item) && liveChildren.length > 0
+		const hasTarget = ymclNavHasTarget(item)
+		result.push({
+			key: `${item.id}-d${depth}`,
+			title: item.title?.trim() || item.id,
+			to: directory && !hasTarget ? null : ymclNavTo(item),
+			depth,
+			kind: directory && !hasTarget ? 'directory' : 'link',
+		})
+		if (liveChildren.length) {
+			result.push(...flattenYmclNavChildren(liveChildren, depth + 1))
+		}
+	}
+	return result
+}
+
+/**
+ * Sidebar rail for the active domain.
+ * The adapter's `navigation` tree is authoritative: exactly the enabled items
+ * the admin configured, in backend order. Registry pages not referenced by the
+ * tree stay reachable via direct URL but are NOT auto-appended — otherwise the
+ * rail would never match the admin console (适配器在未配置导航时才兜底聚合
+ * 全部提供方页面，配置后以下发树为准).
+ */
+const ymclNavItems = computed(() => {
+	const rawNavigation = ymclStore.navigation.filter((item) => isYmclNavVisible(item))
+	return rawNavigation.flatMap((item) => {
 		if (item.type === 'separator') {
 			return [{ id: item.id, kind: 'separator' as const }]
 		}
-		const to =
-			item.type === 'native' && item.route
-				? item.route
-				: `/domain/${encodeURIComponent(item.page_id ?? item.id)}`
+		const rawChildren = item.children ?? []
+		const liveChildren = liveYmclNavChildren(rawChildren)
+		const hasRealChildren = liveChildren.length > 0
+		const menu = flattenYmclNavChildren(rawChildren, 1)
+		if (
+			hasRealChildren &&
+			(item.type === 'native' || item.type === 'page' || item.route || item.page_id)
+		) {
+			menu.unshift({
+				key: `${item.id}-self`,
+				title: item.title?.trim() || item.id,
+				to: ymclNavTo(item),
+				depth: 0,
+				kind: 'link',
+			})
+		}
 		return [
 			{
 				id: item.id,
 				kind: 'nav' as const,
-				to,
-				title: item.title ?? item.id,
-				icon: ymclNavIconMap[item.icon ?? ''] ?? GlobeIcon,
+				to: ymclNavTo(item),
+				title: item.title?.trim() || item.id,
+				icon: resolveYmclNavIcon(item.icon),
+				children: hasRealChildren ? menu : [],
 			},
 		]
-	}),
+	})
+})
+/** 启动器保留页（实验内容 / 下载管理）：域 manifest 配置不了这两个原生路由，
+ * 域模式下固定追加在域条目之后；manifest 若原生声明了同一路由则不重复。 */
+const domainNativeRoutes = computed(
+	() =>
+		new Set(
+			ymclStore.navigation
+				.filter((item) => item.type === 'native' && isYmclNavVisible(item))
+				.map((item) => ymclNativeRoute(item)),
+		),
 )
+const showReservedLab = computed(() => !domainNativeRoutes.value.has('/lab'))
+const showReservedDownloads = computed(() => !domainNativeRoutes.value.has('/downloads'))
 const onSkinsPage = computed(() => route.path === '/skins')
 const onSchematicWorkshopPage = computed(() => route.path === '/lab/schematic-preview')
 const onSettingsPage = computed(() => route.path.startsWith('/settings'))
@@ -281,8 +399,21 @@ const customBackgroundStyle = computed(() => {
 	// transparent window entirely, so the two are mutually exclusive.
 	if (themeStore.transparentBackground || !themeStore.customBackgroundPath) return undefined
 
+	// Domain theme backgrounds may be absolute http(s) URLs or site-relative
+	// adapter paths; only personal local files need the asset protocol.
+	const path = themeStore.customBackgroundPath
+	const domainOrigin = ymclStore.isPersonal ? null : (ymclStore.activeDomain?.origin ?? null)
+	let source: string
+	if (/^(?:https?|data|blob):/i.test(path)) {
+		source = path
+	} else if (domainOrigin) {
+		source = resolveDomainImageUrl(path, domainOrigin) ?? path
+	} else {
+		source = convertFileSrc(path)
+	}
+
 	return {
-		backgroundImage: `url("${convertFileSrc(themeStore.customBackgroundPath)}")`,
+		backgroundImage: `url("${source}")`,
 		filter: `blur(${themeStore.customBackgroundBlur}px)`,
 		opacity: themeStore.customBackgroundOpacity / 100,
 	}
@@ -963,7 +1094,7 @@ const messages = defineMessages({
 	runningAsAdmin: {
 		id: 'app.warning.running-as-admin',
 		defaultMessage:
-			'Axolotl is running as administrator. Drag-and-drop file import is disabled in this mode; please restart the launcher without administrator privileges.',
+			'YMCL is running as administrator. Drag-and-drop file import is disabled in this mode; please restart the launcher without administrator privileges.',
 	},
 	restarting: {
 		id: 'app.restarting',
@@ -971,7 +1102,7 @@ const messages = defineMessages({
 	},
 	closeLauncherTitle: {
 		id: 'app.close-launcher.title',
-		defaultMessage: 'Choose how to close Axolotl Launcher',
+		defaultMessage: 'Choose how to close YMCL (YuDream Launcher)',
 	},
 	closeLauncherDirect: {
 		id: 'app.close-launcher.direct',
@@ -1400,6 +1531,9 @@ async function setupApp() {
 			themeStore[shortcut.enabledField] = getNavShortcutEnabled(shortcut.id)
 	}
 	themeStore.shortcutBindings = resolveAllBindings()
+	// Hydration above writes the personal theme over the theme engine; re-apply
+	// the active domain's profile so a domain theme isn't clobbered at startup.
+	reapplyYmclTheme()
 	stateInitialized.value = true
 	if (privacyConsentPending.value) {
 		await nextTick()
@@ -2151,6 +2285,14 @@ command_listener(handleCommand)
 
 async function handleCommand(e) {
 	if (!e) return
+	if (e.event === 'AddSite') {
+		await router.push({
+			path: '/settings',
+			query: { add_site: e.url },
+			hash: '#ymcl-domains',
+		})
+		return
+	}
 	if (e.event === 'OpenSeedMap') {
 		const query = Object.fromEntries(new URLSearchParams(e.query ?? ''))
 		await router.push({ path: '/lab/seed-map', query })
@@ -2227,11 +2369,11 @@ const updatePopupMessages = defineMessages({
 	},
 	meteredBody: {
 		id: 'app.update-popup.body.metered',
-		defaultMessage: `Axolotl Launcher v{version} is available now! Since you're on a metered network, we didn't automatically download it.`,
+		defaultMessage: `YMCL (YuDream Launcher) v{version} is available now! Since you're on a metered network, we didn't automatically download it.`,
 	},
 	downloadedBody: {
 		id: 'app.update-popup.body.download-complete',
-		defaultMessage: `Axolotl Launcher v{version} has finished downloading. Reload to update now, or automatically when you close Axolotl Launcher.`,
+		defaultMessage: `YMCL (YuDream Launcher) v{version} has finished downloading. Reload to update now, or automatically when you close YMCL (YuDream Launcher).`,
 	},
 	reload: {
 		id: 'app.update-popup.reload',
@@ -2363,7 +2505,7 @@ async function performUpdateCheck() {
 		lastUpdateChannel = channel
 	}
 
-	const update = await checkAppUpdate(channel)
+	const update = await checkAppUpdate(channel, getYmclUpdateApiBase())
 	if (!update) {
 		console.log('No update available')
 		return 'up-to-date'
@@ -2502,8 +2644,20 @@ setAppUpdateActions({
 	check: manualUpdateCheck,
 	download: downloadAvailableUpdate,
 	install: installUpdate,
-	changelog: (version) => {
-		if (version && getAnnouncementByVersion(version)) {
+	changelog: async (version) => {
+		if (!version) {
+			if (isYmclUpdateConfigured()) {
+				const url = getYmclChangelogUrl()
+				if (url) {
+					openUrl(url)
+					return
+				}
+			}
+			openUrl(AxolotlBrandConfig.website)
+			return
+		}
+		// YMCL 更新平台：弹窗内部会拉取 ymcl-content 历史；否则回退本地 Axolotl catalog。
+		if (isYmclUpdateConfigured() || getAnnouncementByVersion(version)) {
 			updateAnnouncementModal.value?.show(version)
 		} else {
 			openUrl(AxolotlBrandConfig.website)
@@ -2725,13 +2879,70 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			<NavRail v-else>
 				<template v-for="item in ymclNavItems" :key="item.id">
 					<div v-if="item.kind === 'separator'" class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
+					<OverflowMenu
+						v-else-if="item.children && item.children.length"
+						v-tooltip.right="item.title"
+						class="w-12 h-12 rounded-full flex items-center justify-center text-2xl text-primary hover:bg-button-bg hover:text-contrast"
+						:options="
+							item.children.map((child) =>
+								child.kind === 'divider'
+									? { id: child.key, divider: true as const }
+									: {
+											id: child.key,
+											action: child.to ? () => router.push(child.to as string) : undefined,
+											remainOnClick: !child.to,
+										},
+							)
+						"
+						placement="right-end"
+					>
+						<component :is="item.icon" />
+						<template v-for="child in item.children" :key="child.key" #[child.key]>
+							<span
+								v-if="child.kind !== 'divider'"
+								class="inline-flex min-w-0 items-center gap-2"
+								:class="child.kind === 'directory' ? 'font-semibold text-secondary' : ''"
+								:style="{ paddingLeft: `${child.depth * 0.75}rem` }"
+							>
+								<span v-if="child.kind === 'directory'" class="text-xs opacity-70">▸</span>
+								<span class="truncate">{{ child.title }}</span>
+							</span>
+						</template>
+					</OverflowMenu>
 					<NavButton
 						v-else
 						v-tooltip.right="item.title"
 						:to="item.to"
-						:is-primary="(r) => r.path === item.to"
+						:is-primary="(r) => r.path === item.to || r.path.startsWith(`${item.to}/`)"
 					>
 						<component :is="item.icon" />
+					</NavButton>
+				</template>
+				<template v-if="showReservedLab || showReservedDownloads">
+					<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
+					<NavButton
+						v-if="showReservedLab"
+						v-tooltip.right="formatMessage(messages.lab)"
+						data-onboarding-id="nav-lab"
+						to="/lab"
+						:is-primary="(r) => r.path.startsWith('/lab')"
+					>
+						<FlaskConicalIcon />
+					</NavButton>
+					<NavButton
+						v-if="showReservedDownloads"
+						v-tooltip.right="formatMessage(messages.downloads)"
+						data-onboarding-id="nav-downloads"
+						to="/downloads"
+						class="relative"
+					>
+						<DownloadIcon />
+						<span
+							v-if="downloadManager.activeCount.value > 0"
+							class="absolute right-0 top-0 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-bold leading-4 text-white"
+						>
+							{{ Math.min(downloadManager.activeCount.value, 99) }}
+						</span>
 					</NavButton>
 				</template>
 			</NavRail>
@@ -3186,6 +3397,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		@skip="skipOnboarding"
 		@request-close-settings="closeOnboardingSettings"
 	/>
+
+	<DomainLoginModal ref="sessionLoginModal" @signed-in="onSessionLoginSignedIn" />
 </template>
 
 <style lang="scss" scoped>

@@ -10,6 +10,7 @@ import {
 	getLocalizedAnnouncementText,
 	type LauncherAnnouncement,
 } from '@/announcements/catalog'
+import { resolveUpdateChangelogUrl } from '@/helpers/ymcl-update-history'
 import i18n from '@/i18n.config'
 
 const props = withDefaults(
@@ -32,7 +33,7 @@ const { formatMessage } = useVIntl()
 const messages = defineMessages({
 	unknownTitle: {
 		id: 'app.update-announcement.unknown-title',
-		defaultMessage: 'Axolotl Launcher was updated',
+		defaultMessage: 'YMCL (YuDream Launcher) was updated',
 	},
 	unknownBody: {
 		id: 'app.update-announcement.unknown-body',
@@ -111,7 +112,8 @@ const categoryRows = computed(() =>
 )
 
 async function openChangelog() {
-	if (props.externalUrl) await openUrl(props.externalUrl)
+	const url = resolveUpdateChangelogUrl(props.externalUrl)
+	if (url) await openUrl(url)
 }
 </script>
 
@@ -159,7 +161,7 @@ async function openChangelog() {
 			</p>
 		</div>
 
-		<ButtonStyled v-if="externalUrl" color="brand" type="outlined" class="self-start">
+		<ButtonStyled color="brand" type="outlined" class="self-start">
 			<button type="button" @click="openChangelog">
 				<ExternalIcon />
 				{{ formatMessage(messages.openChangelog) }}

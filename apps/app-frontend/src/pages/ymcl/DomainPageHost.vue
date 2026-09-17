@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { CompassIcon, RefreshCwIcon } from '@modrinth/assets'
-import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { ButtonStyled, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import type { YmclAction } from '@/helpers/ymcl-actions'
+import { normalizeYmclEnvelope } from '@/helpers/ymcl-envelope'
+import { resolveDataSourceTitle, splitDataSourceId } from '@/helpers/ymcl-home'
+import { normalizeRendererId } from '@/helpers/ymcl-nav'
+import { ymclDisplayText, ymclErrorMessage } from '@/helpers/ymcl'
 import { useYmclStore } from '@/store/ymcl'
+
+import DomainSubNav from '@/components/ymcl/DomainSubNav.vue'
 
 const route = useRoute()
 const { formatMessage } = useVIntl()
+const { addNotification } = injectNotificationManager()
 const ymclStore = useYmclStore()
 
 const messages = defineMessages({
@@ -38,15 +45,11 @@ const messages = defineMessages({
 		id: 'app.ymcl.domain-page.refresh',
 		defaultMessage: '刷新',
 	},
+	actionUnavailable: {
+		id: 'app.ymcl.renderer.action-unavailable',
+		defaultMessage: '该操作暂不可用',
+	},
 })
-
-interface Envelope {
-	records?: Record<string, unknown>[]
-	actions?: YmclAction[]
-	itemActions?: YmclAction[]
-	allow?: string[]
-	schemaVersion?: number
-}
 
 /** Built-in declarative renderers (YAP §6.6); extension bundles land in P4. */
 const renderers: Record<string, ReturnType<typeof defineAsyncComponent>> = {
@@ -69,60 +72,159 @@ const renderers: Record<string, ReturnType<typeof defineAsyncComponent>> = {
 }
 
 const BundleFrame = defineAsyncComponent(() => import('@/components/ymcl/bundle/BundleFrame.vue'))
+const ModuleFrame = defineAsyncComponent(() => import('@/components/ymcl/bundle/ModuleFrame.vue'))
 
 const pageId = computed(() => String(route.params.pageId ?? ''))
-const page = computed(() => ymclStore.pageById(pageId.value))
-const pageTitle = computed(
-	() => page.value?.title ?? page.value?.id ?? formatMessage(messages.title),
-)
+/**
+ * Registry page, or a synthetic descriptor when the route targets a bare
+ * dataSource id (adapters may declare data without a matching page node).
+ */
+const page = computed(() => {
+	const registered = ymclStore.pageById(pageId.value)
+	if (registered) return registered
+	const source = (ymclStore.manifest?.data_sources ?? []).find(
+		(candidate) => candidate.id === pageId.value,
+	)
+	if (!source?.id) return null
+	const sourceCode = source.source_code ?? source.sourceCode ?? ''
+	// Prefer a registry page that already binds this dataSource (admin renderer).
+	const bound = (ymclStore.manifest?.pages ?? []).find(
+		(candidate) => candidate.data_source === source.id,
+	)
+	if (bound) return bound
+	return {
+		id: source.id,
+		renderer: normalizeRendererId(
+			sourceCode.includes('server') ? 'server-list' : 'card-grid',
+		),
+		title: null as string | null,
+		data_source: source.id,
+		permissions: [] as string[],
+	}
+})
+const pageTitle = computed(() => {
+	if (page.value?.title?.trim()) return page.value.title.trim()
+	const sourceId = page.value?.data_source
+	if (sourceId) {
+		const declared = (ymclStore.manifest?.data_sources ?? []).find(
+			(candidate) => candidate.id === sourceId,
+		)
+		const declarationTitle = declared?.title ?? declared?.name ?? declared?.label
+		if (declarationTitle?.trim() && declarationTitle.trim() !== sourceId) {
+			return declarationTitle.trim()
+		}
+		const boundPage = (ymclStore.manifest?.pages ?? []).find(
+			(candidate) => candidate.data_source === sourceId && candidate.title?.trim(),
+		)
+		if (boundPage?.title?.trim()) return boundPage.title.trim()
+		return resolveDataSourceTitle({
+			id: sourceId,
+			cardTitle: null,
+			declarationTitle,
+			pageTitle: null,
+			navigationTitle: null,
+		})
+	}
+	return page.value?.id ?? formatMessage(messages.title)
+})
 const rendererComponent = computed(() => {
-	const id = page.value?.renderer
+	const id = normalizeRendererId(page.value?.renderer)
 	return id ? (renderers[id] ?? null) : null
 })
-const isExtensionRenderer = computed(() => page.value?.renderer === 'extension')
+const isExtensionRenderer = computed(
+	() => normalizeRendererId(page.value?.renderer) === 'extension',
+)
+const isModuleRenderer = computed(() => normalizeRendererId(page.value?.renderer) === 'module')
 
-const envelope = ref<Envelope | null>(null)
+const rawEnvelope = ref<unknown>(null)
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const reloadTick = ref(0)
 
+const manifestAllow = computed(() => {
+	const actions = ymclStore.manifest?.actions as { allow?: string[] } | undefined
+	return actions?.allow ?? []
+})
+
+/** Adapter dialects + manifest allow merged so item buttons stay clickable. */
+const envelope = computed(() => normalizeYmclEnvelope(rawEnvelope.value, manifestAllow.value))
+
+const allow = computed(() => envelope.value.allow)
+
+const pageActions = computed(() => envelope.value.actions as YmclAction[])
+
 async function loadEnvelope() {
 	if (!page.value?.data_source) return
-	const [providerCode, sourceCode] = page.value.data_source.split('.')
-	if (!providerCode || !sourceCode) return
+	// module 页面自持数据拉取（ModuleFrame host.dataFetch），这里再拉一遍
+	// 纯属浪费；dataSource 仅作数据源→页面绑定供首页卡片「全部」反查。
+	if (isModuleRenderer.value) return
+	// `<providerCode>.<sourceCode>` — sourceCode may contain dots (e.g. servers.list).
+	const split = splitDataSourceId(page.value.data_source)
+	if (!split) return
 	loading.value = true
 	loadError.value = null
 	try {
 		const { invoke } = await import('@tauri-apps/api/core')
-		envelope.value = await invoke<Envelope>('plugin:ymcl|ymcl_data_fetch', {
-			providerCode,
-			sourceCode,
+		rawEnvelope.value = await invoke<unknown>('plugin:ymcl|ymcl_data_fetch', {
+			providerCode: split.providerCode,
+			sourceCode: split.sourceCode,
 			query: null,
 		})
 	} catch (error) {
-		loadError.value = String(error)
-		envelope.value = null
+		loadError.value = ymclErrorMessage(error)
+		rawEnvelope.value = null
 	} finally {
 		loading.value = false
 	}
 }
 
-const allow = computed(() => {
-	const actions = ymclStore.manifest?.actions as { allow?: string[] } | undefined
-	return actions?.allow ?? []
-})
-
-const pageActions = computed(() => (envelope.value?.actions ?? []) as YmclAction[])
-
 async function runPageAction(action: YmclAction) {
 	const { executeAction } = await import('@/helpers/ymcl-actions')
-	await executeAction(action, {
-		allow: allow.value,
-		onReload: () => {
+	const title = ymclDisplayText(action.title) || ymclDisplayText(action.code) || '操作'
+	try {
+		const response = await executeAction(action, {
+			allow: allow.value,
+			onReload: () => {
+				reloadTick.value += 1
+				void loadEnvelope()
+			},
+		})
+		if (response === false) {
+			addNotification({
+				title,
+				text: formatMessage(messages.actionUnavailable),
+				type: 'warning',
+			})
+			return
+		}
+		const toast =
+			typeof response === 'object' && response
+				? ymclDisplayText(response.toast) ||
+					ymclDisplayText((response as { message?: unknown }).message)
+				: ''
+		if (toast) {
+			addNotification({ title, text: toast, type: 'success' })
+		}
+		if (typeof response !== 'boolean' && response.refresh !== false) {
 			reloadTick.value += 1
 			void loadEnvelope()
-		},
-	})
+		}
+	} catch (error) {
+		const toast =
+			(error as { ymclToast?: string } | null)?.ymclToast ||
+			ymclErrorMessage(error) ||
+			formatMessage(messages.actionUnavailable)
+		addNotification({
+			title,
+			text: toast === '[object Object]' ? formatMessage(messages.actionUnavailable) : toast,
+			type: 'error',
+		})
+	}
+}
+
+function handlePageReload() {
+	reloadTick.value += 1
+	void loadEnvelope()
 }
 
 watch(
@@ -131,7 +233,7 @@ watch(
 		if (!ymclStore.isPersonal && page.value?.data_source) {
 			void loadEnvelope()
 		} else {
-			envelope.value = null
+			rawEnvelope.value = null
 			loadError.value = null
 		}
 	},
@@ -140,8 +242,10 @@ watch(
 </script>
 
 <template>
-	<div class="flex min-h-full flex-col p-6">
-		<template v-if="ymclStore.isPersonal">
+	<div class="domain-page-layout flex min-h-full gap-6 p-6">
+		<DomainSubNav v-if="!ymclStore.isPersonal" :page-id="pageId" />
+		<div class="flex min-h-full min-w-0 flex-1 flex-col">
+			<template v-if="ymclStore.isPersonal">
 			<div class="flex min-h-full flex-col items-center justify-center gap-3 text-center">
 				<CompassIcon class="h-12 w-12 text-secondary" />
 				<h1 class="m-0 text-lg font-semibold text-contrast">
@@ -164,13 +268,13 @@ watch(
 				<ButtonStyled
 					v-for="action in pageActions"
 					:key="action.code"
-					:type="action.primary ? 'brand' : 'standard'"
+					:color="action.primary ? 'brand' : 'standard'"
 				>
 					<button @click="runPageAction(action)">
 						{{ action.title }}
 					</button>
 				</ButtonStyled>
-				<ButtonStyled v-if="page.data_source" type="standard" circular>
+				<ButtonStyled v-if="page.data_source && !isModuleRenderer" type="standard" circular>
 					<button
 						v-tooltip="formatMessage(messages.refresh)"
 						:disabled="loading"
@@ -187,19 +291,19 @@ watch(
 			<BundleFrame
 				v-else-if="isExtensionRenderer && page"
 				:page="page"
-				@reload="
-					reloadTick++
-					loadEnvelope()
-				"
+				@reload="handlePageReload"
 			/>
-			<div v-else-if="rendererComponent && envelope">
+			<ModuleFrame
+				v-else-if="isModuleRenderer && page"
+				:page="page"
+				:action-allow="allow"
+				@reload="handlePageReload"
+			/>
+			<div v-else-if="rendererComponent && rawEnvelope !== null">
 				<component
 					:is="rendererComponent"
-					:envelope="{ ...envelope, allow }"
-					@reload="
-						reloadTick++
-						loadEnvelope()
-					"
+					:envelope="envelope"
+					@reload="handlePageReload"
 				/>
 			</div>
 			<div
@@ -218,6 +322,15 @@ watch(
 					})
 				}}
 			</div>
-		</template>
+			</template>
+		</div>
 	</div>
 </template>
+
+<style scoped>
+@media (max-width: 800px) {
+	.domain-page-layout {
+		flex-direction: column;
+	}
+}
+</style>

@@ -154,7 +154,7 @@ test('developer-only settings stay out of the normal search categories', () => {
 	)
 })
 
-test('settings navigation groups preserve the intended Axolotl information architecture', () => {
+test('settings navigation groups preserve the intended YMCL information architecture', () => {
 	const categoriesForGroup = (
 		group: 'launcher' | 'game' | 'data-privacy' | 'support' | 'developer',
 		developerMode = false,

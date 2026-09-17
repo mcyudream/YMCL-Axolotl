@@ -10,7 +10,6 @@ import {
 } from '@modrinth/ui'
 import { useModalStack } from '@modrinth/ui/src/composables/modal-stack'
 import { renderString } from '@modrinth/utils'
-import { getVersion } from '@tauri-apps/api/app'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -21,7 +20,7 @@ import {
 	type RemoteAnnouncement,
 	safeAnnouncementUrl,
 } from '@/helpers/remote-announcements'
-import { getUpdateChannel } from '@/helpers/settings'
+import { fetchYmclUpdates, isYmclContentConfigured, type YmclContentRecord } from '@/helpers/ymcl-content'
 
 const props = defineProps<{ ready: boolean; previewOnly?: boolean }>()
 const manager = injectPopupNotificationManager()
@@ -46,7 +45,7 @@ const messages = defineMessages({
 	previewContent: {
 		id: 'app.remote-announcements.preview-content',
 		defaultMessage:
-			'## Announcement preview\n\nThis is **sample content**, not a published announcement.\n\n- Supports headings, lists, and links\n- Close buttons are always available\n\n> Previewing does not change real announcement read status.\n\n| Type | Display |\n| --- | --- |\n| Modal | Full Markdown content |\n| Popup | Summary, then full content |\n\n[Visit the website](https://axlmc.org)',
+			'## Announcement preview\n\nThis is **sample content**, not a published announcement.\n\n- Supports headings, lists, and links\n- Close buttons are always available\n\n> Previewing does not change real announcement read status.\n\n| Type | Display |\n| --- | --- |\n| Modal | Full Markdown content |\n| Popup | Summary, then full content |\n\n[Visit the website](https://www.ghs.red)',
 	},
 	previewAction: { id: 'app.remote-announcements.preview-action', defaultMessage: 'Visit website' },
 })
@@ -54,7 +53,7 @@ const modal = ref<InstanceType<typeof NewModal>>()
 const selected = ref<RemoteAnnouncement | null>(null)
 const active = ref(false)
 const html = computed(() => renderString(selected.value?.content ?? ''))
-const stateKey = 'axolotl-remote-announcements-v2'
+const stateKey = 'ymcl-content-announcements-v1'
 const notices = new Map<string, PopupNotification>()
 const reminded = new Set<string>()
 const read = new Set<string>()
@@ -62,7 +61,6 @@ const queuedThisSession = new Set<string>()
 let items: RemoteAnnouncement[] = []
 let pending: RemoteAnnouncement[] = []
 let cacheKey = ''
-let endpoint: URL | undefined
 let cacheLoaded = false
 let inFlight = false
 let disposed = false
@@ -70,6 +68,25 @@ let lastAttempt = 0
 let controller: AbortController | undefined
 let interval: ReturnType<typeof setInterval> | undefined
 let advanceTimer: ReturnType<typeof setTimeout> | undefined
+
+function mapUpdateRecord(record: YmclContentRecord, now: string): RemoteAnnouncement {
+	const published = record.updatedAt && Number.isFinite(Date.parse(record.updatedAt))
+		? record.updatedAt
+		: now
+	return {
+		id: record.id,
+		title: record.title,
+		summary: record.summary?.slice(0, 300) ?? null,
+		content: record.body || record.summary || record.title,
+		type: 'modal',
+		priority: 'normal',
+		starts_at: published,
+		ends_at: null,
+		published_at: published,
+		action_label: record.url ? 'Visit' : null,
+		action_url: record.url ? safeAnnouncementUrl(record.url) : null,
+	}
+}
 
 function persist() {
 	if (props.previewOnly) return
@@ -203,30 +220,23 @@ function loadCache() {
 }
 async function refresh() {
 	if (inFlight || disposed) return
+	if (!isYmclContentConfigured()) return
 	inFlight = true
 	lastAttempt = Date.now()
 	const abort = new AbortController()
 	controller = abort
-	const timeout = setTimeout(() => abort.abort(), 10000)
+	if (!cacheKey) {
+		cacheKey = stateKey + ':cache'
+	}
 	try {
-		if (!endpoint) {
-			const [version, channel] = await Promise.all([getVersion(), getUpdateChannel()])
-			endpoint = new URL(
-				import.meta.env.VITE_AXO_ANNOUNCEMENTS_URL ||
-					'https://admin.axlmc.org/api/public/announcements',
-			)
-			endpoint.searchParams.set('version', version)
-			endpoint.searchParams.set('channel', channel === 'release' ? 'stable' : 'beta')
-			cacheKey = stateKey + ':cache:' + endpoint.href
-		}
 		if (disposed || abort.signal.aborted) return
 		loadCache()
-		const response = await fetch(endpoint, { signal: abort.signal, credentials: 'omit' })
-		if (!response.ok) return
-		const text = await response.text()
-		if (text.length > 4500000) return
-		const result = JSON.parse(text)
-		const parsed = parseAnnouncements(result.announcements)
+		const records = await fetchYmclUpdates()
+		if (disposed || abort.signal.aborted) return
+		if (!records.length && !items.length) return
+		const now = new Date().toISOString()
+		const mapped = records.map((record) => mapUpdateRecord(record, now))
+		const parsed = parseAnnouncements(mapped)
 		if (!parsed || disposed) return
 		sync(parsed, true)
 		try {
@@ -237,7 +247,6 @@ async function refresh() {
 	} catch {
 		// Network/parse failures are non-fatal; next reconnect retries
 	} finally {
-		clearTimeout(timeout)
 		inFlight = false
 		controller = undefined
 	}
@@ -275,7 +284,7 @@ function preview(type: RemoteAnnouncement['type'], withAction = false) {
 		ends_at: null,
 		published_at: now,
 		action_label: withAction ? formatMessage(messages.previewAction) : null,
-		action_url: withAction ? 'https://axlmc.org' : null,
+		action_url: withAction ? 'https://www.ghs.red' : null,
 	}
 	read.clear()
 	reminded.clear()

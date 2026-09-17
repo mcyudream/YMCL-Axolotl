@@ -18,6 +18,13 @@
 				:offline="offline"
 				@unlinked="fetchInstance"
 			/>
+			<PublishInstanceModal
+				ref="publishModal"
+				:instance-id="instance.id"
+				:instance-name="instance.name"
+			/>
+			<FeatureSelectModal ref="featuresModal" :instance-id="instance.id" />
+			<PackInstallModal ref="installModal" :instance-id="instance.id" />
 			<ContentPageHeader>
 				<template #icon>
 					<InstanceIcon
@@ -223,6 +230,14 @@
 								{{ formatMessage(messages.starting, { seconds: launchElapsedSeconds }) }}
 							</button>
 						</ButtonStyled>
+						<ButtonStyled v-if="canPublishToDomain" circular size="large">
+							<button
+								v-tooltip="formatMessage(messages.publishToDomain)"
+								@click="publishModal?.show()"
+							>
+								<UploadIcon />
+							</button>
+						</ButtonStyled>
 						<ButtonStyled circular size="large">
 							<button
 								v-tooltip="formatMessage(messages.instanceSettings)"
@@ -245,6 +260,14 @@
 										action: () => exportModal?.show(),
 									},
 									{
+										id: 'optional-features',
+										action: () => featuresModal?.show(),
+									},
+									{
+										id: 'install-pack',
+										action: () => installModal?.show(),
+									},
+									{
 										id: 'create-shortcut',
 										action: () => createShortcut(),
 									},
@@ -256,6 +279,12 @@
 								<MoreVerticalIcon />
 								<template #share-instance>
 									<UserPlusIcon /> {{ formatMessage(messages.shareInstance) }}
+								</template>
+								<template #optional-features>
+									<ComponentIcon /> {{ formatMessage(messages.optionalFeatures) }}
+								</template>
+								<template #install-pack>
+									<DownloadIcon /> {{ formatMessage(messages.installPack) }}
 								</template>
 								<template #host-a-server>
 									<ServerIcon /> {{ formatMessage(messages.createServer) }}
@@ -283,11 +312,12 @@
 			:class="['px-6', { 'shrink-0': isFixedRender, hidden: isStudioMode }]"
 		>
 			<SymlinkInstanceWarning
-				v-if="instance?.symlink_target && !symlinkWarning.isHidden.value"
+				v-if="instance?.symlink_target && symlinkWarning.isHidden.value"
 				:symlink-target="instance.symlink_target"
 				class="mb-3"
 				dismissible
 			/>
+			<PackStatusBanner :instance-id="id" />
 			<NavTabs v-if="!hideInstanceTabs" :links="tabs" />
 		</div>
 		<div :class="['p-6 pt-4', { 'flex min-h-0 flex-1 flex-col overflow-hidden': isFixedRender }]">
@@ -356,6 +386,7 @@ import {
 	BoxIcon,
 	CheckCircleIcon,
 	ClipboardCopyIcon,
+	ComponentIcon,
 	DownloadIcon,
 	DropdownIcon,
 	EditIcon,
@@ -376,6 +407,7 @@ import {
 	StopCircleIcon,
 	TerminalSquareIcon,
 	UpdatedIcon,
+	UploadIcon,
 	UserPlusIcon,
 	XIcon,
 } from '@modrinth/assets'
@@ -408,6 +440,10 @@ import ExportModal from '@/components/ui/ExportModal.vue'
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
 import InstanceSettingsModal from '@/components/ui/modal/InstanceSettingsModal.vue'
 import SymlinkInstanceWarning from '@/components/ui/SymlinkInstanceWarning.vue'
+import FeatureSelectModal from '@/components/ymcl/FeatureSelectModal.vue'
+import PackInstallModal from '@/components/ymcl/PackInstallModal.vue'
+import PackStatusBanner from '@/components/ymcl/PackStatusBanner.vue'
+import PublishInstanceModal from '@/components/ymcl/PublishInstanceModal.vue'
 import {
 	fetchCachedServerStatus,
 	getFreshCachedServerStatus,
@@ -441,6 +477,8 @@ import { refreshWorlds, type ServerStatus } from '@/helpers/worlds'
 import { injectServerInstall } from '@/providers/server-install'
 import { handleSevereError } from '@/store/error.js'
 import { useBreadcrumbs, useTheming } from '@/store/state'
+import { useYmclStore } from '@/store/ymcl'
+import { DOMAIN_PUBLISH_PERMISSION, hasDomainPermission } from '@/helpers/ymcl'
 
 import { isActiveUpgradeJobForInstance, isUnmanagedUpgradeEligible } from './upgrade/entry'
 
@@ -473,6 +511,9 @@ const messages = defineMessages({
 	exportModpack: { id: 'app.instance.export-modpack', defaultMessage: 'Export modpack' },
 	createShortcut: { id: 'app.instance.create-shortcut', defaultMessage: 'Create shortcut' },
 	upgradeInstance: { id: 'app.instance.upgrade-instance', defaultMessage: 'Upgrade instance' },
+	publishToDomain: { id: 'app.instance.publish-to-domain', defaultMessage: '发布到域' },
+	optionalFeatures: { id: 'app.instance.optional-features', defaultMessage: '可选组件' },
+	installPack: { id: 'app.instance.install-pack', defaultMessage: '安装域整合包' },
 	addContent: { id: 'app.instances.add-content', defaultMessage: 'Add content' },
 	copyPath: { id: 'app.instances.copy-path', defaultMessage: 'Copy path' },
 	copyNames: { id: 'app.instance.copy-names', defaultMessage: 'Copy names' },
@@ -522,6 +563,18 @@ const launchElapsedSeconds = ref(0)
 const subpagePending = ref(false)
 const stopping = ref(false)
 const exportModal = ref<InstanceType<typeof ExportModal>>()
+const publishModal = ref<InstanceType<typeof PublishInstanceModal>>()
+const featuresModal = ref<InstanceType<typeof FeatureSelectModal>>()
+const installModal = ref<InstanceType<typeof PackInstallModal>>()
+const ymclStore = useYmclStore()
+// 发布是管理端动作：仅持有发布权限（含通配符授权）的会话可见入口，
+// 普通成员不再看到「发布到域」。注意 YmclStoredSession 的会话信息在内层
+// `.session`（YmclSessionInfo），permissions 从那里取。
+const canPublishToDomain = computed(() =>
+	ymclStore.isPersonal
+		? false
+		: hasDomainPermission(ymclStore.session?.session.permissions, DOMAIN_PUBLISH_PERMISSION),
+)
 let launchElapsedTimer: ReturnType<typeof setInterval> | undefined
 
 useLoadingBarToken(subpagePending)

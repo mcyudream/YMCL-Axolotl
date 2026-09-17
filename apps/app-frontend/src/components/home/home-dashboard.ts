@@ -29,12 +29,33 @@ export type HomeWidgetKind =
 	| 'instance'
 	| 'world'
 	| 'server'
+	| 'page-shortcut'
+	| 'data-card'
+	| 'domain-servers'
 
 export type HomeWidgetTarget = {
 	instanceId: string
 	path?: string
 	address?: string
 	fallbackLabel: string
+}
+
+/**
+ * Domain card payloads (YAP §6.5 adapter card contributions). `target` is the
+ * raw protocol value: "page:<pageId>" or "native:<route>"; the data binding
+ * mirrors manifest.dataSources entries so the widget survives manifest churn.
+ */
+export type HomeShortcutTarget = {
+	target: string
+	title?: string
+}
+
+export type HomeDataCardSource = {
+	id: string
+	providerCode: string
+	sourceCode: string
+	variant?: 'stats' | 'list' | 'hero'
+	title?: string
 }
 
 export type HomeWidgetOptions = {
@@ -57,6 +78,8 @@ export type HomeWidgetPlacement = {
 	target?: HomeWidgetTarget
 	options?: HomeWidgetOptions
 	position?: HomeWidgetPosition
+	shortcut?: HomeShortcutTarget
+	dataSource?: HomeDataCardSource
 }
 
 export type HomeDashboardConfig = {
@@ -87,6 +110,9 @@ export const HOME_WIDGET_SIZE_OPTIONS: Record<HomeWidgetKind, readonly HomeWidge
 	instance: ['1x1', '2x1'],
 	world: ['1x1', '2x1'],
 	server: ['1x1', '2x1'],
+	'page-shortcut': ['1x1', '2x1'],
+	'data-card': HOME_WIDGET_STANDARD_SIZES,
+	'domain-servers': ['2x1', '1x2', '2x2'],
 }
 
 export const HOME_WIDGET_DEFAULT_SIZE: Record<HomeWidgetKind, HomeWidgetSize> = {
@@ -99,6 +125,9 @@ export const HOME_WIDGET_DEFAULT_SIZE: Record<HomeWidgetKind, HomeWidgetSize> = 
 	instance: '1x1',
 	world: '1x1',
 	server: '1x1',
+	'page-shortcut': '1x1',
+	'data-card': '2x1',
+	'domain-servers': '2x2',
 }
 
 export function getHomeWidgetCardDensity(
@@ -180,6 +209,38 @@ function normalizePosition(value: unknown): HomeWidgetPosition | undefined {
 	}
 }
 
+const HOME_DATA_CARD_VARIANTS = ['stats', 'list', 'hero'] as const
+
+function normalizeShortcut(value: unknown): HomeShortcutTarget | undefined {
+	if (!isRecord(value) || typeof value.target !== 'string') return undefined
+	const target = value.target.trim()
+	if (!target) return undefined
+	return {
+		target,
+		...(typeof value.title === 'string' && value.title ? { title: value.title } : {}),
+	}
+}
+
+function normalizeDataSource(value: unknown): HomeDataCardSource | undefined {
+	if (!isRecord(value)) return undefined
+	const id = typeof value.id === 'string' ? value.id.trim() : ''
+	const providerCode = typeof value.providerCode === 'string' ? value.providerCode.trim() : ''
+	const sourceCode = typeof value.sourceCode === 'string' ? value.sourceCode.trim() : ''
+	if (!id || !providerCode || !sourceCode) return undefined
+	const variant = HOME_DATA_CARD_VARIANTS.includes(
+		value.variant as (typeof HOME_DATA_CARD_VARIANTS)[number],
+	)
+		? (value.variant as (typeof HOME_DATA_CARD_VARIANTS)[number])
+		: undefined
+	return {
+		id,
+		providerCode,
+		sourceCode,
+		...(variant ? { variant } : {}),
+		...(typeof value.title === 'string' && value.title ? { title: value.title } : {}),
+	}
+}
+
 function normalizeOptions(kind: HomeWidgetKind, value: unknown): HomeWidgetOptions | undefined {
 	if (kind === 'recent') {
 		const recentLimit =
@@ -242,15 +303,21 @@ export function normalizeHomeDashboard(value: unknown): HomeDashboardConfig | nu
 		: 'grid'
 	const widgets = value.widgets.flatMap((candidate): HomeWidgetPlacement[] => {
 		if (!isRecord(candidate) || typeof candidate.kind !== 'string') return []
-		if (!HOME_WIDGET_KINDS.has(candidate.kind as HomeWidgetKind)) return []
+		// domain-packs was renamed to domain-servers (server-first home card).
+		const rawKind = candidate.kind === 'domain-packs' ? 'domain-servers' : candidate.kind
+		if (!HOME_WIDGET_KINDS.has(rawKind as HomeWidgetKind)) return []
 
-		const kind = candidate.kind as HomeWidgetKind
+		const kind = rawKind as HomeWidgetKind
 		const target = normalizeTarget(candidate.target)
 		const options = normalizeOptions(kind, candidate.options)
 		const position = normalizePosition(candidate.position)
+		const shortcut = normalizeShortcut(candidate.shortcut)
+		const dataSource = normalizeDataSource(candidate.dataSource)
 		if ((kind === 'instance' || kind === 'world' || kind === 'server') && !target) return []
 		if (kind === 'world' && !target?.path) return []
 		if (kind === 'server' && !target?.address) return []
+		if (kind === 'page-shortcut' && !shortcut) return []
+		if (kind === 'data-card' && !dataSource) return []
 
 		let id = typeof candidate.id === 'string' && candidate.id ? candidate.id : crypto.randomUUID()
 		if (usedIds.has(id)) id = crypto.randomUUID()
@@ -269,6 +336,8 @@ export function normalizeHomeDashboard(value: unknown): HomeDashboardConfig | nu
 				...(target ? { target } : {}),
 				...(options ? { options } : {}),
 				...(position ? { position } : {}),
+				...(shortcut ? { shortcut } : {}),
+				...(dataSource ? { dataSource } : {}),
 			},
 		]
 	})
