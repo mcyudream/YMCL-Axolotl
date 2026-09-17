@@ -66,7 +66,7 @@
     "message": "Zaawansowane renderowanie"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Wybierz preferowany motyw w Axolotl Launcher."
+    "message": "Wybierz preferowany motyw w YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Motyw"
@@ -531,10 +531,10 @@
     "message": "Zaloguj się"
   },
   "app.skins.sign-in.description": {
-    "message": "Zaloguj się na konto Minecraft, by móc zarządzać skórkami poprzez Axolotl Launcher."
+    "message": "Zaloguj się na konto Minecraft, by móc zarządzać skórkami poprzez YMCL (YuDream Launcher)."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Zaloguj się"
@@ -543,10 +543,10 @@
     "message": "Wybierz skórkę"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Wersja Axolotl Launcher v{version} została pobrana. Załaduj ponownie, żeby zaktualizować teraz, albo automatycznie, gdy zamkniesz Axolotl Launcher."
+    "message": "Wersja YMCL (YuDream Launcher) v{version} została pobrana. Załaduj ponownie, żeby zaktualizować teraz, albo automatycznie, gdy zamkniesz YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "Wersja Axolotl Launcher v{version} jest dostępna! Skoro korzystasz z sieci taryfowej, nie pobraliśmy jej automatycznie."
+    "message": "Wersja YMCL (YuDream Launcher) v{version} jest dostępna! Skoro korzystasz z sieci taryfowej, nie pobraliśmy jej automatycznie."
   },
   "app.update-popup.changelog": {
     "message": "Dziennik zmian"

@@ -57,7 +57,7 @@
     "message": "Fejlett renderelés"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Válaszd ki a Axolotl Launcherhoz a kívánt színsémát."
+    "message": "Válaszd ki a YMCL (YuDream Launcher)hoz a kívánt színsémát."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Téma"
@@ -429,10 +429,10 @@
     "message": "Bejelentkezés"
   },
   "app.skins.sign-in.description": {
-    "message": "Kérlek jelentkezz be a Minecraft-fiókodba, hogy használni tudd a Axolotl Launcher kinézetkezelési funkcióit."
+    "message": "Kérlek jelentkezz be a Minecraft-fiókodba, hogy használni tudd a YMCL (YuDream Launcher) kinézetkezelési funkcióit."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Kérlek jelentkezz be"
@@ -441,10 +441,10 @@
     "message": "Kinézetváltó"
   },
   "app.update-popup.body.download-complete": {
-    "message": "A Axolotl Launcher v{version} letöltése befejeződött. Frissítéshez válaszd ki a Frissítés opciót, vagy az alkalmazás a bezárásakor automatikusan frissül."
+    "message": "A YMCL (YuDream Launcher) v{version} letöltése befejeződött. Frissítéshez válaszd ki a Frissítés opciót, vagy az alkalmazás a bezárásakor automatikusan frissül."
   },
   "app.update-popup.body.metered": {
-    "message": "A Axolotl Launcher v{version} már elérhető! Mivel mérhető hálózaton vagy, nem töltöttük le automatikusan."
+    "message": "A YMCL (YuDream Launcher) v{version} már elérhető! Mivel mérhető hálózaton vagy, nem töltöttük le automatikusan."
   },
   "app.update-popup.changelog": {
     "message": "Változásnapló"

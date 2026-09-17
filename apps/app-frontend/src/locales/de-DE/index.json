@@ -66,7 +66,7 @@
     "message": "Erweitertes Rendering"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Wähle dein bevorzugtes Farbschema für die Axolotl Launcher."
+    "message": "Wähle dein bevorzugtes Farbschema für die YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Farbschema"
@@ -534,10 +534,10 @@
     "message": "Anmelden"
   },
   "app.skins.sign-in.description": {
-    "message": "Bitte melde dich bei deinem Minecraft-Konto an, um die Funktionen zur Skin-Verwaltung von Axolotl Launcher nutzen zu können."
+    "message": "Bitte melde dich bei deinem Minecraft-Konto an, um die Funktionen zur Skin-Verwaltung von YMCL (YuDream Launcher) nutzen zu können."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Bitte melde dich an"
@@ -546,10 +546,10 @@
     "message": "Skin-Auswahl"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} wurde heruntergeladen. Neu laden, um jetzt zu aktualisieren, oder automatisch aktualisieren, wenn du die Axolotl Launcher schließt."
+    "message": "YMCL (YuDream Launcher) v{version} wurde heruntergeladen. Neu laden, um jetzt zu aktualisieren, oder automatisch aktualisieren, wenn du die YMCL (YuDream Launcher) schließt."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} ist jetzt verfügbar! Da du ein getaktetes Netzwerk nutzt, haben wir den Download nicht automatisch gestartet."
+    "message": "YMCL (YuDream Launcher) v{version} ist jetzt verfügbar! Da du ein getaktetes Netzwerk nutzt, haben wir den Download nicht automatisch gestartet."
   },
   "app.update-popup.changelog": {
     "message": "Änderungen"

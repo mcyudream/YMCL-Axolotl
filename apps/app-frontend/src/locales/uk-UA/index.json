@@ -51,7 +51,7 @@
     "message": "Розширене промальовування"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Виберіть бажану колірну тему для Axolotl Launcher."
+    "message": "Виберіть бажану колірну тему для YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Колірна тема"
@@ -426,10 +426,10 @@
     "message": "Увійдіть"
   },
   "app.skins.sign-in.description": {
-    "message": "Будь ласка, увійдіть у свій обліковий запис Minecraft, щоб використовувати особливості керування скінами в Axolotl Launcher."
+    "message": "Будь ласка, увійдіть у свій обліковий запис Minecraft, щоб використовувати особливості керування скінами в YMCL (YuDream Launcher)."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Увійдіть"
@@ -438,10 +438,10 @@
     "message": "Вибір скіну"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} завантажено. Перезапустіть, щоб оновити зараз, або це відбудеться автоматично після закриття застосунку."
+    "message": "YMCL (YuDream Launcher) v{version} завантажено. Перезапустіть, щоб оновити зараз, або це відбудеться автоматично після закриття застосунку."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} вже доступно! Оскільки ви використовуєте лімітне підключення, ми не завантажили його автоматично."
+    "message": "YMCL (YuDream Launcher) v{version} вже доступно! Оскільки ви використовуєте лімітне підключення, ми не завантажили його автоматично."
   },
   "app.update-popup.changelog": {
     "message": "Журнал змін"

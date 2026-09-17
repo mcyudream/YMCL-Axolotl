@@ -51,7 +51,7 @@
     "message": "Renderização avançada"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Seleciona a tua cor preferida para a Axolotl Launcher."
+    "message": "Seleciona a tua cor preferida para a YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Cor de tema"
@@ -243,10 +243,10 @@
     "message": "Modrinth"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} acabou de ser transferida. Recarrega para atualizar agora, ou automaticamente quando fechares a Axolotl Launcher."
+    "message": "YMCL (YuDream Launcher) v{version} acabou de ser transferida. Recarrega para atualizar agora, ou automaticamente quando fechares a YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} está disponível! Como estás numa rede com tráfego limitado, não a transferimos automaticamente."
+    "message": "YMCL (YuDream Launcher) v{version} está disponível! Como estás numa rede com tráfego limitado, não a transferimos automaticamente."
   },
   "app.update-popup.changelog": {
     "message": "Lista de alterações"

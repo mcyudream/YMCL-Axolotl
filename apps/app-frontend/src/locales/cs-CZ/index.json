@@ -66,7 +66,7 @@
     "message": "Pokročilé vykreslování"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Vyberte si váš preferovaný motiv pro aplikaci Axolotl Launcher."
+    "message": "Vyberte si váš preferovaný motiv pro aplikaci YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Barevný motiv"
@@ -534,10 +534,10 @@
     "message": "Přihlásit se"
   },
   "app.skins.sign-in.description": {
-    "message": "Přihlas se prosím ke svému Minecraft účtu, abys mohl/a využívat funkce pro správu skinů v aplikaci Axolotl Launcher."
+    "message": "Přihlas se prosím ke svému Minecraft účtu, abys mohl/a využívat funkce pro správu skinů v aplikaci YMCL (YuDream Launcher)."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Přihlaš se prosím"
@@ -546,10 +546,10 @@
     "message": "Výběr skinu"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Stahování Axolotl Launcher v{version} bylo dokončeno. Aktualizujte ji znovunačtením nebo se automaticky aktualizuje po zavření."
+    "message": "Stahování YMCL (YuDream Launcher) v{version} bylo dokončeno. Aktualizujte ji znovunačtením nebo se automaticky aktualizuje po zavření."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} je nyní k dispozici! Protože jste v měřené síti, nebyla stažena automaticky."
+    "message": "YMCL (YuDream Launcher) v{version} je nyní k dispozici! Protože jste v měřené síti, nebyla stažena automaticky."
   },
   "app.update-popup.changelog": {
     "message": "Seznam změn"

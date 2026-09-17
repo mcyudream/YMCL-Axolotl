@@ -48,10 +48,10 @@
     "message": "Se descarcă v{version}"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Aplicația Axolotl Launcherv{version} a terminat descărcarea. Reîncărcați pentru a actualiza acum sau automat când închideți aplicația Axolotl Launcher."
+    "message": "Aplicația YMCL (YuDream Launcher)v{version} a terminat descărcarea. Reîncărcați pentru a actualiza acum sau automat când închideți aplicația YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "Aplicația Axolotl Launcherv{version} este disponibil acum! Deoarece sunteți într-o rețea cu contorizare, nu am descărcat-o automat."
+    "message": "Aplicația YMCL (YuDream Launcher)v{version} este disponibil acum! Deoarece sunteți într-o rețea cu contorizare, nu am descărcat-o automat."
   },
   "app.update-popup.changelog": {
     "message": "Jurnalul modificărilor"

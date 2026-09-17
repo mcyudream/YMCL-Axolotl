@@ -42,7 +42,7 @@
     "message": "Pemaparan lanjutan"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Pilih tema warna pilihan anda untuk Axolotl Launcher."
+    "message": "Pilih tema warna pilihan anda untuk YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Tema warna"
@@ -369,10 +369,10 @@
     "message": "Daftar Masuk"
   },
   "app.skins.sign-in.description": {
-    "message": "Sila daftar masuk ke akaun Minecraft anda untuk menggunakan ciri pengurusan kekulit milik Axolotl Launcher."
+    "message": "Sila daftar masuk ke akaun Minecraft anda untuk menggunakan ciri pengurusan kekulit milik YMCL (YuDream Launcher)."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Sila daftar masuk"
@@ -381,10 +381,10 @@
     "message": "Pemilih kekulit"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} sudah selesai dimuat turun! Muat semula untuk kemas kini sekarang, atau kemas kini secara automatik apabila anda menutup Axolotl Launcher."
+    "message": "YMCL (YuDream Launcher) v{version} sudah selesai dimuat turun! Muat semula untuk kemas kini sekarang, atau kemas kini secara automatik apabila anda menutup YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} kini tersedia! Memandangkan anda sedang menggunakan rangkaian bermeter, kami tidak memuat turunnya secara automatik."
+    "message": "YMCL (YuDream Launcher) v{version} kini tersedia! Memandangkan anda sedang menggunakan rangkaian bermeter, kami tidak memuat turunnya secara automatik."
   },
   "app.update-popup.changelog": {
     "message": "Log perubahan"

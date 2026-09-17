@@ -45,7 +45,7 @@
     "message": "高度なレンダリング"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Axolotl Launcherでのお好みのテーマを選択してください。"
+    "message": "YMCL (YuDream Launcher)でのお好みのテーマを選択してください。"
   },
   "app.appearance-settings.color-theme.title": {
     "message": "テーマ"
@@ -321,13 +321,13 @@
     "message": "タイニー・テイクオーバー"
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} のダウンロードが完了しました。今すぐ更新するには再読み込みするか、Axolotl Launcherを閉じる際に自動更新されます。"
+    "message": "YMCL (YuDream Launcher) v{version} のダウンロードが完了しました。今すぐ更新するには再読み込みするか、YMCL (YuDream Launcher)を閉じる際に自動更新されます。"
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} が利用可能になりました！お使いのネットワークが従量制のため、自動ダウンロードは行っておりません。"
+    "message": "YMCL (YuDream Launcher) v{version} が利用可能になりました！お使いのネットワークが従量制のため、自動ダウンロードは行っておりません。"
   },
   "app.update-popup.changelog": {
     "message": "更新履歴"

@@ -51,7 +51,7 @@
     "message": "Masalimuot na pagrerender"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Piliin ang iyong mas gustong kulay para sa Axolotl Launcher."
+    "message": "Piliin ang iyong mas gustong kulay para sa YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Tema ng kulay"
@@ -315,10 +315,10 @@
     "message": "Modrinth"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Tapos nang ma-download ang Axolotl Launcher v{version}. Mag-reload upang ma-update ngayon, o awtomatiko sa pagsara ng Axolotl Launcher."
+    "message": "Tapos nang ma-download ang YMCL (YuDream Launcher) v{version}. Mag-reload upang ma-update ngayon, o awtomatiko sa pagsara ng YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "Magagamit na ngayon ang Axolotl Launcher v{version}! Hindi namin dinanload kaagad dahil naka-metro ang inyong network."
+    "message": "Magagamit na ngayon ang YMCL (YuDream Launcher) v{version}! Hindi namin dinanload kaagad dahil naka-metro ang inyong network."
   },
   "app.update-popup.changelog": {
     "message": "Changelog"

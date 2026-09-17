@@ -66,7 +66,7 @@
     "message": "Edistynyt renderointi"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Valitse haluamasi väriteema Axolotl Launcherille."
+    "message": "Valitse haluamasi väriteema YMCL (YuDream Launcher)ille."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Väriteema"
@@ -534,10 +534,10 @@
     "message": "Kirjaudu sisään"
   },
   "app.skins.sign-in.description": {
-    "message": "Kirjaudu Minecraft-tilillesi käyttääksesi Axolotl Launcherin ulkoasujen hallintaominaisuuksia."
+    "message": "Kirjaudu Minecraft-tilillesi käyttääksesi YMCL (YuDream Launcher)in ulkoasujen hallintaominaisuuksia."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Kirjaudu sisään"
@@ -546,10 +546,10 @@
     "message": "Skinivalinta"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher versio {version} on ladattu. Voit käynnistää sovelluksen uudelleen päivittääksesi heti tai antaa päivityksen asentua automaattisesti, kun suljet Axolotl Launcherin."
+    "message": "YMCL (YuDream Launcher) versio {version} on ladattu. Voit käynnistää sovelluksen uudelleen päivittääksesi heti tai antaa päivityksen asentua automaattisesti, kun suljet YMCL (YuDream Launcher)in."
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher versio {version} on nyt saatavilla! Koska käytät käytön mukaan laskutettavaa verkkoa, emme ladannut sitä automaattisesti."
+    "message": "YMCL (YuDream Launcher) versio {version} on nyt saatavilla! Koska käytät käytön mukaan laskutettavaa verkkoa, emme ladannut sitä automaattisesti."
   },
   "app.update-popup.changelog": {
     "message": "Muutosloki"

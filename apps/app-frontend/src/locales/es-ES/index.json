@@ -54,7 +54,7 @@
     "message": "Renderizado avanzado"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "Selecciona tu tema de color preferido para la Axolotl Launcher."
+    "message": "Selecciona tu tema de color preferido para la YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "Tema de color"
@@ -429,10 +429,10 @@
     "message": "Iniciar Sesión"
   },
   "app.skins.sign-in.description": {
-    "message": "Por favor, inicia sesión con tu cuenta de Minecraft para usar las funciones del administrador de skins de Axolotl Launcher."
+    "message": "Por favor, inicia sesión con tu cuenta de Minecraft para usar las funciones del administrador de skins de YMCL (YuDream Launcher)."
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "Por favor, inicia sesión"
@@ -441,10 +441,10 @@
     "message": "Selector de Skin"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} se ha descargado. Actualiza la página ahora o espera a que se actualice automáticamente al cerrar Axolotl Launcher."
+    "message": "YMCL (YuDream Launcher) v{version} se ha descargado. Actualiza la página ahora o espera a que se actualice automáticamente al cerrar YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "¡Axolotl Launcher v{version} ya está disponible! Como estás conectado a una red con tarifa por datos, no la hemos descargado automáticamente."
+    "message": "¡YMCL (YuDream Launcher) v{version} ya está disponible! Como estás conectado a una red con tarifa por datos, no la hemos descargado automáticamente."
   },
   "app.update-popup.changelog": {
     "message": "Registro de cambios"

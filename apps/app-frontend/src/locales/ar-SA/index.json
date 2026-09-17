@@ -51,7 +51,7 @@
     "message": "العرض المتقدم"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "اختر لون سمتك المفضل من أجل تطبيق Axolotl Launcher."
+    "message": "اختر لون سمتك المفضل من أجل تطبيق YMCL (YuDream Launcher)."
   },
   "app.appearance-settings.color-theme.title": {
     "message": "لون السمة"
@@ -315,10 +315,10 @@
     "message": "اختيار المظهر"
   },
   "app.update-popup.body.download-complete": {
-    "message": "انتهى تنزيل تطبيق Axolotl Launcherv{version}. أعد التحميل للتحديث الآن، أو تلقائيًا عند إغلاق تطبيق Axolotl Launcher."
+    "message": "انتهى تنزيل تطبيق YMCL (YuDream Launcher)v{version}. أعد التحميل للتحديث الآن، أو تلقائيًا عند إغلاق تطبيق YMCL (YuDream Launcher)."
   },
   "app.update-popup.body.metered": {
-    "message": "تطبيق Axolotl Launcherv{version} متاح الآن! وبما أنك متصل بشبكة مقيّدة، لم نقم بتنزيله تلقائيًا."
+    "message": "تطبيق YMCL (YuDream Launcher)v{version} متاح الآن! وبما أنك متصل بشبكة مقيّدة، لم نقم بتنزيله تلقائيًا."
   },
   "app.update-popup.changelog": {
     "message": "سجل التغيير"

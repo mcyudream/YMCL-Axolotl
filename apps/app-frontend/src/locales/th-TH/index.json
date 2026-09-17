@@ -51,7 +51,7 @@
     "message": "การเรนเดอร์ขั้นสูง"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "เลือกธีมสีที่คุณต้องการสำหรับ Axolotl Launcher"
+    "message": "เลือกธีมสีที่คุณต้องการสำหรับ YMCL (YuDream Launcher)"
   },
   "app.appearance-settings.color-theme.title": {
     "message": "ธีมสี"
@@ -426,19 +426,19 @@
     "message": "ลงชื่อเข้าใช้"
   },
   "app.skins.sign-in.description": {
-    "message": "โปรดลงชื่อเข้าใช้บัญชี Minecraft ของคุณเพื่อใช้งานฟีเจอร์จัดการสกินของ Axolotl Launcher"
+    "message": "โปรดลงชื่อเข้าใช้บัญชี Minecraft ของคุณเพื่อใช้งานฟีเจอร์จัดการสกินของ YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.title": {
     "message": "โปรดลงชื่อเข้าใช้"
   },
   "app.update-popup.body.download-complete": {
-    "message": "ดาวน์โหลด Axolotl Launcherv{version} สำเร็จแล้ว เปิดโปรแกรมใหม่อีกครั้งเพื่ออัปเดตตอนนี้ หรือจะรออัปเดตอัตโนมัติ ซึ่งจะเกิดขึ้นเมื่อคุณกดปิดโปรแกรม Axolotl Launcher"
+    "message": "ดาวน์โหลด YMCL (YuDream Launcher)v{version} สำเร็จแล้ว เปิดโปรแกรมใหม่อีกครั้งเพื่ออัปเดตตอนนี้ หรือจะรออัปเดตอัตโนมัติ ซึ่งจะเกิดขึ้นเมื่อคุณกดปิดโปรแกรม YMCL (YuDream Launcher)"
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcherv{version} พร้อมให้บริการแล้ว! แต่เนื่องจากคุณเปิดโหมดจำกัดปริมาณการใช้ข้อมูลเครือข่าย เราจึงไม่ได้อัปเดตเนื้อหาโดยอัตโนมัติ"
+    "message": "YMCL (YuDream Launcher)v{version} พร้อมให้บริการแล้ว! แต่เนื่องจากคุณเปิดโหมดจำกัดปริมาณการใช้ข้อมูลเครือข่าย เราจึงไม่ได้อัปเดตเนื้อหาโดยอัตโนมัติ"
   },
   "app.update-popup.changelog": {
     "message": "บันทึกการเปลี่ยนแปลง"

@@ -423,10 +423,10 @@
     "message": "隱藏至系統匣"
   },
   "app.appearance-settings.close-behavior.title": {
-    "message": "選擇關閉 Axolotl Launcher 的方式"
+    "message": "選擇關閉 YMCL (YuDream Launcher) 的方式"
   },
   "app.appearance-settings.color-theme.description": {
-    "message": "請選擇你偏好的 Axolotl Launcher 色彩主題。"
+    "message": "請選擇你偏好的 YMCL (YuDream Launcher) 色彩主題。"
   },
   "app.appearance-settings.color-theme.title": {
     "message": "色彩主題"
@@ -747,7 +747,7 @@
     "message": "記住我的選擇"
   },
   "app.close-launcher.title": {
-    "message": "選擇關閉 Axolotl Launcher 的方式"
+    "message": "選擇關閉 YMCL (YuDream Launcher) 的方式"
   },
   "app.close-launcher.tray": {
     "message": "隱藏至系統匣"
@@ -759,10 +759,10 @@
     "message": "如果您有更多、更好的想法或建議，歡迎加入我們的 QQ 群組："
   },
   "app.community-announcement.feedback-suffix": {
-    "message": " 上向我們提出。期待與大家共同完善 Axolotl Launcher！"
+    "message": " 上向我們提出。期待與大家共同完善 YMCL (YuDream Launcher)！"
   },
   "app.community-announcement.response": {
-    "message": "自從 Axolotl Launcher 在影片平台宣傳以來，我們收穫了遠超預期的喜愛與關注，同時也收到了許多高品質的回饋與提議。"
+    "message": "自從 YMCL (YuDream Launcher) 在影片平台宣傳以來，我們收穫了遠超預期的喜愛與關注，同時也收到了許多高品質的回饋與提議。"
   },
   "app.community-announcement.thanks": {
     "message": "對於影片評論區裡的留言，我都已盡可能地逐一回覆。承蒙各位厚愛，在此表達最誠摯的感謝！"
@@ -1674,7 +1674,7 @@
     "message": "除錯資訊"
   },
   "app.error.directory-description": {
-    "message": "Axolotl Launcher 無法遷移至所選目錄。請聯絡支援團隊以取得協助，或取消目錄變更。"
+    "message": "YMCL (YuDream Launcher) 無法遷移至所選目錄。請聯絡支援團隊以取得協助，或取消目錄變更。"
   },
   "app.error.directory-title": {
     "message": "無法變更應用程式目錄"
@@ -1692,7 +1692,7 @@
     "message": "與 Microsoft、Xbox 或 Minecraft 服務的連線被拒絕。這些服務可能被 hosts 檔案封鎖，請參考支援文章進行修復。"
   },
   "app.error.loader-description": {
-    "message": "Axolotl Launcher 無法找到此實例所需的載入器版本。"
+    "message": "YMCL (YuDream Launcher) 無法找到此實例所需的載入器版本。"
   },
   "app.error.loader-fix": {
     "message": "請使用下方按鈕修復此實例。"
@@ -1710,7 +1710,7 @@
     "message": "登入 Minecraft"
   },
   "app.error.network-description": {
-    "message": "Axolotl Launcher 連線 Microsoft 服務時遇到問題，這通常是網路連線不佳造成的。請重試；如果問題持續存在，請參考支援文章。"
+    "message": "YMCL (YuDream Launcher) 連線 Microsoft 服務時遇到問題，這通常是網路連線不佳造成的。請重試；如果問題持續存在，請參考支援文章。"
   },
   "app.error.network-issues": {
     "message": "網路問題"
@@ -1731,7 +1731,7 @@
     "message": "正在使用 PC Game Pass、從基岩版轉移，或剛剛購買遊戲？"
   },
   "app.error.permissions-description": {
-    "message": "Axolotl Launcher 無法寫入所選目錄。請調整目錄權限後重試，或取消目錄變更。"
+    "message": "YMCL (YuDream Launcher) 無法寫入所選目錄。請調整目錄權限後重試，或取消目錄變更。"
   },
   "app.error.permissions-title": {
     "message": "變更目錄權限"
@@ -1749,7 +1749,7 @@
     "message": "空間不足"
   },
   "app.error.state-description": {
-    "message": "Axolotl Launcher 未能正確載入，可能有檔案損毀或缺少必要檔案。"
+    "message": "YMCL (YuDream Launcher) 未能正確載入，可能有檔案損毀或缺少必要檔案。"
   },
   "app.error.state-fix-internet": {
     "message": "檢查網路連線，然後重新啟動應用程式。"
@@ -1761,7 +1761,7 @@
     "message": "重新下載並安裝應用程式。"
   },
   "app.error.state-title": {
-    "message": "Axolotl Launcher 初始化失敗"
+    "message": "YMCL (YuDream Launcher) 初始化失敗"
   },
   "app.error.support-article": {
     "message": "支援文章"
@@ -3555,7 +3555,7 @@
     "message": "紅石"
   },
   "app.lab.recipe-generator.copyright.disclaimer-body": {
-    "message": "Minecraft 素材版權歸 Mojang Studios / Microsoft 所有，僅用於識別相容的遊戲內容。Axolotl Launcher 與 Mojang Studios 或 Microsoft 無關聯，也未獲得其認可。"
+    "message": "Minecraft 素材版權歸 Mojang Studios / Microsoft 所有，僅用於識別相容的遊戲內容。YMCL (YuDream Launcher) 與 Mojang Studios 或 Microsoft 無關聯，也未獲得其認可。"
   },
   "app.lab.recipe-generator.copyright.disclaimer-heading": {
     "message": "非官方工具"
@@ -4335,13 +4335,13 @@
     "message": "複製 /tp"
   },
   "app.lab.seed-map.copyright.disclaimer-body": {
-    "message": "Minecraft 是 Mojang Synergies AB 的商標。Axolotl Launcher 與 Mojang 或 MinecraftSearch 均無隸屬關係，也未獲得其認可。"
+    "message": "Minecraft 是 Mojang Synergies AB 的商標。YMCL (YuDream Launcher) 與 Mojang 或 MinecraftSearch 均無隸屬關係，也未獲得其認可。"
   },
   "app.lab.seed-map.copyright.disclaimer-heading": {
     "message": "非官方工具"
   },
   "app.lab.seed-map.copyright.engine-body": {
-    "message": "群系、地形、出生點與結構數據由 cubiomes 和 Axolotl 原生集成在本地生成。cubiomes 版權所有 (c) 2020 Cubitect，並依據 MIT 許可證提供。"
+    "message": "群系、地形、出生點與結構數據由 cubiomes 和 YMCL 原生集成在本地生成。cubiomes 版權所有 (c) 2020 Cubitect，並依據 MIT 許可證提供。"
   },
   "app.lab.seed-map.copyright.engine-heading": {
     "message": "本地地圖引擎"
@@ -5646,10 +5646,10 @@
     "message": "瀏覽時直接翻譯 Modrinth 項目的標題、摘要和介紹。保留原文、雙語同屏，或者讓譯文站 C 位，都由你決定。"
   },
   "app.onboarding.translation.title": {
-    "message": "翻譯，是 Axolotl 的拿手活"
+    "message": "翻譯，是 YMCL 的拿手活"
   },
   "app.onboarding.updates.description": {
-    "message": "決定 Axolotl 何時檢查更新，以及是否替你安裝。"
+    "message": "決定 YMCL 何時檢查更新，以及是否替你安裝。"
   },
   "app.onboarding.updates.title": {
     "message": "保持在線"
@@ -5658,7 +5658,7 @@
     "message": "實例、內容、世界和下載，現在都有了同一個家。正式開玩之前，先快速逛一圈。"
   },
   "app.onboarding.welcome.footer": {
-    "message": "你的最後一款啟動器"
+    "message": "一款專為to B設計的啟動器，由YuDream Admin Skin驅動。"
   },
   "app.onboarding.welcome.title": {
     "message": "一切就緒"
@@ -5673,7 +5673,7 @@
     "message": "Discord 執行時顯示你當前使用啟動器或遊玩的狀態。"
   },
   "app.privacy-consent.intro": {
-    "message": "選擇 Axolotl 可以傳送或展示的內容。確認前不會傳送任何遙測。"
+    "message": "選擇 YMCL 可以傳送或展示的內容。確認前不會傳送任何遙測。"
   },
   "app.privacy-consent.privacy-policy": {
     "message": "閱讀隱私政策"
@@ -6405,7 +6405,7 @@
     "message": "{loader} 伺服器端暫不支援"
   },
   "app.servers.modpack.unsupported-loader-description": {
-    "message": "此整合包使用 {loader}，但 Axolotl 目前僅支援原版、Fabric 與 Quilt 整合包伺服器端。{loader} 支援即將推出。"
+    "message": "此整合包使用 {loader}，但 YMCL 目前僅支援原版、Fabric 與 Quilt 整合包伺服器端。{loader} 支援即將推出。"
   },
   "app.settings.about.afdian": {
     "message": "在愛發電贊助"
@@ -6414,7 +6414,10 @@
     "message": "支持專案持續開發"
   },
   "app.settings.about.attribution": {
-    "message": "Axolotl Launcher 是開源專案 Modrinth 程式碼庫的修改版本。"
+    "message": "YMCL (YuDream Launcher) 是基於開源啟動器 Axolotl（美西螈）二次開發的開源 Minecraft 啟動器。"
+  },
+  "app.settings.about.based-on-axolotl": {
+    "message": "基於美西螈（Axolotl）二次開發"
   },
   "app.settings.about.community-support": {
     "message": "專案與社群"
@@ -6432,7 +6435,7 @@
     "message": "複製群組號碼"
   },
   "app.settings.about.description": {
-    "message": "你的最後一款啟動器。"
+    "message": "一款專為to B設計的啟動器，由YuDream Admin Skin驅動。"
   },
   "app.settings.about.developer-tools": {
     "message": "開發工具"
@@ -6444,7 +6447,7 @@
     "message": "授權條款與來源聲明"
   },
   "app.settings.about.not-affiliated": {
-    "message": "Modrinth 是 Rinth, Inc. 的商標。Axolotl Launcher 與 Rinth, Inc. 無關聯，亦未獲得其認可。"
+    "message": "Modrinth 是 Rinth, Inc. 的商標。YMCL (YuDream Launcher) 與 Rinth, Inc. 無關聯，亦未獲得其認可。"
   },
   "app.settings.about.original-source": {
     "message": "Modrinth 原始碼"
@@ -6483,7 +6486,7 @@
     "message": "調查問卷"
   },
   "app.settings.about.survey-description": {
-    "message": "幫助我們改進 Axolotl Launcher"
+    "message": "幫助我們改進 YMCL (YuDream Launcher)"
   },
   "app.settings.about.test-error": {
     "message": "觸發測試錯誤"
@@ -6720,13 +6723,13 @@
     "message": "應用程式快取"
   },
   "app.settings.resources.app-cache-description": {
-    "message": "Axolotl Launcher 會快取資料以加快載入速度。清除快取會強制應用程式重新載入資料，並可能暫時降低速度。"
+    "message": "YMCL (YuDream Launcher) 會快取資料以加快載入速度。清除快取會強制應用程式重新載入資料，並可能暫時降低速度。"
   },
   "app.settings.resources.app-directory": {
     "message": "應用程式目錄"
   },
   "app.settings.resources.axolotl-data-directory": {
-    "message": "Axolotl 資料目錄"
+    "message": "YMCL 資料目錄"
   },
   "app.settings.resources.app-directory-description": {
     "message": "啟動器用於儲存全部遊戲檔案的目錄。變更後將在重新啟動啟動器後生效。"
@@ -6738,7 +6741,7 @@
     "message": "Minecraft 目錄"
   },
   "app.settings.resources.minecraft-directories-description": {
-    "message": "新增一或多個供實例使用的外部 .minecraft 資料夾。這些資料夾會與 Axolotl 資料分開保存。"
+    "message": "新增一或多個供實例使用的外部 .minecraft 資料夾。這些資料夾會與 YMCL 資料分開保存。"
   },
   "app.settings.resources.minecraft-directory-mode": {
     "message": "遊戲目錄模式"
@@ -7152,7 +7155,7 @@
     "message": "將 Release 資料複製到 Beta？"
   },
   "app.settings.updates.channel.description": {
-    "message": "選擇 Axolotl 接收的啟動器版本。"
+    "message": "選擇 YMCL 接收的啟動器版本。"
   },
   "app.settings.updates.channel.label": {
     "message": "管道"
@@ -7164,7 +7167,7 @@
     "message": "穩定且經過測試的新功能與修正，更新頻率較慢。"
   },
   "app.settings.updates.channel.restart-description": {
-    "message": "立即重新啟動 Axolotl 以開始使用新的更新管道，或稍後手動重新啟動。"
+    "message": "立即重新啟動 YMCL 以開始使用新的更新管道，或稍後手動重新啟動。"
   },
   "app.settings.updates.channel.restart-development-description": {
     "message": "手動重新啟動開發工作階段後，新的更新管道才會生效。"
@@ -7203,7 +7206,7 @@
     "message": "資料庫隔離"
   },
   "app.settings.updates.database-operation.active-target": {
-    "message": "無法覆寫目前正在使用的資料庫。請先重新啟動 Axolotl 並切換更新管道。"
+    "message": "無法覆寫目前正在使用的資料庫。請先重新啟動 YMCL 並切換更新管道。"
   },
   "app.settings.updates.database-operation.beta-to-release": {
     "message": "從 Beta 複製到 Release"
@@ -7221,7 +7224,7 @@
     "message": "覆寫資料庫？"
   },
   "app.settings.updates.database-operation.failed": {
-    "message": "無法複製資料庫。請確認 Axolotl 未在使用目標資料庫。"
+    "message": "無法複製資料庫。請確認 YMCL 未在使用目標資料庫。"
   },
   "app.settings.updates.database-operation.label": {
     "message": "資料庫操作"
@@ -7293,7 +7296,7 @@
     "message": "更新管道"
   },
   "app.settings.updates.up-to-date": {
-    "message": "Axolotl 已是最新版本。"
+    "message": "YMCL 已是最新版本。"
   },
   "app.sidebar.collapse": {
     "message": "收起邊欄"
@@ -7437,13 +7440,13 @@
     "message": "小鬼當家"
   },
   "app.skins.sign-in.axolotl-alt": {
-    "message": "Axolotl Launcher"
+    "message": "YMCL (YuDream Launcher)"
   },
   "app.skins.sign-in.button": {
     "message": "登入"
   },
   "app.skins.sign-in.description": {
-    "message": "請登入你的 Minecraft 帳號以使用 Axolotl Launcher 的外觀管理功能。"
+    "message": "請登入你的 Minecraft 帳號以使用 YMCL (YuDream Launcher) 的外觀管理功能。"
   },
   "app.skins.sign-in.title": {
     "message": "請登入"
@@ -7476,7 +7479,7 @@
     "message": "填寫問卷"
   },
   "app.survey-promotion.intro": {
-    "message": "為了更好地改進 Axolotl Launcher，我們準備了一份簡短的調查問卷，期待聽到你的回饋。"
+    "message": "為了更好地改進 YMCL (YuDream Launcher)，我們準備了一份簡短的調查問卷，期待聽到你的回饋。"
   },
   "app.survey-promotion.reward": {
     "message": "我們將從填寫問卷的使用者中抽取幸運使用者，贈送 Minecraft 正版帳號（可折現）。"
@@ -7680,16 +7683,16 @@
     "message": "此版本暫未內建更新公告，請前往官網查看完整更新日誌。"
   },
   "app.update-announcement.unknown-title": {
-    "message": "Axolotl Launcher 已更新"
+    "message": "YMCL (YuDream Launcher) 已更新"
   },
   "app.update-announcement.version": {
     "message": "版本 {version}"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Axolotl Launcher v{version} 已完成下載！立即重新載入以更新，或在關閉 Axolotl Launcher 時自動更新。"
+    "message": "YMCL (YuDream Launcher) v{version} 已完成下載！立即重新載入以更新，或在關閉 YMCL (YuDream Launcher) 時自動更新。"
   },
   "app.update-popup.body.metered": {
-    "message": "Axolotl Launcher v{version} 現已推出！由於你目前使用的是計量付費網路，我們並未自動下載更新。"
+    "message": "YMCL (YuDream Launcher) v{version} 現已推出！由於你目前使用的是計量付費網路，我們並未自動下載更新。"
   },
   "app.update-popup.changelog": {
     "message": "更新日誌"
@@ -7719,7 +7722,7 @@
     "message": "正在安裝版本 {version}"
   },
   "app.warning.running-as-admin": {
-    "message": "Axolotl 正在以系統管理員身分執行。此模式無法拖曳匯入檔案，請以一般權限重新啟動啟動器。"
+    "message": "YMCL 正在以系統管理員身分執行。此模式無法拖曳匯入檔案，請以一般權限重新啟動啟動器。"
   },
   "app.world-editor.allow-commands.label": {
     "message": "允許作弊"
@@ -8166,7 +8169,7 @@
     "message": "光影包"
   },
   "drop.help.title": {
-    "message": "我可以拖入什麼到 Axolotl？"
+    "message": "我可以拖入什麼到 YMCL？"
   },
   "drop.help.worlds-desc": {
     "message": "拖放存檔文件夾來導入到實例。"
@@ -9075,7 +9078,7 @@
     "message": "{count} 個精確選擇"
   },
   "instance.upgrade.customize.custom.description": {
-    "message": "為所選內容固定精確版本，其餘相依關係由 Axolotl 求解。"
+    "message": "為所選內容固定精確版本，其餘相依關係由 YMCL 求解。"
   },
   "instance.upgrade.customize.custom.discard-switch": {
     "message": "捨棄並切換"
@@ -9180,7 +9183,7 @@
     "message": "繼續前請處理自訂衝突。"
   },
   "instance.upgrade.customize.search-limit.body": {
-    "message": "Axolotl 無法在搜尋上限內找到方案。請放寬一項自訂選擇。"
+    "message": "YMCL 無法在搜尋上限內找到方案。請放寬一項自訂選擇。"
   },
   "instance.upgrade.customize.search-limit.title": {
     "message": "已達搜尋上限"
