@@ -15,6 +15,7 @@ use theseus::{
 use tokio::time::Instant;
 use url::Url;
 
+/// Axolotl Update Server 默认地址（兼容回退）。
 const UPDATE_SERVER_LATEST_URL: &str = "https://update.axlmc.org/latest";
 const UPDATE_SERVER_API: &str = "https://update.axlmc.org/api/versions";
 const UPDATE_SERVER_BASE: &str = "https://update.axlmc.org/";
@@ -23,6 +24,9 @@ const UPDATE_SERVER_BASE: &str = "https://update.axlmc.org/";
 // connection would hang the download forever. Bound the whole download.
 const UPDATE_DOWNLOAD_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(15 * 60);
+
+/// 最近一次检查更新使用的 YMCL 更新平台 base（apt 下载复用）。
+static ACTIVE_UPDATE_BASE: Mutex<Option<String>> = Mutex::new(None);
 
 // ── Shared types ─────────────────────────────────────────────────
 
@@ -64,6 +68,8 @@ struct ArtifactEntry {
     architecture: String,
     relative_path: String,
     #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
     sha256: Option<String>,
     #[serde(default)]
     size: u64,
@@ -78,6 +84,93 @@ struct AptDebAsset {
     size: u64,
 }
 
+/// YMCL 自有更新平台（yda ymcl-content）API base。
+/// 优先级：invoke 参数 > 运行时 env YMCL_UPDATE_BASE_URL > None（Axolotl 回退）。
+fn resolve_update_base(update_base: Option<String>) -> Option<String> {
+    if let Some(value) = update_base {
+        let trimmed = value.trim().trim_end_matches('/').to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    std::env::var("YMCL_UPDATE_BASE_URL")
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            ACTIVE_UPDATE_BASE
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone())
+        })
+}
+
+fn remember_update_base(update_base: Option<String>) {
+    if let Ok(mut guard) = ACTIVE_UPDATE_BASE.lock() {
+        *guard = resolve_update_base(update_base);
+    }
+}
+
+fn update_manifest_endpoint(update_base: Option<String>) -> Result<Url> {
+    let url = if let Some(base) = resolve_update_base(update_base) {
+        format!("{base}/manifest")
+    } else {
+        std::env::var("YMCL_UPDATE_LATEST_URL")
+            .unwrap_or_else(|_| UPDATE_SERVER_LATEST_URL.to_string())
+    };
+    Url::parse(url.trim().trim_end_matches('/')).map_err(|error| {
+        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+    })
+}
+
+fn update_versions_endpoint(update_base: Option<String>) -> String {
+    if let Some(base) = resolve_update_base(update_base) {
+        return format!("{base}/versions");
+    }
+    std::env::var("YMCL_UPDATE_VERSIONS_URL")
+        .unwrap_or_else(|_| UPDATE_SERVER_API.to_string())
+}
+
+fn update_site_origin(update_base: Option<String>) -> String {
+    if let Some(base) = resolve_update_base(update_base) {
+        if let Ok(url) = Url::parse(&base) {
+            return url.origin().ascii_serialization();
+        }
+    }
+    std::env::var("YMCL_UPDATE_SERVER_BASE")
+        .unwrap_or_else(|_| UPDATE_SERVER_BASE.to_string())
+}
+
+fn artifact_download_url(entry: &ArtifactEntry, update_base: Option<String>) -> Result<Url> {
+    if let Some(url) = entry
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| value.starts_with("http://") || value.starts_with("https://"))
+    {
+        return Url::parse(url).map_err(|error| {
+            theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+        });
+    }
+
+    let relative = entry.relative_path.trim();
+    if relative.starts_with("http://") || relative.starts_with("https://") {
+        return Url::parse(relative).map_err(|error| {
+            theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+        });
+    }
+
+    let origin = update_site_origin(update_base);
+    let joined = format!(
+        "{}/{}",
+        origin.trim_end_matches('/'),
+        relative.trim_start_matches('/')
+    );
+    Url::parse(&joined).map_err(|error| {
+        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+    })
+}
+
 fn apt_deb_arch() -> Result<&'static str> {
     match std::env::consts::ARCH {
         "x86_64" => Ok("amd64"),
@@ -89,12 +182,13 @@ fn apt_deb_arch() -> Result<&'static str> {
     }
 }
 
-async fn fetch_apt_deb_asset(version: &str) -> Result<AptDebAsset> {
+async fn fetch_apt_deb_asset(version: &str, update_base: Option<String>) -> Result<AptDebAsset> {
+    let catalog_url = update_versions_endpoint(update_base.clone());
     let response = ClientBuilder::new()
         .user_agent(launcher_user_agent())
         .timeout(UPDATE_DOWNLOAD_TIMEOUT)
         .build()?
-        .get(UPDATE_SERVER_API)
+        .get(&catalog_url)
         .send()
         .await?;
 
@@ -139,13 +233,7 @@ async fn fetch_apt_deb_asset(version: &str) -> Result<AptDebAsset> {
         )))
     })?;
 
-    let url =
-        Url::parse(&format!("{UPDATE_SERVER_BASE}{}", artifact.relative_path))
-            .map_err(|error| {
-                theseus::Error::from(theseus::ErrorKind::OtherError(
-                    error.to_string(),
-                ))
-            })?;
+    let url = artifact_download_url(artifact, update_base)?;
 
     Ok(AptDebAsset {
         url,
@@ -182,17 +270,11 @@ fn update_platform() -> Result<&'static str> {
     }
 }
 
-fn update_endpoint() -> Result<Url> {
-    Url::parse(UPDATE_SERVER_LATEST_URL).map_err(|error| {
-        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string()))
-            .into()
-    })
-}
-
 /// Build the platform-updater with the given endpoints and run a check.
 async fn check_with_endpoints<R: Runtime>(
     webview: &Webview<R>,
     channel: &str,
+    update_base: Option<String>,
 ) -> Result<Option<Update>> {
     let channel = update_channel(channel)?;
     let platform = update_platform()?;
@@ -200,11 +282,11 @@ async fn check_with_endpoints<R: Runtime>(
         webview.app_handle().package_info().version.to_string();
     let mut updater = webview
         .updater_builder()
-        .endpoints(vec![update_endpoint()?])?
+        .endpoints(vec![update_manifest_endpoint(update_base)?])?
         .header("Accept", "application/json")?
-        .header("X-Axolotl-Channel", channel)?
-        .header("X-Axolotl-Platform", platform)?
-        .header("X-Axolotl-Version", current_version)?;
+        .header("X-YMCL-Channel", channel)?
+        .header("X-YMCL-Platform", platform)?
+        .header("X-YMCL-Version", current_version)?;
 
     #[cfg(target_os = "windows")]
     {
@@ -240,8 +322,10 @@ async fn check_with_endpoints<R: Runtime>(
 async fn check_with_updater<R: Runtime>(
     webview: &Webview<R>,
     channel: &str,
+    update_base: Option<String>,
 ) -> Result<Option<UpdateMetadata>> {
-    let Some(mut update) = check_with_endpoints(webview, channel).await? else {
+    remember_update_base(update_base.clone());
+    let Some(mut update) = check_with_endpoints(webview, channel, update_base.clone()).await? else {
         return Ok(None);
     };
     update.timeout = Some(UPDATE_DOWNLOAD_TIMEOUT);
@@ -251,7 +335,7 @@ async fn check_with_updater<R: Runtime>(
     // Update Server catalog instead of the AppImage artifact. Its integrity
     // is verified with the catalog's sha256/size during the download.
     if is_apt_linux() {
-        update.download_url = fetch_apt_deb_asset(&update.version).await?.url;
+        update.download_url = fetch_apt_deb_asset(&update.version, update_base).await?.url;
     }
 
     let published_at = update
@@ -284,8 +368,9 @@ async fn check_with_updater<R: Runtime>(
 pub async fn check_app_update<R: Runtime>(
     webview: Webview<R>,
     channel: String,
+    update_base: Option<String>,
 ) -> Result<Option<UpdateMetadata>> {
-    check_with_updater(&webview, &channel).await
+    check_with_updater(&webview, &channel, update_base).await
 }
 
 // Reimplementation of Update::download mostly, minus the actual download part
@@ -360,7 +445,7 @@ pub async fn enqueue_update_for_installation<R: Runtime>(
         // The .deb carries no minisign signature, so the plugin's signed
         // download cannot be used. Fetch the catalog entry and verify the
         // downloaded bytes against its sha256 and size instead.
-        let asset = fetch_apt_deb_asset(&update.version).await?;
+        let asset = fetch_apt_deb_asset(&update.version, None).await?;
 
         let mut headers = update.headers.clone();
         if !headers.contains_key(ACCEPT) {
@@ -478,7 +563,7 @@ pub fn remove_enqueued_update<R: Runtime>(webview: Webview<R>) {
 
 // ── Debian / derivatives apt update ─────────────────────────────
 
-/// Whether this Linux system updates Axolotl through apt (Debian and its
+/// Whether this Linux system updates YMCL through apt (Debian and its
 /// derivatives) and has `pkexec` available for a single privileged prompt.
 #[tauri::command]
 pub fn is_apt_linux() -> bool {
@@ -512,7 +597,7 @@ pub async fn install_apt_package(version: &str, data: &[u8]) -> Result<()> {
 
     let arch = apt_deb_arch()?;
     let deb_path = std::env::temp_dir()
-        .join(format!("Axolotl.Launcher_{version}_{arch}.deb"));
+        .join(format!("YMCL.Launcher_{version}_{arch}.deb"));
     std::fs::write(&deb_path, data).map_err(|io| {
         theseus::Error::from(theseus::ErrorKind::OtherError(format!(
             "Failed to write the downloaded deb: {io}"

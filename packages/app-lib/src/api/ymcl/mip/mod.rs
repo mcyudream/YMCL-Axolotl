@@ -3,7 +3,9 @@
 //! and atomic apply. Sub-modules split the responsibilities.
 pub mod apply;
 pub mod diff;
+pub mod first_install;
 pub mod manifest;
+pub mod mirrors;
 pub mod publish;
 pub mod state;
 pub mod update;

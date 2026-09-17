@@ -31,8 +31,20 @@ pub struct YmclAuthMethod {
     pub client_id: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "providers_endpoint")]
     pub providers_url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct YmclRegistrationConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub verification_methods_endpoint: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -41,6 +53,8 @@ pub struct YmclAuthConfig {
     pub required: bool,
     #[serde(default)]
     pub methods: Vec<YmclAuthMethod>,
+    #[serde(default)]
+    pub registration: Option<YmclRegistrationConfig>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -57,6 +71,10 @@ pub struct YmclCapabilities {
     pub auth: Option<YmclAuthConfig>,
     #[serde(default)]
     pub mip: Option<MipEndpointConfig>,
+    /// Skin wardrobe face (YAP §6.11). Present when `capabilities`
+    /// contains `skins`; `base_url` defaults to `{YAP_API_BASE}/skins`.
+    #[serde(default)]
+    pub skins: Option<SkinsEndpointConfig>,
 }
 
 /// MIP distribution face advertised by the adapter (YAP §7).
@@ -66,12 +84,19 @@ pub struct MipEndpointConfig {
     pub base_url: Option<String>,
 }
 
+/// Skin wardrobe face advertised by the adapter (YAP §6.11).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SkinsEndpointConfig {
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct YmclNavigationItem {
     pub id: String,
     #[serde(default)]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, alias = "pageId")]
     pub page_id: Option<String>,
     #[serde(default)]
     pub route: Option<String>,
@@ -81,8 +106,19 @@ pub struct YmclNavigationItem {
     pub icon: Option<String>,
     #[serde(default)]
     pub sort: i64,
-    #[serde(default)]
+    #[serde(default, alias = "requiredPermission")]
     pub required_permission: Option<String>,
+    /// Admin console enable toggle. Must round-trip: the frontend filters
+    /// disabled entries out of the sidebar.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+    /// Nested entries (目录 → 子菜单 → 子菜单, YAP §6.5 extension). Adapters
+    /// that only send a flat tree omit the field; the serde default keeps
+    /// those payloads compatible. Admin dialects also use subMenus/items/tabs.
+    #[serde(default, alias = "subMenus", alias = "items", alias = "tabs")]
+    pub children: Vec<YmclNavigationItem>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -92,7 +128,7 @@ pub struct YmclPageDescriptor {
     pub renderer: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "dataSource")]
     pub data_source: Option<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
@@ -108,11 +144,11 @@ pub struct YmclManifest {
     pub protocol_version: u32,
     #[serde(default)]
     pub domain: Option<YmclDomainIdentity>,
-    #[serde(default)]
+    #[serde(default, alias = "nav", alias = "menu")]
     pub navigation: Vec<YmclNavigationItem>,
     #[serde(default)]
     pub pages: Vec<YmclPageDescriptor>,
-    #[serde(default)]
+    #[serde(default, alias = "dataSources")]
     pub data_sources: Vec<serde_json::Value>,
     #[serde(default)]
     pub actions: Option<serde_json::Value>,

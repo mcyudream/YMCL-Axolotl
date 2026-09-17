@@ -6,8 +6,6 @@ use reqwest::Method;
 
 use super::manifest::YAP_API_BASE;
 use crate::State;
-use crate::state::ymcl_session;
-use crate::util::fetch::fetch_advanced;
 
 pub fn data_url(
     origin: &str,
@@ -43,24 +41,7 @@ pub async fn fetch_data(
         }
     }
 
-    let session = ymcl_session::get(&active, &state.pool).await?;
-    let header = session
-        .as_ref()
-        .map(|session| ("Authorization", session.access_token.clone()));
-
-    let bytes = fetch_advanced(
-        Method::GET,
-        &url,
-        None,
-        None,
-        header.as_ref().map(|(name, value)| (*name, value.as_str())),
-        None,
-        None,
-        None,
-        &state.api_semaphore,
-        &state.pool,
-    )
-    .await?;
+    let bytes = super::auth::domain_request_opt(&state, &active, Method::GET, &url, None).await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -88,21 +69,12 @@ pub async fn execute_action(
         .into());
     }
     let origin = super::registry::domain_origin(&active).await?;
-    let session = ymcl_session::get(&active, &state.pool).await?;
-    let header = session
-        .as_ref()
-        .map(|session| ("Authorization", session.access_token.clone()));
-    let bytes = fetch_advanced(
+    let bytes = super::auth::domain_request_opt(
+        &state,
+        &active,
         Method::POST,
         &action_url(&origin, provider_code, action_code),
-        None,
         Some(params),
-        header.as_ref().map(|(name, value)| (*name, value.as_str())),
-        None,
-        None,
-        None,
-        &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     Ok(serde_json::from_slice(&bytes)?)

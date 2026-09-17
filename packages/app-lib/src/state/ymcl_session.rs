@@ -61,6 +61,21 @@ impl YmclStoredSession {
         self.expires_at
             .is_some_and(|expires| expires <= Utc::now().timestamp())
     }
+
+	/// True when the access token is expired or will expire within `skew_secs`,
+	/// so the API layer can renew it before the host rejects the next request.
+	pub fn needs_refresh(&self, skew_secs: i64) -> bool {
+		let Some(expires) = self.expires_at else {
+			return false;
+		};
+		expires <= Utc::now().timestamp() + skew_secs.max(0)
+	}
+
+	pub fn can_refresh(&self) -> bool {
+		self.refresh_token
+			.as_deref()
+			.is_some_and(|token| !token.trim().is_empty())
+	}
 }
 
 pub async fn get(
@@ -123,6 +138,15 @@ pub async fn remove(domain_id: &str, exec: &SqlitePool) -> crate::Result<()> {
         .execute(exec)
         .await?;
     Ok(())
+}
+
+/// Every domain that still has a stored session row.
+pub async fn list_domain_ids(exec: &SqlitePool) -> crate::Result<Vec<String>> {
+	let rows: Vec<(String,)> =
+		sqlx::query_as("SELECT domain_id FROM ymcl_sessions")
+			.fetch_all(exec)
+			.await?;
+	Ok(rows.into_iter().map(|row| row.0).collect())
 }
 
 pub async fn update_session_info(

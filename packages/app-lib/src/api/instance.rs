@@ -30,7 +30,8 @@ pub use self::core_components::{
     restore_core_component, set_core_component_enabled,
 };
 pub use self::export_mrpack::{
-    create_mrpack_json, export_mrpack, get_pack_export_candidates,
+    build_publish_archive, create_mrpack_json, export_mrpack,
+    get_pack_export_candidates,
 };
 pub use self::get::{get, get_many, list};
 pub use self::home::{

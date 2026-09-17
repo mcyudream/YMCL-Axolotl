@@ -479,6 +479,15 @@ impl Credentials {
         self.account_type == MinecraftAccountType::Yggdrasil
     }
 
+    /// Skins for these accounts are managed locally by the app (own closet +
+    /// the offline skin resource pack applied at launch): offline accounts have
+    /// no server to talk to, and third-party Yggdrasil accounts push skins
+    /// through their skin station, which the launcher only reaches via the
+    /// owning domain's wardrobe — never through the Mojang flow below.
+    pub fn uses_local_skins(&self) -> bool {
+        self.is_offline() || self.is_yggdrasil()
+    }
+
     fn from_stored(stored: StoredCredentials) -> Self {
         let account_type =
             MinecraftAccountType::from_database(&stored.account_type);
@@ -1221,7 +1230,7 @@ const MICROSOFT_AUTHORIZE_URL: &str =
 const MICROSOFT_TOKEN_URL: &str =
     "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 const REQUESTED_SCOPE: &str = "XboxLive.signin offline_access";
-pub const MINECRAFT_SERVICES_USER_AGENT: &str = "Axolotl Launcher";
+pub const MINECRAFT_SERVICES_USER_AGENT: &str = "YMCL (YuDream Launcher)";
 
 pub struct RequestWithDate<T> {
     pub date: DateTime<Utc>,

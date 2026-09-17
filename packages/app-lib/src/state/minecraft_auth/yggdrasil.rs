@@ -607,7 +607,7 @@ async fn response_error(response: reqwest::Response) -> crate::Error {
     ErrorKind::OtherError(message).as_error()
 }
 
-fn create_credentials(
+pub(crate) fn create_credentials(
     profile: YggdrasilProfile,
     access_token: String,
     client_token: String,

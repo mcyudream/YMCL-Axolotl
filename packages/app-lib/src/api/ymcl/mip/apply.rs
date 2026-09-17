@@ -4,7 +4,9 @@
 //! Transaction model:
 //! 1. **Stage** (zero-risk): download every needed object into
 //!    `.pack-staging/`, verifying sha512; copy `Move` sources there too.
-//!    Any failure aborts with the instance untouched.
+//!    Hard failures abort with the instance untouched. Recoverable
+//!    failures (download/checksum) on paths that already exist locally are
+//!    skipped so one bad remote object cannot block the rest of the update.
 //! 2. **Backup**: instance files that will be overwritten or deleted are
 //!    copied into `.pack-backup/`.
 //! 3. **Commit**: move staged content in, apply deletions. On failure the
@@ -15,6 +17,10 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha512};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use crate::event::LoadingBarId;
+use crate::event::LoadingBarType;
+use crate::event::emit::{emit_loading, init_loading};
 
 use super::diff::{ChangeAction, UpdatePlan};
 use super::manifest::{MipFileEntry, MipManifest};
@@ -29,24 +35,141 @@ pub const PACK_NEW_SUFFIX: &str = ".pack-new";
 #[async_trait]
 pub trait ObjectFetcher: Send + Sync {
     /// Fetches the bytes for a manifest entry, trying its sources in order.
-    /// Returns `Err` when every source fails or any checksum mismatches.
+    /// Implementations should verify sha512 per source and advance to the
+    /// next source on mismatch. Returns `Err` when every source fails.
     async fn fetch(&self, entry: &MipFileEntry) -> crate::Result<Vec<u8>>;
 }
 
-fn sha512_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha512_hex(bytes: &[u8]) -> String {
     let digest = Sha512::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub(crate) fn verify_payload(
+    bytes: &[u8],
+    expected: &str,
+    path: &str,
+) -> crate::Result<()> {
+    let actual = sha512_hex(bytes);
+    if actual != expected.to_lowercase() {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "Checksum mismatch for {path}: expected {expected}, got {actual}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// A planned change that could not be applied because every object source
+/// failed; the local file was kept when one already existed.
+#[derive(Clone, Debug)]
+pub struct SkippedFile {
+    pub path: String,
+    pub reason: String,
 }
 
 pub struct ApplyOutcome {
     pub new_state: MipPackState,
     pub staged_files: usize,
     pub deleted_files: usize,
+    pub skipped_files: Vec<SkippedFile>,
+}
+
+/// Per-file progress reporter for the staging download loop, surfaced as a
+/// standard pack-download loading bar (download toast + Downloads page) with
+/// a `(done/total) path` message. Byte-weighted when the manifest carries
+/// sizes; falls back to a flat per-file weight (and the mean known size for
+/// unsized files) so the bar keeps moving either way.
+pub struct ApplyProgress {
+    bar: LoadingBarId,
+    total: f64,
+    finished: f64,
+    byte_weighted: bool,
+    avg_known: f64,
+    count: usize,
+    done: usize,
+}
+
+impl ApplyProgress {
+    /// Creates the loading bar for one apply run; `None` when there is
+    /// nothing to download or the event system is unavailable (tests, CLI).
+    pub async fn create(
+        instance_id: &str,
+        pack_id: &str,
+        target_version: &str,
+        plan: &UpdatePlan,
+        entry_by_path: &HashMap<String, MipFileEntry>,
+    ) -> Option<Self> {
+        if plan.changes.is_empty() {
+            return None;
+        }
+        let known: Vec<u64> = plan
+            .changes
+            .iter()
+            .filter_map(|change| {
+                entry_by_path
+                    .get(&change.path)
+                    .and_then(|entry| entry.size)
+                    .filter(|size| *size > 0)
+            })
+            .collect();
+        let byte_weighted = !known.is_empty();
+        let (total, avg_known) = if byte_weighted {
+            let sum = known.iter().sum::<u64>() as f64;
+            (sum, sum / known.len() as f64)
+        } else {
+            (plan.changes.len() as f64, 0.0)
+        };
+        let bar = init_loading(
+            LoadingBarType::PackFileDownload {
+                instance_id: instance_id.to_string(),
+                pack_name: pack_id.to_string(),
+                icon: None,
+                pack_version: target_version.to_string(),
+            },
+            100.0,
+            &format!("正在更新整合包 {pack_id} → {target_version}"),
+        )
+        .await
+        .ok()?;
+        Some(Self {
+            bar,
+            total,
+            finished: 0.0,
+            byte_weighted,
+            avg_known,
+            count: plan.changes.len(),
+            done: 0,
+        })
+    }
+
+    fn weight(&self, entry: Option<&MipFileEntry>) -> f64 {
+        if !self.byte_weighted {
+            return 1.0;
+        }
+        match entry.and_then(|entry| entry.size).filter(|size| *size > 0) {
+            Some(size) => size as f64,
+            None => self.avg_known,
+        }
+    }
+
+    /// Records one planned change as processed (its download attempted).
+    pub fn step(&mut self, path: &str, entry: Option<&MipFileEntry>) {
+        self.done += 1;
+        let weight = self.weight(entry);
+        self.finished += weight;
+        let _ = emit_loading(
+            &self.bar,
+            ((weight / self.total) * 100.0).max(0.0),
+            Some(&format!("({}/{}) {}", self.done, self.count, path)),
+        );
+    }
 }
 
 /// Applies `plan` to `instance_dir`. `entry_by_path` maps each planned
 /// change path to its target manifest entry. The new state is returned; the
-/// caller persists it ( WF-5 step 9 ) via [`super::state::save`].
+/// caller persists it ( WF-5 step 9 ) via [`super::state::save`]. `progress`
+/// receives one [`ApplyProgress::step`] per attempted change.
 pub async fn apply_update<F>(
     instance_dir: &Path,
     base: &MipPackState,
@@ -54,6 +177,7 @@ pub async fn apply_update<F>(
     plan: &UpdatePlan,
     entry_by_path: &HashMap<String, MipFileEntry>,
     fetcher: &F,
+    mut progress: Option<&mut ApplyProgress>,
 ) -> crate::Result<ApplyOutcome>
 where
     F: ObjectFetcher + ?Sized,
@@ -79,16 +203,22 @@ where
         plan,
         entry_by_path,
         fetcher,
+        progress.as_deref_mut(),
     )
     .await;
-    if let Err(error) = stage_result {
-        tokio::fs::remove_dir_all(&staging).await.ok();
-        return Err(error);
-    }
+    let skipped_files = match stage_result {
+        Ok(skipped) => skipped,
+        Err(error) => {
+            tokio::fs::remove_dir_all(&staging).await.ok();
+            return Err(error);
+        }
+    };
 
     // Backup phase: every instance file about to be overwritten or deleted.
+    // Skipped changes leave the local file alone, so they are not backed up
+    // and are not committed either (nothing was staged for them).
     let mut backed_up: Vec<PathBuf> = Vec::new();
-    let backup_result = backup_targets(instance_dir, &backup, plan).await;
+    let backup_result = backup_targets(instance_dir, &backup, plan, &skipped_files).await;
     if let Err(error) = backup_result {
         restore_backup(instance_dir, &backup).await;
         tokio::fs::remove_dir_all(&staging).await.ok();
@@ -97,7 +227,7 @@ where
     backed_up.push(backup.clone());
 
     // Commit phase: move staged content in, then delete.
-    let commit_result = commit(instance_dir, &staging, plan).await;
+    let commit_result = commit(instance_dir, &staging, plan, &skipped_files).await;
     if let Err(error) = commit_result {
         restore_backup(instance_dir, &backup).await;
         tokio::fs::remove_dir_all(&staging).await.ok();
@@ -109,13 +239,15 @@ where
     tokio::fs::remove_dir_all(&backup).await.ok();
 
     Ok(ApplyOutcome {
-        new_state: build_new_state(base, target, plan, entry_by_path),
-        staged_files: plan.changes.len(),
+        new_state: build_new_state(base, target, plan, entry_by_path, &skipped_files),
+        staged_files: plan.changes.len() - skipped_files.len(),
         deleted_files: plan.deletions.len(),
+        skipped_files,
     })
 }
 
 /// Stage 1: download / copy every planned target into the staging dir.
+/// Returns recoverable skips (local kept) after trying every change.
 async fn stage_all<F>(
     instance_dir: &Path,
     staging: &Path,
@@ -124,10 +256,12 @@ async fn stage_all<F>(
     plan: &UpdatePlan,
     entry_by_path: &HashMap<String, MipFileEntry>,
     fetcher: &F,
-) -> crate::Result<()>
+    mut progress: Option<&mut ApplyProgress>,
+) -> crate::Result<Vec<SkippedFile>>
 where
     F: ObjectFetcher + ?Sized,
 {
+    let mut skipped: Vec<SkippedFile> = Vec::new();
     for change in &plan.changes {
         let Some(entry) = entry_by_path.get(&change.path) else {
             return Err(crate::ErrorKind::OtherError(format!(
@@ -136,6 +270,9 @@ where
             ))
             .into());
         };
+        if let Some(progress) = progress.as_deref_mut() {
+            progress.step(&change.path, Some(entry));
+        }
 
         let destination = staging.join(sanitize(&change.path)?);
         if let Some(parent) = destination.parent() {
@@ -148,7 +285,8 @@ where
                 // download). If the content also changed, the downloaded
                 // bytes replace the copied local content (MIP §6 挪+改).
                 let source = instance_dir.join(sanitize(from)?);
-                if source.exists() {
+                let source_exists = source.exists();
+                if source_exists {
                     tokio::fs::copy(&source, &destination).await?;
                 }
                 if base
@@ -156,46 +294,80 @@ where
                     .get(from.as_str())
                     .is_none_or(|base_file| base_file.sha512 != entry.sha512)
                 {
-                    let bytes = verify(
-                        fetcher.fetch(entry).await?,
-                        &entry.sha512,
-                        &entry.path,
-                    )?;
-                    tokio::fs::write(&destination, bytes).await?;
+                    match fetch_verified(fetcher, entry).await {
+                        Ok(bytes) => {
+                            tokio::fs::write(&destination, bytes).await?;
+                        }
+                        Err(error) if source_exists => {
+                            // Keep the copied local content; report the skip.
+                            tracing::warn!(
+                                "Keeping local {} after move fetch failed: {error}",
+                                change.path
+                            );
+                            skipped.push(SkippedFile {
+                                path: change.path.clone(),
+                                reason: error.to_string(),
+                            });
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
             ChangeAction::SeedIfMissing => {
                 // seed never overwrites: only stage when absent on disk.
                 if !instance_dir.join(sanitize(&change.path)?).exists() {
-                    let bytes = verify(
-                        fetcher.fetch(entry).await?,
-                        &entry.sha512,
-                        &entry.path,
-                    )?;
+                    let bytes = fetch_verified(fetcher, entry).await?;
                     tokio::fs::write(&destination, bytes).await?;
                 }
             }
             ChangeAction::MergeDegrade => {
                 // MIP §9.2 degradation: keep ours, write theirs alongside as
-                // `<path>.pack-new`.
-                let bytes = verify(
-                    fetcher.fetch(entry).await?,
-                    &entry.sha512,
-                    &entry.path,
-                )?;
-                let theirs = staging.join(sanitize(&format!(
-                    "{path}{PACK_NEW_SUFFIX}",
-                    path = change.path
-                ))?);
-                tokio::fs::write(theirs, bytes).await?;
+                // `<path>.pack-new`. When theirs cannot be fetched, keep ours
+                // and skip the sidecar.
+                let local_exists =
+                    instance_dir.join(sanitize(&change.path)?).exists();
+                match fetch_verified(fetcher, entry).await {
+                    Ok(bytes) => {
+                        let theirs = staging.join(sanitize(&format!(
+                            "{path}{PACK_NEW_SUFFIX}",
+                            path = change.path
+                        ))?);
+                        tokio::fs::write(theirs, bytes).await?;
+                    }
+                    Err(error) if local_exists => {
+                        tracing::warn!(
+                            "Skipping merge sidecar for {}: {error}",
+                            change.path
+                        );
+                        skipped.push(SkippedFile {
+                            path: change.path.clone(),
+                            reason: error.to_string(),
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             ChangeAction::Add | ChangeAction::Replace => {
-                let bytes = verify(
-                    fetcher.fetch(entry).await?,
-                    &entry.sha512,
-                    &entry.path,
-                )?;
-                tokio::fs::write(&destination, bytes).await?;
+                let local_exists =
+                    instance_dir.join(sanitize(&change.path)?).exists();
+                match fetch_verified(fetcher, entry).await {
+                    Ok(bytes) => {
+                        tokio::fs::write(&destination, bytes).await?;
+                    }
+                    Err(error) if local_exists => {
+                        // One bad remote object must not block the rest of
+                        // the update when a local copy is already in place.
+                        tracing::warn!(
+                            "Keeping local {} after fetch failed: {error}",
+                            change.path
+                        );
+                        skipped.push(SkippedFile {
+                            path: change.path.clone(),
+                            reason: error.to_string(),
+                        });
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             // Deletions never appear in plan.changes (they live in
             // UpdatePlan.deletions and need no download).
@@ -207,7 +379,26 @@ where
     // manifest reachable for the caller building the report.
     let _ = target;
 
-    Ok(())
+    Ok(skipped)
+}
+
+async fn fetch_verified<F>(
+    fetcher: &F,
+    entry: &MipFileEntry,
+) -> crate::Result<Vec<u8>>
+where
+    F: ObjectFetcher + ?Sized,
+{
+    let bytes = fetcher.fetch(entry).await?;
+    verify_payload(&bytes, &entry.sha512, &entry.path)?;
+    Ok(bytes)
+}
+
+fn is_skipped(
+    skipped: &[SkippedFile],
+    path: &str,
+) -> bool {
+    skipped.iter().any(|item| item.path == path)
 }
 
 /// Stage 2: copy files that commit will overwrite or delete into backup.
@@ -215,9 +406,13 @@ async fn backup_targets(
     instance_dir: &Path,
     backup: &Path,
     plan: &UpdatePlan,
+    skipped: &[SkippedFile],
 ) -> crate::Result<()> {
     let mut targets: Vec<String> = plan.deletions.clone();
     for change in &plan.changes {
+        if is_skipped(skipped, &change.path) {
+            continue;
+        }
         match &change.action {
             ChangeAction::Replace => targets.push(change.path.clone()),
             ChangeAction::Move { from } => targets.push(from.clone()),
@@ -244,8 +439,15 @@ async fn commit(
     instance_dir: &Path,
     staging: &Path,
     plan: &UpdatePlan,
+    skipped: &[SkippedFile],
 ) -> crate::Result<()> {
     for change in &plan.changes {
+        if is_skipped(skipped, &change.path) {
+            // Nothing was staged for this path; leave the local file alone.
+            // A skipped Move still consumes its source only when the
+            // destination was staged — which it was not, so keep the source.
+            continue;
+        }
         let destination = staging.join(sanitize(&change.path)?);
         if !destination.exists() {
             // Seed skipped (file existed) or merge-degrade (ours kept):
@@ -266,6 +468,9 @@ async fn commit(
     }
     // Move sources are consumed by the rename-in of the new path.
     for change in &plan.changes {
+        if is_skipped(skipped, &change.path) {
+            continue;
+        }
         if let ChangeAction::Move { from } = &change.action {
             let source = instance_dir.join(sanitize(from)?);
             if source.exists() {
@@ -341,37 +546,37 @@ fn sanitize(relative: &str) -> crate::Result<PathBuf> {
     Ok(path)
 }
 
-fn verify(
-    bytes: Vec<u8>,
-    expected: &str,
-    path: &str,
-) -> crate::Result<Vec<u8>> {
-    let actual = sha512_hex(&bytes);
-    if actual != expected.to_lowercase() {
-        return Err(crate::ErrorKind::OtherError(format!(
-            "Checksum mismatch for {path}: expected {expected}, got {actual}"
-        ))
-        .into());
-    }
-    Ok(bytes)
-}
-
 /// Builds the post-apply state (MIP WF-5 step 9): target file map, same
-/// channel, feature selections carried over.
+/// channel, feature selections carried over — plus features new in the
+/// target manifest merged in at their default (WF-5 step 2). The feature
+/// selection command overrides this afterwards with the explicit choice.
+/// Skipped paths keep their previous state entry so the next update retries
+/// them.
 fn build_new_state(
     base: &MipPackState,
     target: &MipManifest,
     plan: &UpdatePlan,
     entry_by_path: &HashMap<String, MipFileEntry>,
+    skipped: &[SkippedFile],
 ) -> MipPackState {
     let mut files = base.files.clone();
     for change in &plan.changes {
+        if is_skipped(skipped, &change.path) {
+            // Keep the previous recorded hash for this path (or the Move
+            // source's hash when the rename was staged but content fetch
+            // failed — that case is not skipped for the path itself).
+            if let Some(previous) = base.files.get(&change.path) {
+                files.insert(change.path.clone(), previous.clone());
+            }
+            continue;
+        }
         if let Some(entry) = entry_by_path.get(&change.path) {
             files.insert(
                 change.path.clone(),
                 super::state::StateFile {
                     sha512: entry.sha512.clone(),
                     policy: entry.policy.clone(),
+                    feature: entry.feature.clone(),
                 },
             );
         }
@@ -380,16 +585,33 @@ fn build_new_state(
         files.remove(path);
     }
     // Move sources are consumed by the rename; their base entry goes away.
+    // A skipped Move never completed, so the source entry stays.
     for change in &plan.changes {
+        if is_skipped(skipped, &change.path) {
+            continue;
+        }
         if let ChangeAction::Move { from } = &change.action {
             files.remove(from);
+        }
+    }
+    let mut selected_features = base.selected_features.clone();
+    for feature in &target.features {
+        if feature.default && !selected_features.contains(&feature.id) {
+            selected_features.push(feature.id.clone());
         }
     }
     MipPackState {
         pack_id: target.pack_id.clone(),
         version: target.version.clone(),
         channel: target.channel.clone(),
-        selected_features: base.selected_features.clone(),
+        selected_features,
+        declared_features: Some(
+            target
+                .features
+                .iter()
+                .map(|feature| feature.id.clone())
+                .collect(),
+        ),
         files,
         locked_paths: base.locked_paths.clone(),
         disabled_paths: base.disabled_paths.clone(),
@@ -487,6 +709,7 @@ mod tests {
         StateFile {
             sha512: hash(bytes),
             policy: "managed".to_string(),
+            feature: None,
         }
     }
 
@@ -533,7 +756,7 @@ mod tests {
         ]);
 
         let outcome =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher)
+            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
                 .await
                 .unwrap();
 
@@ -586,7 +809,7 @@ mod tests {
         let fetcher = MemoryFetcher::new(&[]);
 
         let outcome =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher)
+            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
                 .await
                 .unwrap();
 
@@ -626,7 +849,7 @@ mod tests {
             b"author options",
         )]);
 
-        apply_update(instance, &base, &target, &plan, &entries, &fetcher)
+        apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
             .await
             .unwrap();
 
@@ -661,7 +884,7 @@ mod tests {
             b"author-updated",
         )]);
 
-        apply_update(instance, &base, &target, &plan, &entries, &fetcher)
+        apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
             .await
             .unwrap();
 
@@ -681,34 +904,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checksum_failure_leaves_instance_untouched() {
+    async fn checksum_failure_keeps_local_and_skips_file() {
         let dir = tempfile::tempdir().unwrap();
         let instance = dir.path();
         write_instance(instance, "mods/a.jar", b"original").await;
+        write_instance(instance, "mods/b.jar", b"keep-b").await;
 
         let mut base = MipPackState::default();
         base.files
             .insert("mods/a.jar".into(), state_file_from(b"original"));
+        base.files
+            .insert("mods/b.jar".into(), state_file_from(b"keep-b"));
 
-        // Manifest claims a hash the fetcher cannot serve correctly.
+        // Manifest claims a hash the fetcher cannot serve correctly for a.jar,
+        // while b.jar updates normally.
         let bad_hash = "0".repeat(128);
-        let target = manifest("2.0.0", vec![entry("mods/a.jar", &bad_hash)]);
+        let new_b = b"new-b";
+        let target = manifest(
+            "2.0.0",
+            vec![
+                entry("mods/a.jar", &bad_hash),
+                entry("mods/b.jar", &hash(new_b)),
+            ],
+        );
 
         let mut local = HashMap::new();
         local.insert("mods/a.jar".to_string(), hash(b"original"));
+        local.insert("mods/b.jar".to_string(), hash(b"keep-b"));
         let (plan, entries) = plan_for(&base, &target, &local);
-        let fetcher =
-            MemoryFetcher::new(&[(bad_hash.as_str(), b"corrupt".as_slice())]);
+        let fetcher = MemoryFetcher::new(&[
+            (bad_hash.as_str(), b"corrupt".as_slice()),
+            (hash(new_b).as_str(), new_b.as_slice()),
+        ]);
 
-        let result =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher)
-                .await;
-        assert!(result.is_err());
-        // Instance untouched, staging cleaned up.
+        let outcome =
+            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
+                .await
+                .unwrap();
+
+        // Local content kept for the failed file; the rest of the update applied.
         assert_eq!(
             tokio::fs::read(instance.join("mods/a.jar")).await.unwrap(),
             b"original"
         );
+        assert_eq!(
+            tokio::fs::read(instance.join("mods/b.jar")).await.unwrap(),
+            new_b
+        );
+        assert!(!instance.join(STAGING_DIR_NAME).exists());
+        assert_eq!(outcome.skipped_files.len(), 1);
+        assert_eq!(outcome.skipped_files[0].path, "mods/a.jar");
+        // Skipped path keeps its previous recorded hash so the next update retries.
+        assert_eq!(
+            outcome.new_state.files.get("mods/a.jar").unwrap().sha512,
+            hash(b"original")
+        );
+        assert_eq!(
+            outcome.new_state.files.get("mods/b.jar").unwrap().sha512,
+            hash(new_b)
+        );
+    }
+
+    #[tokio::test]
+    async fn checksum_failure_without_local_file_still_aborts() {
+        let dir = tempfile::tempdir().unwrap();
+        let instance = dir.path();
+
+        let bad_hash = "0".repeat(128);
+        let target =
+            manifest("2.0.0", vec![entry("mods/required.jar", &bad_hash)]);
+        let base = MipPackState::default();
+        let (plan, entries) = plan_for(&base, &target, &HashMap::new());
+        let fetcher =
+            MemoryFetcher::new(&[(bad_hash.as_str(), b"corrupt".as_slice())]);
+
+        let result =
+            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
+                .await;
+        assert!(result.is_err());
+        assert!(!instance.join("mods/required.jar").exists());
         assert!(!instance.join(STAGING_DIR_NAME).exists());
     }
 

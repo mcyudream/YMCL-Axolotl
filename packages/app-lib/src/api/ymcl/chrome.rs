@@ -5,8 +5,6 @@ use reqwest::Method;
 
 use super::manifest::YAP_API_BASE;
 use crate::State;
-use crate::state::ymcl_session;
-use crate::util::fetch::fetch_advanced;
 
 pub fn chrome_home_url(origin: &str) -> String {
     format!("{origin}{YAP_API_BASE}/chrome/home")
@@ -24,7 +22,8 @@ pub async fn get_home_config() -> crate::Result<serde_json::Value> {
     }
     let origin = super::registry::domain_origin(&active).await?;
     let bytes =
-        authenticated_request(&state, &origin, Method::GET, None).await?;
+        super::auth::domain_request(&state, &active, Method::GET, &chrome_home_url(&origin), None)
+            .await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -40,38 +39,13 @@ pub async fn put_home_config(config: serde_json::Value) -> crate::Result<()> {
         .into());
     }
     let origin = super::registry::domain_origin(&active).await?;
-    authenticated_request(&state, &origin, Method::POST, Some(config)).await?;
+    super::auth::domain_request(
+        &state,
+        &active,
+        Method::PUT,
+        &chrome_home_url(&origin),
+        Some(config),
+    )
+    .await?;
     Ok(())
-}
-
-async fn authenticated_request(
-    state: &State,
-    origin: &str,
-    method: Method,
-    body: Option<serde_json::Value>,
-) -> crate::Result<bytes::Bytes> {
-    let Some(session) = ymcl_session::get(
-        &super::registry::active_domain_id(&state.pool).await?,
-        &state.pool,
-    )
-    .await?
-    else {
-        return Err(crate::ErrorKind::OtherError(
-            "Sign in to this domain to manage its home layout".to_string(),
-        )
-        .into());
-    };
-    fetch_advanced(
-        method,
-        &chrome_home_url(origin),
-        None,
-        body,
-        Some(("Authorization", session.access_token.as_str())),
-        None,
-        None,
-        None,
-        &state.api_semaphore,
-        &state.pool,
-    )
-    .await
 }

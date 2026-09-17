@@ -43,6 +43,54 @@ pub async fn export_mrpack(
     description: Option<String>,
     _name: Option<String>,
 ) -> crate::Result<()> {
+    write_mrpack_archive(
+        instance_id,
+        &export_path,
+        included_export_candidates,
+        version_id,
+        description,
+        None,
+    )
+    .await
+}
+
+/// Packs an instance into a mrarchive at a temporary path for MIP publishing
+/// (YAP §7): same pipeline as [`export_mrpack`], plus the `mip.json` MIP
+/// extension file (features/policies, MIP §3.5). Returns the archive path;
+/// the caller deletes it after upload.
+#[tracing::instrument(skip_all)]
+pub async fn build_publish_archive(
+    instance_id: &str,
+    included_export_candidates: Vec<String>,
+    version_id: Option<String>,
+    mip_json: serde_json::Value,
+) -> crate::Result<PathBuf> {
+    let archive_dir = std::env::temp_dir();
+    let archive_path = archive_dir.join(format!(
+        "ymcl-publish-{}.mrpack",
+        uuid::Uuid::new_v4()
+    ));
+    write_mrpack_archive(
+        instance_id,
+        &archive_path,
+        included_export_candidates,
+        version_id,
+        None,
+        Some(mip_json),
+    )
+    .await?;
+    Ok(archive_path)
+}
+
+#[tracing::instrument(skip_all)]
+async fn write_mrpack_archive(
+    instance_id: &str,
+    export_path: &PathBuf,
+    included_export_candidates: Vec<String>,
+    version_id: Option<String>,
+    description: Option<String>,
+    mip_json: Option<serde_json::Value>,
+) -> crate::Result<()> {
     let state = State::get().await?;
     let _permit: tokio::sync::SemaphorePermit =
         state.io_semaphore.0.acquire().await?;
@@ -75,9 +123,9 @@ pub async fn export_mrpack(
         .collect::<Vec<_>>();
 
     let instance_base_path = get_full_path(instance_id).await?;
-    let mut file = File::create(&export_path)
+    let mut file = File::create(export_path)
         .await
-        .map_err(|e| IOError::with_path(e, &export_path))?;
+        .map_err(|e| IOError::with_path(e, export_path))?;
     let mut writer = ZipFileWriter::with_tokio(&mut file);
     let version_id = version_id.unwrap_or("1.0.0".to_string());
     let loading_bar = init_loading(
@@ -238,6 +286,14 @@ pub async fn export_mrpack(
         Compression::Deflate,
     );
     writer.write_entry_whole(builder, &data).await?;
+    // MIP 扩展描述（features/policies，MIP §3.5）：随 mrpack 一起入库，
+    // 适配器在 ingest 时合并进 manifest。
+    if let Some(mip_json) = mip_json {
+        let mip_data = serde_json::to_vec_pretty(&mip_json)?;
+        let builder =
+            ZipEntryBuilder::new("mip.json".to_string().into(), Compression::Deflate);
+        writer.write_entry_whole(builder, &mip_data).await?;
+    }
     writer.close().await?;
 
     let _ =
@@ -580,9 +636,19 @@ async fn create_mrpack_json_inner(
                 _ => {}
             }
         }
-        let Some((hashes, download)) = remote else {
+        let Some((mut hashes, download)) = remote else {
             continue;
         };
+        // MIP ingest requires a sha512 on every index entry; CurseForge only
+        // exposes sha1, so hash the local copy when the remote lacks it.
+        if !hashes.contains_key(&PackFileHash::Sha512) {
+            let Ok((_, local_sha512)) =
+                crate::util::fetch::sha512_file_async(&disk_path).await
+            else {
+                continue;
+            };
+            hashes.insert(PackFileHash::Sha512, local_sha512);
+        }
         let relative_path = path.as_str().replace('\\', "/");
         let Ok(path) = mrpack_relative_path(&original_content_relative_path(
             &relative_path,

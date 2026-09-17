@@ -169,6 +169,10 @@ pub enum ProxyPolicy {
     #[default]
     System,
     Direct,
+    /// Loopback destinations (dev domain origins on 127.0.0.1/localhost):
+    /// the system proxy only adds a fragile extra hop for traffic to the
+    /// local machine, so these always go direct.
+    Loopback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -533,13 +537,28 @@ fn route(
     supports_range: bool,
 ) -> DownloadRoute {
     DownloadRoute {
+        proxy: if is_loopback_url(&url) {
+            ProxyPolicy::Loopback
+        } else {
+            ProxyPolicy::System
+        },
         url,
         source,
         is_mirror,
         allow_sensitive_headers: !is_mirror,
         supports_range,
-        proxy: ProxyPolicy::System,
     }
+}
+
+/// Whether the URL points at this machine (127.0.0.1/localhost/::1), which
+/// must bypass the system proxy.
+pub(crate) fn is_loopback_url(url: &str) -> bool {
+    Url::parse(url).ok().is_some_and(|url| match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    })
 }
 
 fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
@@ -1102,6 +1121,16 @@ pub(crate) static DIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
         #[cfg(not(test))]
         let builder = builder.https_only(true);
         builder
+        .build()
+        .expect("client configuration should be valid")
+});
+
+pub(crate) static LOOPBACK_FETCH_CLIENT: LazyLock<reqwest::Client> =
+    LazyLock::new(|| {
+        // Loopback dev origins are plain http, so unlike the direct
+        // download clients this must not enforce https.
+        reqwest_client_builder()
+            .no_proxy()
             .build()
             .expect("client configuration should be valid")
     });
@@ -1424,6 +1453,7 @@ async fn fetch_validated_metadata_route(
     let route_client = match route.proxy {
         ProxyPolicy::System => client,
         ProxyPolicy::Direct => &DIRECT_FETCH_CLIENT,
+        ProxyPolicy::Loopback => &LOOPBACK_FETCH_CLIENT,
     };
     let mut request = route_client.get(&route.url);
     if let Some((name, value)) = header {
@@ -1938,6 +1968,7 @@ async fn fetch_advanced_with_client_and_progress(
                 }
                 (ProxyPolicy::System, false) => client,
                 (ProxyPolicy::System, true) => &*NO_REDIRECT_REQWEST_CLIENT,
+                (ProxyPolicy::Loopback, _) => &*LOOPBACK_FETCH_CLIENT,
                 (ProxyPolicy::Direct, false) => &*DIRECT_FETCH_CLIENT,
                 (ProxyPolicy::Direct, true) => &*DIRECT_REQWEST_CLIENT,
             };
@@ -2062,22 +2093,39 @@ async fn fetch_advanced_with_client_and_progress(
                                     fetch_retry_delay(total_attempts)
                                 })),
                         );
-                        let route_error: crate::Error = if let Ok(mut error) =
-                            resp.json::<LabrinthError>().await
-                        {
-                            error.status = Some(status.as_u16());
-                            error.method = Some(method.as_str().to_string());
-                            error.url = Some(log_request_url.clone());
-                            error.route = uri_path.map(str::to_string);
-                            ErrorKind::LabrinthError(error).into()
-                        } else {
-                            ErrorKind::HttpError {
-                                status: status.as_u16(),
-                                method: method.as_str().to_string(),
-                                url: log_request_url.clone(),
-                            }
-                            .into()
-                        };
+                        let body = resp.text().await.unwrap_or_default();
+                        let route_error: crate::Error =
+                            if let Ok(mut error) =
+                                serde_json::from_str::<LabrinthError>(&body)
+                            {
+                                error.status = Some(status.as_u16());
+                                error.method = Some(method.as_str().to_string());
+                                error.url = Some(log_request_url.clone());
+                                error.route = uri_path.map(str::to_string);
+                                ErrorKind::LabrinthError(error).into()
+                            } else if let Some(message) =
+                                domain_envelope_message(&body)
+                            {
+                                // YAP host business errors carry the reason
+                                // as {code, message}; surface it instead of
+                                // a bare status code.
+                                ErrorKind::LabrinthError(LabrinthError {
+                                    error: "domain_error".to_string(),
+                                    description: message,
+                                    status: Some(status.as_u16()),
+                                    method: Some(method.as_str().to_string()),
+                                    url: Some(log_request_url.clone()),
+                                    route: uri_path.map(str::to_string),
+                                })
+                                .into()
+                            } else {
+                                ErrorKind::HttpError {
+                                    status: status.as_u16(),
+                                    method: method.as_str().to_string(),
+                                    url: log_request_url.clone(),
+                                }
+                                .into()
+                            };
                         let route_error_message = route_error.to_string();
                         drop(permit);
                         let retry_rate_limited = status
@@ -2257,11 +2305,27 @@ async fn fetch_advanced_with_client_and_progress(
                         }
                         .await
                     } else {
+                        let response_status = resp.status();
+                        let response_content_length = resp.content_length();
+                        let response_content_encoding = resp
+                            .headers()
+                            .get(reqwest::header::CONTENT_ENCODING)
+                            .map(|value| {
+                                String::from_utf8_lossy(value.as_bytes())
+                                    .into_owned()
+                            });
                         resp.bytes().await.wrap_err_with(|| {
                             eyre!(
-                                "failed to read response body from {log_request_url}"
+                                "failed to read response body from \
+                                 {log_request_url} (status={response_status}, \
+                                 content_length={}, content_encoding={})",
+                                response_content_length
+                                    .map(|length| length.to_string())
+                                    .unwrap_or_else(|| "chunked".to_string()),
+                                response_content_encoding
+                                    .unwrap_or_else(|| "identity".to_string()),
                             )
-						})
+                        })
                     };
                     drop(permit);
 
@@ -2834,11 +2898,24 @@ async fn response_status_error(
     request_url: &str,
 ) -> crate::Error {
     let status = response.status();
-    if let Ok(mut error) = response.json::<LabrinthError>().await {
+    let body = response.text().await.unwrap_or_default();
+    if let Ok(mut error) = serde_json::from_str::<LabrinthError>(&body) {
         error.status = Some(status.as_u16());
         error.method = Some(method.as_str().to_string());
         error.url = Some(sanitize_url_for_log(request_url));
         ErrorKind::LabrinthError(error).into()
+    } else if let Some(message) = domain_envelope_message(&body) {
+        // YAP host business errors carry the reason as {code, message};
+        // surface it instead of a bare status code.
+        ErrorKind::LabrinthError(LabrinthError {
+            error: "domain_error".to_string(),
+            description: message,
+            status: Some(status.as_u16()),
+            method: Some(method.as_str().to_string()),
+            url: Some(sanitize_url_for_log(request_url)),
+            route: None,
+        })
+        .into()
     } else {
         ErrorKind::HttpError {
             status: status.as_u16(),
@@ -2847,6 +2924,19 @@ async fn response_status_error(
         }
         .into()
     }
+}
+
+/// Extracts the human-readable reason from a YAP host business-error
+/// envelope (`{code, message}` / `{code, message, data}`). Requires a
+/// code-like companion field so plain `{message}` JSON bodies from other
+/// services are left to the generic status error.
+fn domain_envelope_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let message = value.get("message")?.as_str()?;
+    if message.is_empty() || value.get("code").is_none() {
+        return None;
+    }
+    Some(message.to_string())
 }
 
 pub(crate) async fn finalize_download(
@@ -5871,6 +5961,41 @@ pub async fn sha1_file_async(
     }
 
     Ok((size, hasher.digest().to_string()))
+}
+
+/// Streaming sha512 for local files: mrpack/MIP index entries must carry a
+/// sha512 reference even when the remote provider (CurseForge) only exposes
+/// sha1, so the launcher hashes its local copy instead.
+pub async fn sha512_file_async(
+    path: impl AsRef<Path>,
+) -> crate::Result<(u64, String)> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .await
+        .map_err(|e| IOError::with_path(e, path))?;
+    let mut hasher = Sha512::new();
+    let mut size = 0;
+    let mut buffer = vec![0; 262144];
+
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|e| IOError::with_path(e, path))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        hasher.update(&buffer[..bytes_read]);
+        size += bytes_read as u64;
+    }
+
+    let digest = hasher.finalize();
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok((size, hex))
 }
 
 pub async fn sha1_file_cancellable(

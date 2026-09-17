@@ -18,6 +18,10 @@ pub struct YmclBundleReady {
     pub version: String,
     /// Absolute path of the bundle entry file on disk.
     pub entry_path: String,
+    /// Entry file contents. Module pages import from a blob URL built from
+    /// this string — fetching entry_path via asset.localhost is blocked by
+    /// CSP connect-src.
+    pub entry_source: String,
     /// Directory containing the extracted bundle.
     pub base_dir: String,
 }
@@ -113,10 +117,13 @@ pub async fn ensure_bundle(
         }
     }
 
+    let entry_source = tokio::fs::read_to_string(&entry_path).await?;
+
     Ok(YmclBundleReady {
         bundle_id: bundle_id.to_string(),
         version: version.to_string(),
         entry_path: entry_path.to_string_lossy().to_string(),
+        entry_source,
         base_dir: dir.to_string_lossy().to_string(),
     })
 }

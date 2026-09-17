@@ -82,6 +82,24 @@ pub fn compute_update_plan(
     let mut plan = UpdatePlan::default();
     let mut handled_moves: HashSet<&str> = HashSet::new();
 
+    // Features the target introduces that the base version did not declare:
+    // a default on those is a genuine "new optional content shipped in a
+    // later version" and gets opted in (MIP WF-5 default merge). Without the
+    // base's declared set, a default feature missing from `selected_features`
+    // is indistinguishable from a player-deselected one, so nothing is
+    // assumed (states from before `declared_features` existed).
+    let new_default_features: HashSet<&str> = match &base.declared_features {
+        None => HashSet::new(),
+        Some(declared) => target
+            .features
+            .iter()
+            .filter(|feature| {
+                feature.default && !declared.iter().any(|id| *id == feature.id)
+            })
+            .map(|feature| feature.id.as_str())
+            .collect(),
+    };
+
     // Pass 1: explicit movedFrom declarations (validated against base).
     for file in &target.files {
         if let Some(moved_from) = &file.moved_from {
@@ -121,7 +139,7 @@ pub fn compute_update_plan(
                 }
             }
             // Feature gating: files of unselected features are skipped.
-            if is_feature_selected(base, file) {
+            if is_feature_selected(base, file, &new_default_features) {
                 plan.changes.push(PlannedChange {
                     path: file.path.clone(),
                     action: ChangeAction::Add,
@@ -181,12 +199,13 @@ pub fn compute_update_plan(
 fn is_feature_selected(
     base: &MipPackState,
     file: &super::manifest::MipFileEntry,
+    new_default_features: &HashSet<&str>,
 ) -> bool {
     match &file.feature {
-        Some(feature) => base
-            .selected_features
-            .iter()
-            .any(|selected| selected == feature),
+        Some(feature) => {
+            base.selected_features.iter().any(|selected| selected == feature)
+                || new_default_features.contains(feature.as_str())
+        }
         None => true,
     }
 }
@@ -214,6 +233,7 @@ mod tests {
         StateFile {
             sha512: hash.to_string(),
             policy: "managed".to_string(),
+            feature: None,
         }
     }
 
@@ -367,6 +387,40 @@ mod tests {
         // merge on a brand-new path is a plain add; the local-collision case
         // (MIP §9.2 新增冲突) is resolved at apply time against the disk.
         assert_eq!(by_path["config/x.toml"].action, ChangeAction::Add);
+    }
+
+    #[test]
+    fn new_default_feature_is_opted_in_only_when_base_declared_its_features() {
+        let mut shader = entry("shaders/oms.jar", "hash-oms");
+        shader.feature = Some("shaders".to_string());
+        let mut target = manifest(vec![shader]);
+        target.features.push(super::super::manifest::MipFeature {
+            id: "shaders".to_string(),
+            name: None,
+            default: true,
+            conflicts: Vec::new(),
+        });
+
+        // Base recorded its (empty) feature list: "shaders" is new in the
+        // target, so its default opts the files in.
+        let mut base = MipPackState {
+            version: "1.0.0".to_string(),
+            declared_features: Some(Vec::new()),
+            ..MipPackState::default()
+        };
+        let plan = compute_update_plan(&base, &target, &HashMap::new()).unwrap();
+        assert_eq!(plan.changes.len(), 1);
+        assert_eq!(plan.changes[0].path, "shaders/oms.jar");
+
+        // Base declared "shaders" but the player deselected it: stays out.
+        base.declared_features = Some(vec!["shaders".to_string()]);
+        let plan = compute_update_plan(&base, &target, &HashMap::new()).unwrap();
+        assert!(plan.changes.is_empty());
+
+        // Legacy state without the declared list: nothing is assumed.
+        let plan =
+            compute_update_plan(&MipPackState::default(), &target, &HashMap::new()).unwrap();
+        assert!(plan.changes.is_empty());
     }
 
     #[test]

@@ -48,11 +48,26 @@ pub struct MipFeature {
     pub conflicts: Vec<String>,
 }
 
+/// Tolerates adapters that stored numeric fields as JSON strings (e.g.
+/// `"size": "75804"`): size is informational, so parse it leniently instead
+/// of failing the whole manifest.
+fn lenient_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Number(number)) => number.as_u64(),
+        Some(serde_json::Value::String(text)) => text.trim().parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MipFileEntry {
     pub path: String,
     pub sha512: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_u64")]
     pub size: Option<u64>,
     #[serde(default = "default_policy")]
     pub policy: String,

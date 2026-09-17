@@ -62,10 +62,34 @@
 					"url": "https://update.axlmc.org/*"
 				},
 				{
+					"url": "https://admin.axlmc.org/*"
+				},
+				{
+					"url": "https://*.yudream.online/*"
+				},
+				{
+					"url": "http://localhost:8080/*"
+				},
+				{
+					"url": "http://127.0.0.1:8080/*"
+				},
+				{
 					"url": "http://localhost:8000/*"
 				},
 				{
 					"url": "http://127.0.0.1:8000/*"
+				},
+				{
+					"url": "http://localhost:3000/*"
+				},
+				{
+					"url": "http://127.0.0.1:3000/*"
+				},
+				{
+					"url": "http://localhost:9002/*"
+				},
+				{
+					"url": "http://127.0.0.1:9002/*"
 				},
 				{
 					"url": "http://*.taila228c5.ts.net/*"
@@ -174,6 +198,7 @@
 		"terracotta:default",
 		"multiplayer:default",
 		"servers:default",
-		"planet-minecraft:default"
+		"planet-minecraft:default",
+		"ymcl:default"
 	]
 }

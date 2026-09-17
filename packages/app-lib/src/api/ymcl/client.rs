@@ -30,6 +30,7 @@ pub async fn fetch_manifest(
     semaphore: &FetchSemaphore,
     exec: &sqlx::SqlitePool,
 ) -> crate::Result<YmclManifest> {
+    // Unauthenticated bootstrap (capabilities/add-domain before login).
     fetch_json::<YmclManifest>(
         Method::GET,
         &manifest_url(origin),
@@ -40,6 +41,20 @@ pub async fn fetch_manifest(
         exec,
     )
     .await
+}
+
+/// Manifest pull with the active domain session when available.
+/// YDA filters navigation/pages by the caller's RBAC — an anonymous GET
+/// often returns only native launcher entries, so custom plugin pages
+/// never reach the sidebar. Authenticated refresh is required after login.
+pub async fn fetch_manifest_for_domain(domain_id: &str) -> crate::Result<YmclManifest> {
+    let state = State::get().await?;
+    let origin = super::registry::domain_origin(domain_id).await?;
+    let url = manifest_url(&origin);
+    let bytes = super::auth::domain_request_opt(&state, domain_id, Method::GET, &url, None).await?;
+    let manifest: YmclManifest = serde_json::from_slice(&bytes)?;
+    super::manifest::validate_protocol_version(manifest.protocol_version)?;
+    Ok(manifest)
 }
 
 /// Convenience wrapper resolving state once for both fetches.
@@ -193,29 +208,82 @@ mod adapter_contract_tests {
     }
 
     /// Contract lock for `GET /v1/manifest` (yudream-admin-plugins
-    /// `YmclManifestController`): navigation tree with native items, empty
-    /// page registry, and the action whitelist.
+    /// `YmclManifestController`): navigation tree with native items (and a
+    /// two-level `children` extension), empty page registry, the action
+    /// whitelist, and the pass-through `theme` ThemeProfile (YAP §6.9).
     #[test]
     fn parses_ymcl_manifest_payload() {
         use super::super::manifest::YmclManifest;
-        let payload = r#"{
+        // r##…## : the payload contains "#7aabff", which would terminate an
+        // r#"…"# raw string early.
+        let payload = r##"{
             "protocol_version": 1,
             "navigation": [
                 { "id": "home", "type": "native", "route": "/", "title": "首页",
-                  "icon": "home", "sort": 0, "required_permission": null },
+                  "icon": "home", "sort": 0, "required_permission": null,
+                  "enabled": true,
+                  "children": [
+                    { "id": "mc.servers", "type": "page", "page_id": "mc.servers",
+                      "title": "服务器", "sort": 0, "required_permission": null,
+                      "enabled": true },
+                    { "id": "mc.network", "type": "directory", "title": "联机",
+                      "sort": 1, "enabled": true,
+                      "children": [
+                        { "id": "mc.network.list", "type": "page",
+                          "page_id": "mc.network.list", "title": "联机列表",
+                          "sort": 0, "enabled": true }
+                      ] }
+                  ] },
                 { "id": "skins", "type": "native", "route": "/skins", "title": "皮肤",
-                  "icon": "skins", "sort": 30, "required_permission": null }
+                  "icon": "skins", "sort": 30, "enabled": true },
+                { "id": "settings", "type": "native", "route": "/settings", "title": "设置",
+                  "icon": "settings", "sort": 40, "enabled": false }
             ],
             "pages": [],
             "data_sources": [],
-            "actions": { "allow": ["client:launch-server", "client:reload", "server:*"] }
-        }"#;
+            "actions": { "allow": ["client:launch-server", "client:reload", "server:*"] },
+            "home": { "schemaVersion": 1, "locked": false, "cards": [] },
+            "theme": {
+                "schemaVersion": 1,
+                "mode": { "default": "dark" },
+                "accentColor": { "value": "#7aabff" },
+                "background": { "url": "https://example.com/bg.png", "blur": 12, "opacity": 65 },
+                "window": { "transparent": false, "opacity": 55, "blur": false },
+                "advancedRendering": { "value": true },
+                "pageTransitions": { "value": true }
+            }
+        }"##;
         let manifest: YmclManifest = serde_json::from_str(payload)
             .expect("manifest payload must deserialize");
         assert_eq!(manifest.protocol_version, 1);
-        assert_eq!(manifest.navigation.len(), 2);
+        assert_eq!(manifest.navigation.len(), 3);
         assert_eq!(manifest.navigation[0].route.as_deref(), Some("/"));
+        assert_eq!(manifest.navigation[0].enabled, Some(true));
+        assert_eq!(manifest.navigation[0].children.len(), 2);
+        assert_eq!(
+            manifest.navigation[0].children[0].page_id.as_deref(),
+            Some("mc.servers"),
+        );
+        // 目录 → 子菜单 → 子菜单 must survive deserialization.
+        let directory = &manifest.navigation[0].children[1];
+        assert_eq!(directory.r#type, "directory");
+        assert_eq!(directory.children.len(), 1);
+        assert_eq!(
+            directory.children[0].page_id.as_deref(),
+            Some("mc.network.list"),
+        );
         assert_eq!(manifest.navigation[1].title.as_deref(), Some("皮肤"));
+        assert_eq!(manifest.navigation[2].enabled, Some(false));
+        assert!(manifest.navigation[1].children.is_empty());
         assert!(manifest.pages.is_empty());
+        // ThemeProfile is opaque JSON on the Rust side; the frontend
+        // (store/ymcl-theme.ts) owns its shape. Lock the pass-through here.
+        let theme = manifest.theme.as_ref().expect("theme node must be kept");
+        assert_eq!(theme["mode"]["default"], "dark");
+        assert_eq!(theme["accentColor"]["value"], "#7aabff");
+        assert_eq!(theme["background"]["opacity"], 65);
+        assert_eq!(theme["window"]["transparent"], false);
+        assert_eq!(theme["advancedRendering"]["value"], true);
+        assert_eq!(theme["pageTransitions"]["value"], true);
     }
 }

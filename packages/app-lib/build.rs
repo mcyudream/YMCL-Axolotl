@@ -1,6 +1,6 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
-use std::process::{Command, exit};
+use std::path::{Path, PathBuf};
+use std::process::{exit, Command};
 use std::{env, fs};
 
 /// Build-time opt-in to a private launcher data directory. Read by
@@ -46,6 +46,20 @@ fn set_env() {
         }
 
         println!("cargo::rustc-env={var_name}={var_value}");
+
+        // Cargo's dep-info env check compares the value rustc baked in
+        // against the value visible in this process (including .cargo's
+        // [env] section). When the two differ, every build re-runs this
+        // crate from scratch, so surface the conflict instead of silently
+        // losing the cache.
+        match env::var_os(&var_name) {
+            Some(current) if current != OsString::from(&var_value) => {
+                println!(
+                    "cargo::warning={var_name} differs between .env and the process/`[env]` value; cargo will consider theseus dirty on every build"
+                );
+            }
+            _ => {}
+        }
     }
 
     if let Some(curseforge_api_key) = curseforge_api_key {
@@ -118,6 +132,13 @@ fn build_java_jars() {
         out_dir.join("java/libs").display()
     );
 
+    // Gradle dominates build-script reruns that have nothing to do with Java
+    // (e.g. a .env edit), so keep the existing jars when every watched Java
+    // input is older than what OUT_DIR already holds.
+    if java_jars_up_to_date(&out_dir.join("java/libs")) {
+        return;
+    }
+
     let gradle_path = fs::canonicalize(
         #[cfg(target_os = "windows")]
         "java\\gradlew.bat",
@@ -141,4 +162,58 @@ fn build_java_jars() {
         println!("cargo::error=Gradle build failed with {exit_status}");
         exit(exit_status.code().unwrap_or(1));
     }
+}
+
+fn java_jars_up_to_date(libs_dir: &Path) -> bool {
+    const JAVA_INPUTS: &[&str] = &[
+        "java/src",
+        "java/gradle",
+        "java/build.gradle.kts",
+        "java/settings.gradle.kts",
+        "java/gradle.properties",
+    ];
+
+    let mut newest_input: Option<std::time::SystemTime> = None;
+    for input in JAVA_INPUTS {
+        // An unreadable input falls back to running Gradle rather than
+        // silently reusing stale jars.
+        let Some(modified) = newest_mtime(Path::new(input)) else {
+            return false;
+        };
+        newest_input = Some(match newest_input {
+            Some(current) => current.max(modified),
+            None => modified,
+        });
+    }
+    let newest_input = newest_input.unwrap();
+
+    let Ok(entries) = fs::read_dir(libs_dir) else {
+        return false;
+    };
+    let mut jar_count = 0;
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "jar") {
+            jar_count += 1;
+            let modified =
+                match entry.metadata().and_then(|meta| meta.modified()) {
+                    Ok(modified) => modified,
+                    Err(_) => return false,
+                };
+            if modified < newest_input {
+                return false;
+            }
+        }
+    }
+    jar_count > 0
+}
+
+fn newest_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    let meta = fs::metadata(path).ok()?;
+    let mut newest = meta.modified().ok()?;
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).ok()? {
+            newest = newest.max(newest_mtime(&entry.ok()?.path())?);
+        }
+    }
+    Some(newest)
 }

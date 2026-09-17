@@ -53,7 +53,21 @@ fn main() {
     println!("cargo:rerun-if-changed=tauri.linux.conf.json");
     println!("cargo:rerun-if-changed=tauri-modern.conf.json");
     println!("cargo:rerun-if-changed=tauri-release.conf.json");
-    println!("cargo:rerun-if-changed=../../third-party/blockbench");
+    // Watch the skin editor's build inputs only. Watching the whole submodule
+    // would include dist/, which the npm build below rewrites on every run, so
+    // the script would re-trigger itself and force a full ymcl_gui rebuild
+    // on every launch.
+    for blockbench_input in [
+        "../../third-party/blockbench/js",
+        "../../third-party/blockbench/css",
+        "../../third-party/blockbench/assets",
+        "../../third-party/blockbench/font",
+        "../../third-party/blockbench/index.html",
+        "../../third-party/blockbench/build.js",
+        "../../third-party/blockbench/package.json",
+    ] {
+        println!("cargo:rerun-if-changed={blockbench_input}");
+    }
     // Tauri validates frontendDist during Cargo metadata/check builds. The
     // frontend build runs in parallel in CI, so create the directory before
     // tauri-build reads the configuration. A real frontend build overwrites
@@ -814,6 +828,64 @@ fn main() {
                         "mod_translation_list_tasks",
                         "mod_translation_get_task",
                         "mod_translation_dismiss_task",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "ymcl",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "ymcl_domains_state",
+                        "ymcl_domain_add",
+                        "ymcl_domain_remove",
+                        "ymcl_domain_activate",
+                        "ymcl_manifest_get",
+                        "ymcl_manifest_refresh",
+                        "ymcl_data_fetch",
+                        "ymcl_action_execute",
+                        "ymcl_session_get",
+                        "ymcl_auth_password_login",
+                        "ymcl_auth_register",
+                        "ymcl_auth_oauth_login",
+                        "ymcl_auth_oauth_cancel",
+                        "ymcl_ygg_exchange",
+                        "ymcl_ygg_profiles",
+                        "ymcl_auth_external_providers",
+                        "ymcl_auth_external_begin",
+                        "ymcl_auth_external_poll",
+                        "ymcl_auth_external_finish",
+                        "ymcl_auth_logout",
+                        "ymcl_context_switch",
+                        "ymcl_chrome_home_get",
+                        "ymcl_chrome_home_put",
+                        "ymcl_bundle_get",
+                        "ymcl_skin_profiles",
+                        "ymcl_skin_create_profile",
+                        "ymcl_skin_closet",
+                        "ymcl_skin_equip",
+                        "ymcl_skin_upload",
+                        "ymcl_cape_upload",
+                        "ymcl_skin_delete",
+                        "ymcl_skin_library",
+                        "ymcl_skin_collect",
+                        "ymcl_skin_texture",
+                        "ymcl_skin_domain_for_account",
+                        "ymcl_pre_launch_check",
+                        "ymcl_pack_apply_update",
+                        "ymcl_pack_features",
+                        "ymcl_pack_set_features",
+                        "ymcl_pack_install_preview",
+                        "ymcl_pack_mrpack_download",
+                        "ymcl_pack_adopt_state",
+                        "ymcl_join_preview",
+                        "ymcl_publish_diff",
+                        "ymcl_publish_push",
+                        "ymcl_publish_initial",
+                        "ymcl_publish_list_versions",
+                        "ymcl_publish_withdraw",
+                        "ymcl_mip_servers",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

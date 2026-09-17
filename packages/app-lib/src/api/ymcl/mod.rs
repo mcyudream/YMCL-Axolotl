@@ -11,5 +11,6 @@ pub mod events;
 pub mod manifest;
 pub mod mip;
 pub mod registry;
+pub mod skins;
 
 pub use crate::state::ymcl_session::{YmclSessionInfo, YmclStoredSession};

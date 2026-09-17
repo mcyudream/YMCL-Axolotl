@@ -11,7 +11,6 @@ use tauri::{AppHandle, Emitter};
 
 use super::manifest::YAP_API_BASE;
 use crate::State;
-use crate::state::ymcl_session;
 
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
@@ -101,6 +100,17 @@ pub async fn run_event_loop(app: AppHandle) {
             }
         };
         backoff = INITIAL_BACKOFF;
+        // 连接（或重连）成功即通知前端重拉 manifest：yda 重启/重载后，启动器
+        // 缓存的 pages/data_sources 可能已经过期（YAP §6.10 事件只定位不携带）。
+        app.emit(
+            "ymcl://event",
+            &YmclEvent {
+                id: None,
+                event_type: "manifest.updated".to_string(),
+                payload: serde_json::json!({ "reason": "stream.reconnected" }),
+            },
+        )
+        .ok();
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
@@ -151,7 +161,9 @@ async fn current_session(app: &AppHandle) -> Option<(String, String)> {
         return None;
     }
     let origin = super::registry::domain_origin(&active).await.ok()?;
-    let session = ymcl_session::get(&active, &state.pool).await.ok()??;
+    // ensure_session renews an expired token before each (re)connect, so a
+    // long-lived SSE loop never reconnects with a stale token.
+    let session = super::auth::ensure_session(&active).await.ok()??;
     Some((origin, session.access_token))
 }
 

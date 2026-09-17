@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
+    brand::DEEP_LINK_SCHEME,
     event::{
         CommandPayload,
         emit::{emit_command, emit_warning},
@@ -13,7 +14,7 @@ use urlencoding::decode;
 /// Handles external functions (such as through URL deep linkage)
 /// Link is extracted value (link) in somewhat URL format, such as
 /// subdomain1/subdomain2
-/// (Does not include axolotl://)
+/// (Does not include the scheme, e.g. ymcl://)
 pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
     // /seed-map?{query}   -    Opens the Lab seed map with a shared state
     if let Some(rest) = sublink.strip_prefix("seed-map")
@@ -23,6 +24,32 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
         return Ok(CommandPayload::OpenSeedMap {
             query: query.to_string(),
         });
+    }
+    // /add-site?url={origin}   -    Adds a YAP domain site to the launcher
+    if let Some(rest) = sublink.strip_prefix("add-site")
+        && (rest.is_empty() || rest.starts_with('?') || rest.starts_with('/'))
+    {
+        let query = rest.trim_start_matches('/').trim_start_matches('?');
+        let mut url = None;
+        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+            match &*key {
+                "url" => url = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+        return match url {
+            Some(url) if !url.trim().is_empty() => {
+                Ok(CommandPayload::AddSite { url: url.trim().to_string() })
+            }
+            _ => {
+                emit_warning("Invalid command, add-site requires a url parameter")
+                    .await?;
+                Err(crate::ErrorKind::InputError(
+                    "add-site requires a url parameter".to_string(),
+                )
+                .into())
+            }
+        };
     }
     Ok(match sublink.split_once('/') {
         // /mod/{id}   -    Installs a mod of mod id
@@ -104,9 +131,10 @@ pub async fn parse_command(
 ) -> crate::Result<CommandPayload> {
     tracing::debug!("Parsing command: {}", &command_string);
 
-    // axolotl://some-command
+    // ymcl://some-command (scheme from brand::DEEP_LINK_SCHEME)
     // This occurs when following a web redirect link
-    if let Some(sublink) = command_string.strip_prefix("axolotl://") {
+    let scheme_prefix = format!("{DEEP_LINK_SCHEME}://");
+    if let Some(sublink) = command_string.strip_prefix(scheme_prefix.as_str()) {
         Ok(handle_url(sublink).await?)
     } else {
         // We assume anything else is a filepath to a modpack file; zip

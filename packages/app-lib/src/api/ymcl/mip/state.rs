@@ -15,6 +15,13 @@ pub struct MipPackState {
     pub channel: Option<String>,
     #[serde(default)]
     pub selected_features: Vec<String>,
+    /// Feature ids the installed version declared (MIP §3.2). Lets the next
+    /// update distinguish "deselected by the player" from "added in a later
+    /// version", so newly introduced default features get opted in (MIP WF-5
+    /// default merge) instead of being silently skipped. `None` for states
+    /// written before this field existed.
+    #[serde(default)]
+    pub declared_features: Option<Vec<String>>,
     #[serde(default)]
     pub files: std::collections::BTreeMap<String, StateFile>,
     #[serde(default)]
@@ -40,6 +47,11 @@ pub struct StateFile {
     pub sha512: String,
     #[serde(default = "default_policy")]
     pub policy: String,
+    /// Feature this file belongs to (MIP §3.2 `files[].feature`), recorded so
+    /// later delta publishes can re-annotate changed/added files. Absent for
+    /// core files and for states written before this field existed.
+    #[serde(default)]
+    pub feature: Option<String>,
 }
 
 fn default_policy() -> String {

@@ -88,6 +88,23 @@ pub fn domain_id_for_origin(origin: &str) -> String {
         .collect::<String>()
 }
 
+/// Adapters without a configured display name report their own base URL as
+/// `domain.name`, which would surface as `http://host:port` in the UI — and
+/// worse, that URL can differ from the origin the user actually joined.
+/// A URL-shaped stored name is therefore not a usable label: show the joined
+/// origin (scheme stripped) instead until the domain configures a real name.
+fn display_label(stored_name: &str, origin: &str) -> String {
+    let trimmed = stored_name.trim();
+    if trimmed.is_empty() || trimmed.contains("://") {
+        origin
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn summary_from_row(
     row: &DomainRow,
     active_domain_id: &str,
@@ -95,11 +112,7 @@ fn summary_from_row(
     YmclDomainSummary {
         id: row.id.clone(),
         origin: Some(row.origin.clone()),
-        display_name: if row.display_name.is_empty() {
-            row.origin.clone()
-        } else {
-            row.display_name.clone()
-        },
+        display_name: display_label(&row.display_name, &row.origin),
         logo_url: row.logo_url.clone(),
         is_personal: false,
         is_active: row.id == active_domain_id,
@@ -196,7 +209,6 @@ pub async fn domain_capabilities(
     domain_id: &str,
 ) -> crate::Result<YmclCapabilities> {
     let state = State::get().await?;
-    let origin = domain_origin(domain_id).await?;
     let row: Option<(Option<String>,)> = sqlx::query_as(
         "SELECT capabilities_json FROM ymcl_domains WHERE id = $1",
     )
@@ -210,6 +222,18 @@ pub async fn domain_capabilities(
             return Ok(capabilities);
         }
     }
+    refresh_capabilities(domain_id).await
+}
+
+/// Re-probes a domain's capabilities and updates the cached row. Called
+/// when the cached snapshot is absent or lacks a capability a caller needs
+/// (e.g. mip appearing after the adapter gains the distribution face), so
+/// adapter-side rollouts self-heal without a manual domain refresh.
+pub async fn refresh_capabilities(
+    domain_id: &str,
+) -> crate::Result<YmclCapabilities> {
+    let state = State::get().await?;
+    let origin = domain_origin(domain_id).await?;
     let capabilities =
         fetch_capabilities(&origin, &state.api_semaphore, &state.pool).await?;
     sqlx::query("UPDATE ymcl_domains SET capabilities_json = $1 WHERE id = $2")
@@ -378,13 +402,7 @@ pub async fn active_manifest() -> crate::Result<Option<YmclManifest>> {
             return Ok(Some(manifest));
         }
     }
-    let manifest = match client::fetch_manifest(
-        &row.origin,
-        &state.api_semaphore,
-        &state.pool,
-    )
-    .await
-    {
+    let manifest = match fetch_manifest_authed(&row.id, &row.origin, &state).await {
         Ok(manifest) => manifest,
         Err(error) => {
             tracing::warn!(
@@ -398,16 +416,59 @@ pub async fn active_manifest() -> crate::Result<Option<YmclManifest>> {
     Ok(Some(manifest))
 }
 
-/// Forces a re-fetch of the active domain's manifest.
+/// Prefer session-authenticated manifest (full nav/pages per user RBAC);
+/// fall back to anonymous fetch when no session exists yet.
+async fn fetch_manifest_authed(
+    domain_id: &str,
+    origin: &str,
+    state: &State,
+) -> crate::Result<YmclManifest> {
+    match client::fetch_manifest_for_domain(domain_id).await {
+        Ok(manifest) => Ok(manifest),
+        Err(auth_error) => {
+            tracing::debug!(
+                "Authed manifest fetch failed for {domain_id} ({auth_error}); trying anonymous"
+            );
+            client::fetch_manifest(origin, &state.api_semaphore, &state.pool).await
+        }
+    }
+}
+
+/// Forces a re-fetch of the active domain's manifest. Also re-probes the
+/// domain's capabilities so admin-side changes (display name, logo, auth
+/// endpoints) propagate without removing and re-adding the domain.
 pub async fn refresh_manifest() -> crate::Result<Option<YmclManifest>> {
     let state = State::get().await?;
     let Some(row) = active_domain_row(&state.pool).await? else {
         return Ok(None);
     };
-    let manifest =
-        client::fetch_manifest(&row.origin, &state.api_semaphore, &state.pool)
-            .await?;
+    let manifest = fetch_manifest_authed(&row.id, &row.origin, &state).await?;
     validate_protocol_version(manifest.protocol_version)?;
     store_manifest(&row.id, &manifest, &state.pool).await?;
+
+    if let Ok(capabilities) =
+        client::fetch_capabilities(&row.origin, &state.api_semaphore, &state.pool)
+            .await
+    {
+        let name = capabilities
+            .domain
+            .as_ref()
+            .map(|domain| domain.name.clone())
+            .unwrap_or_else(|| row.display_name.clone());
+        let logo_url = capabilities.domain.as_ref().and_then(|domain| {
+            domain.logo_url.clone().or_else(|| row.logo_url.clone())
+        });
+        sqlx::query(
+            "UPDATE ymcl_domains \
+             SET capabilities_json = $1, display_name = $2, logo_url = $3 \
+             WHERE id = $4",
+        )
+        .bind(&serde_json::to_string(&capabilities)?)
+        .bind(name)
+        .bind(logo_url)
+        .bind(&row.id)
+        .execute(&state.pool)
+        .await?;
+    }
     Ok(Some(manifest))
 }
