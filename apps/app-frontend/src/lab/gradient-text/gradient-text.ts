@@ -63,7 +63,7 @@ type Color = {
 export const DEFAULT_GRADIENT_COLORS = ['#A855F7', '#22C55E']
 
 export const DEFAULT_GRADIENT_DOCUMENT: GradientTextDocument = {
-	lines: [[{ text: 'Axolotl', formats: [] }]],
+	lines: [[{ text: 'YMCL', formats: [] }]],
 }
 
 export const gradientFormatAdapters: readonly GradientFormatAdapter[] = [

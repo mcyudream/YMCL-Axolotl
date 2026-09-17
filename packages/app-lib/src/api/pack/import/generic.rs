@@ -15,7 +15,7 @@ use crate::{
     state::ModLoader,
 };
 
-/// Import a generic launcher instance folder into an Axolotl profile.
+/// Import a generic launcher instance folder into an YMCL profile.
 ///
 /// Runs in four stages: resolve the source folder, validate that it contains
 /// a detectable Minecraft version, register the instance metadata, then copy
@@ -209,7 +209,7 @@ async fn build_dependencies(
     for (loader, version) in components {
         if loader.eq_ignore_ascii_case("labymod") {
             return Err(crate::ErrorKind::InputError(
-                "Unsupported loader LabyMod: Axolotl does not install, update, or repair LabyMod instances"
+                "Unsupported loader LabyMod: YMCL does not install, update, or repair LabyMod instances"
                     .to_string(),
             )
             .into());

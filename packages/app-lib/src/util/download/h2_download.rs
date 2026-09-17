@@ -365,7 +365,7 @@ pub(crate) fn request_headers(
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&crate::launcher_user_agent())
-            .unwrap_or_else(|_| HeaderValue::from_static("Axolotl Launcher")),
+            .unwrap_or_else(|_| HeaderValue::from_static("YMCL (YuDream Launcher)")),
     );
     let route_host = Url::parse(&route.url)
         .ok()
@@ -1163,7 +1163,7 @@ async fn download_asset_item(
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&crate::launcher_user_agent())
-            .unwrap_or_else(|_| HeaderValue::from_static("Axolotl Launcher")),
+            .unwrap_or_else(|_| HeaderValue::from_static("YMCL (YuDream Launcher)")),
     );
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
 

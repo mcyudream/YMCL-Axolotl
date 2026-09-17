@@ -2,113 +2,112 @@ import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const REPOSITORY = 'Mystic-Stars/Axolotl'
-const PER_PAGE = 100
-const MAX_PAGES = 10
+const REPOSITORY = 'mcyudream/YMCL-Axolotl'
 const OUTPUT_PATH = fileURLToPath(
 	new URL('../../apps/app-frontend/src/data/about/contributors.json', import.meta.url),
 )
+const TEAM_OUTPUT_PATH = fileURLToPath(
+	new URL('../../apps/app-frontend/src/data/about/team.json', import.meta.url),
+)
+
+/**
+ * Current-repo (non-upstream) contributors for YMCL-Axolotl.
+ * Everyone else in fork history is Axolotl / Modrinth upstream and is omitted.
+ */
+const CURRENT_REPO_CONTRIBUTORS = [
+	{
+		login: 'YDHusky',
+		name: 'SiberianHusky',
+		url: 'https://github.com/YDHusky',
+		avatarUrl: 'https://github.com/YDHusky.png?size=96',
+	},
+]
 
 function requestHeaders() {
 	const headers = {
 		Accept: 'application/vnd.github+json',
-		'User-Agent': 'Axolotl-Launcher-Contributors-Sync',
+		'User-Agent': 'YMCL-Axolotl-Contributors-Sync',
 	}
-	const token = process.env.AXOLOTL_GITHUB_TOKEN || process.env.GITHUB_TOKEN
+	const token = process.env.YMCL_GITHUB_TOKEN || process.env.GITHUB_TOKEN
 	if (token) {
 		headers.Authorization = `Bearer ${token}`
 	}
 	return headers
 }
 
-async function fetchPage(page) {
+async function fetchContributorCounts() {
 	const url = new URL(`https://api.github.com/repos/${REPOSITORY}/contributors`)
-	url.searchParams.set('per_page', String(PER_PAGE))
-	url.searchParams.set('page', String(page))
+	url.searchParams.set('per_page', '100')
 
-	let failure
-	for (let attempt = 1; attempt <= 3; attempt++) {
-		try {
-			const response = await fetch(url, {
-				headers: requestHeaders(),
-				signal: AbortSignal.timeout(30_000),
-			})
-			if (!response.ok) throw new Error(`HTTP ${response.status}`)
-			return await response.json()
-		} catch (error) {
-			failure = error
-			if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1_000))
+	const response = await fetch(url, {
+		headers: requestHeaders(),
+		signal: AbortSignal.timeout(30_000),
+	})
+	if (!response.ok) throw new Error(`HTTP ${response.status}`)
+	const payload = await response.json()
+	if (!Array.isArray(payload)) throw new Error('Contributors response was not an array')
+
+	const counts = new Map()
+	for (const entry of payload) {
+		if (!entry || typeof entry.login !== 'string') continue
+		if (entry.type === 'Bot' || /\[bot\]$/i.test(entry.login)) continue
+		if (!Number.isInteger(entry.contributions) || entry.contributions < 1) continue
+		counts.set(entry.login.toLowerCase(), entry.contributions)
+	}
+	return counts
+}
+
+function resolveContributors(counts) {
+	return CURRENT_REPO_CONTRIBUTORS.map((person) => {
+		const loginKey = person.login.toLowerCase()
+		const nameKey = person.name.toLowerCase()
+		const contributions = counts.get(loginKey) ?? counts.get(nameKey) ?? 1
+		return {
+			name: person.name,
+			avatarUrl: person.avatarUrl,
+			url: person.url,
+			contributions,
 		}
-	}
-	throw new Error(`Unable to fetch contributors from ${url}`, { cause: failure })
+	}).sort((left, right) => right.contributions - left.contributions || left.name.localeCompare(right.name))
 }
 
-function normalizeContributor(contributor) {
-	if (!contributor || typeof contributor !== 'object' || Array.isArray(contributor))
-		return undefined
-	if (typeof contributor.login !== 'string' || !contributor.login) return undefined
-	if (typeof contributor.html_url !== 'string' || !contributor.html_url) return undefined
-	if (typeof contributor.avatar_url !== 'string' || !contributor.avatar_url) return undefined
-	if (!Number.isInteger(contributor.contributions) || contributor.contributions < 1)
-		return undefined
-
-	const avatarUrl = new URL(contributor.avatar_url)
-	avatarUrl.searchParams.set('s', '96')
-
-	return {
-		name: contributor.login,
-		avatarUrl: avatarUrl.toString(),
-		url: contributor.html_url,
-		contributions: contributor.contributions,
-	}
+function buildTeam(contributors) {
+	return contributors.map((entry) => ({
+		name: entry.name,
+		avatarUrl: entry.avatarUrl,
+		url: entry.url,
+	}))
 }
 
-async function fetchContributors() {
-	const pages = []
-	for (let page = 1; page <= MAX_PAGES; page++) {
-		const contributors = await fetchPage(page)
-		if (!Array.isArray(contributors)) throw new Error(`Page ${page} did not contain an array`)
-		pages.push(contributors)
-		if (contributors.length < PER_PAGE) break
-	}
-
-	const contributors = pages
-		.flat()
-		.map(normalizeContributor)
-		.filter((contributor) => contributor !== undefined)
-		.sort(
-			(left, right) =>
-				right.contributions - left.contributions || left.name.localeCompare(right.name),
-		)
-
-	if (contributors.length === 0)
-		throw new Error('The contributors response did not contain any people')
-	return contributors
+async function writeIfChanged(path, data) {
+	const nextText = `${JSON.stringify(data, null, '\t')}\n`
+	const currentText = existsSync(path) ? await fs.readFile(path, 'utf8') : ''
+	if (currentText === nextText) return false
+	await fs.writeFile(path, nextText)
+	return true
 }
 
 async function main() {
-	let contributors
+	let counts = new Map()
 	try {
-		contributors = await fetchContributors()
+		counts = await fetchContributorCounts()
 	} catch (error) {
-		if (existsSync(OUTPUT_PATH)) {
-			console.warn(
-				`Unable to refresh contributors, keeping the existing snapshot: ${error.message}`,
-			)
-			return
-		}
-		throw error
+		console.warn(`Unable to refresh contribution counts, using defaults: ${error.message}`)
 	}
 
-	const nextText = `${JSON.stringify(contributors, null, '\t')}\n`
-	const currentText = existsSync(OUTPUT_PATH) ? await fs.readFile(OUTPUT_PATH, 'utf8') : ''
+	const contributors = resolveContributors(counts)
+	const team = buildTeam(contributors)
 
-	if (currentText === nextText) {
-		console.log(`Contributors are up to date (${contributors.length} people).`)
+	const contributorsChanged = await writeIfChanged(OUTPUT_PATH, contributors)
+	const teamChanged = await writeIfChanged(TEAM_OUTPUT_PATH, team)
+
+	if (!contributorsChanged && !teamChanged) {
+		console.log(`Current-repo contributors are up to date (${contributors.length} people).`)
 		return
 	}
 
-	await fs.writeFile(OUTPUT_PATH, nextText)
-	console.log(`Synchronized ${contributors.length} contributors from ${REPOSITORY}.`)
+	console.log(
+		`Synchronized ${contributors.length} current-repo contributor(s) from ${REPOSITORY} (upstream omitted).`,
+	)
 }
 await main()

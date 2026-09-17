@@ -25,7 +25,7 @@ export type DatapackTag = {
 
 export type DatapackSaveSource = PackFile[] | Blob
 
-const PACK_DESCRIPTION = 'Axolotl Recipe Generator'
+const PACK_DESCRIPTION = 'YMCL Recipe Generator'
 
 function formatDatapackTimestamp(date: Date): string {
 	const pad = (value: number) => String(value).padStart(2, '0')

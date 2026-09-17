@@ -333,7 +333,7 @@ fn mmc_dependencies(
         let uid = component.uid.to_ascii_lowercase();
         if uid.contains("labymod") {
             return Err(crate::ErrorKind::InputError(
-				"Unsupported loader LabyMod: Axolotl does not install, update, or repair LabyMod instances"
+				"Unsupported loader LabyMod: YMCL does not install, update, or repair LabyMod instances"
 					.to_string(),
 			)
 			.into());

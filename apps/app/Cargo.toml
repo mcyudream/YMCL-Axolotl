@@ -1,9 +1,9 @@
 [package]
-name = "theseus_gui"
+name = "ymcl_gui"
 # The actual version is set by the theseus-build workflow on tagging
 version = "1.9.6-beta.7"
 edition.workspace = true
-description = "Axolotl Launcher is a cross-platform Minecraft launcher"
+description = "YMCL (YuDream Launcher) is a cross-platform Minecraft launcher"
 homepage = "https://www.ghs.red"
 license = "GPL-3.0-only"
 

@@ -101,7 +101,7 @@ fn dependencies(
     }
     if loader == "labymod" || loader.starts_with("labymod-") {
         return Err(crate::ErrorKind::InputError(
-            "Unsupported loader LabyMod: Axolotl does not install, update, or repair LabyMod instances"
+            "Unsupported loader LabyMod: YMCL does not install, update, or repair LabyMod instances"
                 .to_string(),
         )
         .into());

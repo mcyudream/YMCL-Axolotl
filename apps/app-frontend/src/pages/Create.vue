@@ -4,6 +4,8 @@ import { BigOptionButton, Button, defineMessages, useVIntl } from '@modrinth/ui'
 import { inject } from 'vue'
 import { useRouter } from 'vue-router'
 
+import DomainPacksPanel from '@/components/ymcl/DomainPacksPanel.vue'
+
 const { formatMessage } = useVIntl()
 const router = useRouter()
 
@@ -104,6 +106,8 @@ function handleImportExisting() {
 					@click="handleImportExisting"
 				/>
 			</div>
+
+			<DomainPacksPanel />
 
 			<p class="m-0 text-sm text-secondary">
 				{{ formatMessage(messages.pclHmclHint) }}

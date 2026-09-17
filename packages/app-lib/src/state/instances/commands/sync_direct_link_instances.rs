@@ -35,7 +35,7 @@ pub struct DirectLinkSyncReport {
     pub errors: Vec<String>,
 }
 
-/// Reconciles configured external `.minecraft` roots with Axolotl's instance
+/// Reconciles configured external `.minecraft` roots with YMCL's instance
 /// records. The external filesystem is authoritative: new version folders are
 /// associated, changed JSON metadata is refreshed, and records whose version
 /// JSON disappeared are removed without touching any remaining files.
@@ -285,7 +285,7 @@ pub(crate) async fn sync_direct_link_instances(
     // Ordinary instances created with a version-isolated game-dir override
     // are also associated with a configured root. If that root is removed
     // from Settings before the next scan promotes the record to a direct
-    // link, drop only the Axolotl record here as well.
+    // link, drop only the YMCL record here as well.
     for metadata in &existing {
         if metadata.instance.linked_dot_minecraft.is_some() {
             continue;
@@ -333,7 +333,7 @@ pub(crate) async fn sync_direct_link_instances(
         };
         if !configured_root_matches(Path::new(root), &canonical_roots, &roots) {
             // Configured roots are authoritative. Removing a root from Settings
-            // only drops Axolotl's association; the external files remain intact.
+            // only drops YMCL's association; the external files remain intact.
             instance_rows::delete_instance_by_id(
                 &metadata.instance.id,
                 &state.pool,
@@ -352,7 +352,7 @@ pub(crate) async fn sync_direct_link_instances(
             && !seen_json.iter().any(|path| path == &json_path)
         {
             // External deletion is authoritative, but there is nothing left
-            // to delete on disk. Only remove the stale Axolotl record.
+            // to delete on disk. Only remove the stale YMCL record.
             instance_rows::delete_instance_by_id(
                 &metadata.instance.id,
                 &state.pool,

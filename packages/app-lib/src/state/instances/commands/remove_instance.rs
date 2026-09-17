@@ -31,7 +31,7 @@ async fn remove_instance_with_policy(
             crate::ErrorKind::InputError("Unknown instance".to_string())
         })?;
 
-    // Directly associated instances have no Axolotl profile directory. Their
+    // Directly associated instances have no YMCL profile directory. Their
     // version directory is the instance itself, so removal deliberately
     // deletes the externally managed content in place. Keep the shared
     // `.minecraft` root (assets/libraries/other versions) intact.

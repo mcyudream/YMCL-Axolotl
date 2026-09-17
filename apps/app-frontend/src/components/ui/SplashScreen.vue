@@ -5,7 +5,7 @@
 				class="absolute h-screen w-full flex flex-col justify-center items-center gap-4 z-[9998]"
 				data-tauri-drag-region
 			>
-				<img class="app-logo" src="@/assets/axolotl.png" alt="Axolotl Launcher" />
+				<img class="app-logo" src="@/assets/axolotl.png" alt="YMCL (YuDream Launcher)" />
 				<ProgressBar class="max-w-xs" :progress="Math.min(loadingProgress, 100)" />
 				<span v-if="message">{{ message }}</span>
 			</div>
@@ -114,8 +114,8 @@ loading_listener(async (e) => {
 	height: 100vh;
 	width: 100vw;
 	background:
-		linear-gradient(180deg, rgba(255, 77, 157, 0.24) 0%, rgba(48, 16, 40, 0.56) 97.29%),
-		linear-gradient(0deg, rgba(22, 18, 28, 0.68), rgba(22, 18, 28, 0.68));
+		linear-gradient(180deg, rgba(16, 80, 176, 0.28) 0%, rgba(0, 24, 88, 0.56) 97.29%),
+		linear-gradient(0deg, rgba(14, 18, 28, 0.68), rgba(14, 18, 28, 0.68));
 	z-index: 9997;
 }
 

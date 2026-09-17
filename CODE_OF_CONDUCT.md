@@ -1,4 +1,4 @@
-# Axolotl Launcher 行为准则
+# YMCL (YuDream Launcher) 行为准则
 
 ## 我们的承诺
 
@@ -32,7 +32,7 @@
 
 ## 适用范围
 
-本行为准则适用于 Axolotl Launcher 的所有官方社区空间，包括本仓库的 Issue、Pull Request、代码审查、讨论区、文档、官方账号和官方 QQ 群等。参与者在公开场合代表本项目时也应遵守本准则。
+本行为准则适用于 YMCL (YuDream Launcher) 的所有官方社区空间，包括本仓库的 Issue、Pull Request、代码审查、讨论区、文档和官方账号等。参与者在公开场合代表本项目时也应遵守本准则。
 
 本项目使用的第三方平台可能另有自己的规则；遵守这些规则不能成为违反本行为准则的理由。本准则也不限制对代码、设计或项目决策进行善意、基于事实的批评。
 
@@ -51,8 +51,8 @@
 
 如果你遭遇或目睹了违反本准则的行为，请尽快联系项目维护者：
 
-- 对于需要保密的事件，请在 [Axolotl GitHub Issues](https://github.com/Mystic-Stars/Axolotl/issues) 中仅留下“需要私下联系维护者”的简短说明，不要公开事件细节、个人信息、账号令牌或完整日志；维护者会通过可用的私下渠道与你联系。
-- 对于一般性的社区问题，可以在相关 Issue 或官方 QQ 群（737601250）中提出。请勿在公开频道发布可能使当事人被识别的敏感信息。
+- 对于需要保密的事件，请在 [YMCL GitHub Issues](https://github.com/mcyudream/YMCL-Axolotl/issues) 中仅留下“需要私下联系维护者”的简短说明，不要公开事件细节、个人信息、账号令牌或完整日志；维护者会通过可用的私下渠道与你联系。
+- 对于一般性的社区问题，可以在相关 Issue 中提出。请勿在公开频道发布可能使当事人被识别的敏感信息。
 
 维护者会及时、公平地受理和调查报告，并尽可能保护报告人的隐私。请仅提供与事件相关且你有权分享的信息；恶意或明显虚假的报告也可能构成对社区的骚扰。
 
@@ -62,7 +62,7 @@
 
 ---
 
-# Axolotl Launcher Code of Conduct
+# YMCL (YuDream Launcher) Code of Conduct
 
 ## Our Pledge
 
@@ -96,7 +96,7 @@ The following behaviors are unacceptable in the community:
 
 ## Scope
 
-This Code of Conduct applies to all official community spaces of Axolotl Launcher, including Issues, Pull Requests, code reviews, discussion forums, documentation, official accounts, and official QQ groups in this repository. Participants should also adhere to this Code of Conduct when representing the project in public.
+This Code of Conduct applies to all official community spaces of YMCL (YuDream Launcher), including Issues, Pull Requests, code reviews, discussion forums, documentation, and official accounts in this repository. Participants should also adhere to this Code of Conduct when representing the project in public.
 
 Third-party platforms used by this project may have their own rules; compliance with those rules does not constitute a valid reason for violating this Code of Conduct. This Code also does not restrict good-faith, fact-based criticism of code, design, or project decisions.
 
@@ -115,8 +115,8 @@ Maintainers may remove, edit, or reject comments, commits, issues, pull requests
 
 If you experience or witness a violation of this Code of Conduct, please contact the project maintainers as soon as possible:
 
-- For confidential matters, please leave only a brief note saying "Need to contact maintainers privately" in the [Axolotl GitHub Issues](https://github.com/Mystic-Stars/Axolotl/issues), without publicly disclosing event details, personal information, account tokens, or full logs; the maintainers will contact you through available private channels.
-- For general community issues, you can raise them in the relevant Issue or the official QQ group (737601250). Do not post sensitive information in public channels that could identify the parties involved.
+- For confidential matters, please leave only a brief note saying "Need to contact maintainers privately" in the [YMCL GitHub Issues](https://github.com/mcyudream/YMCL-Axolotl/issues), without publicly disclosing event details, personal information, account tokens, or full logs; the maintainers will contact you through available private channels.
+- For general community issues, you can raise them in the relevant Issue. Do not post sensitive information in public channels that could identify the parties involved.
 
 Maintainers will promptly and fairly receive and investigate reports, and protect the privacy of reporters to the best of their ability. Please only provide information that is relevant to the incident and that you are authorized to share; malicious or clearly false reports may also constitute harassment of the community.
 

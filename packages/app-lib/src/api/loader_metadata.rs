@@ -33,8 +33,19 @@ const OPTIFINE_VERSION_LIST_URL: &str =
     "https://bmclapi2.bangbang93.com/optifine/versionList";
 const LITELOADER_META_URL: &str =
     "https://dl.liteloader.com/versions/versions.json";
-const CLEANROOM_RELEASES_URL: &str =
+pub(crate) const CLEANROOM_RELEASES_URL: &str =
     "https://api.github.com/repos/CleanroomMC/Cleanroom/releases?per_page=100";
+
+/// Deterministic release-asset URL for a Cleanroom version. Matches the
+/// `browser_download_url` the GitHub API reports, so the domain CAS mirror
+/// key (the raw URL) lines up between publish-side push and install-side
+/// lookup regardless of which side constructed it.
+pub(crate) fn cleanroom_installer_url(loader_version: &str) -> String {
+    format!(
+        "https://github.com/CleanroomMC/Cleanroom/releases/download/\
+         {loader_version}/cleanroom-{loader_version}-installer.jar"
+    )
+}
 const FORGE_MAVEN_URL: &str =
     "https://maven.minecraftforge.net/net/minecraftforge/forge/";
 const FORGE_PROMOTIONS_URL: &str = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json";
@@ -727,16 +738,15 @@ async fn fetch_cleanroom_manifest(
     fetch_semaphore: &FetchSemaphore,
     pool: &SqlitePool,
 ) -> crate::Result<Manifest> {
-    let releases: Vec<GithubRelease> = fetch_json(
-        Method::GET,
+    // GitHub API metadata: prefer the domain CAS mirror (published admins
+    // push it) so version resolution works without GitHub access.
+    let bytes = crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
         CLEANROOM_RELEASES_URL,
-        None,
-        None,
-        None,
         fetch_semaphore,
         pool,
     )
     .await?;
+    let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes)?;
     Ok(cleanroom_manifest(releases))
 }
 
@@ -1651,11 +1661,11 @@ async fn resolve_installer_profile(
     state: &State,
     installer_url: &str,
 ) -> crate::Result<PartialVersionInfo> {
-    let bytes = fetch(
+    // Installer jars may be GitHub-hosted (Cleanroom): mirror-first fetch
+    // keeps installs working where GitHub is unreachable. Non-GitHub
+    // installers (Forge/NeoForge maven) go straight to the origin.
+    let bytes = crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
         installer_url,
-        None,
-        None,
-        None,
         &state.api_semaphore,
         &state.pool,
     )
@@ -1698,11 +1708,10 @@ pub(crate) async fn ensure_installer_artifacts(
         return Ok(());
     }
 
-    let bytes = fetch(
+    // The stored installer URL may point at GitHub (Cleanroom); re-fetches
+    // go through the same mirror-first path as the initial install.
+    let bytes = crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
         &installer_url.client,
-        None,
-        None,
-        None,
         &state.api_semaphore,
         &state.pool,
     )

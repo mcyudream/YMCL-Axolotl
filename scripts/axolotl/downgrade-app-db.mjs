@@ -27,7 +27,7 @@
 //   --list            print the applied migrations and exit
 //
 // AXOLOTL_LAUNCHER_IMAGES=<name,...>  process names that count as the launcher
-//                     running; defaults to Axolotl Launcher.exe, theseus_gui.exe
+//                     running; defaults to YMCL.exe, Axolotl Launcher.exe, theseus_gui.exe
 //
 // Resolving the default location needs Windows; pass --db anywhere else. The
 // launcher must be closed: a running instance keeps the database open and would
@@ -339,7 +339,7 @@ function columnsPresent(db, columns) {
 // Names a running launcher can appear under. Installed builds use the configured
 // main binary name and a `tauri dev` binary keeps the crate name; a fork may
 // rename it again, so AXOLOTL_LAUNCHER_IMAGES replaces the list.
-const LAUNCHER_IMAGES = ['Axolotl Launcher.exe', 'theseus_gui.exe']
+const LAUNCHER_IMAGES = ['YMCL.exe', 'Axolotl Launcher.exe', 'theseus_gui.exe', 'ymcl_gui.exe']
 
 function launcherImages() {
 	const configured = process.env.AXOLOTL_LAUNCHER_IMAGES

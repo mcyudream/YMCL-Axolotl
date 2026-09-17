@@ -493,6 +493,8 @@ impl State {
             concurrency_state.run_auto_concurrency_controller().await;
         });
 
+        crate::api::ymcl::auth::start_session_keeper();
+
         crate::telemetry::start(Arc::clone(state));
 
         tokio::task::spawn(async move {
@@ -523,7 +525,7 @@ impl State {
                 tracing::error!("Error running discord RPC: {e}");
             }
 
-            // Axolotl does not connect to Modrinth's private friends socket.
+            // YMCL does not connect to Modrinth's private friends socket.
         });
 
         Ok(())

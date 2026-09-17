@@ -14,7 +14,7 @@ import {
 test('creates pack.mcmeta with legacy and ranged pack formats', () => {
 	assert.equal(JSON.parse(createPackMcmeta(48)).pack.pack_format, 48)
 	assert.deepEqual(JSON.parse(createPackMcmeta([107, 1])).pack, {
-		description: 'Axolotl Recipe Generator',
+		description: 'YMCL Recipe Generator',
 		min_format: [107, 1],
 		max_format: [107, 1],
 	})
@@ -30,7 +30,7 @@ test('creates a datapack file name with a timestamp', () => {
 test('creates a description listing recipe product names in brackets', () => {
 	assert.equal(
 		createDatapackDescription(['橡木活板门', '闪长岩台阶']),
-		'Axolotl Recipe Generator\n[橡木活板门] [闪长岩台阶]',
+		'YMCL Recipe Generator\n[橡木活板门] [闪长岩台阶]',
 	)
 })
 

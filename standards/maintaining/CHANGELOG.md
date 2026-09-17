@@ -72,7 +72,7 @@ Name the page, tab, modal, or feature you're talking about. "The Content tab", "
 
 ## Naming things
 
-- Use the public, branded name: **Modrinth App**, **Modrinth Hosting**, **Modrinth** - not "the app", "servers", "Modrinth Servers" (deprecated). Capitalize product names.
+- Use the public, branded name: **YMCL (YuDream Launcher)** or **YMCL** - not "the app" or "the launcher". Capitalize product names.
 - Refer to UI surfaces by the label the user sees: **Content tab**, **Worlds tab**, **Files tab**, **Logs page**, **server panel**, **project page**, **Discover page**.
 - Capitalize tab and page names when referring to them by name (`the Content tab`), but not when used generically (`browse content`).
 

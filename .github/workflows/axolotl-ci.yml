@@ -80,7 +80,7 @@ jobs:
       - run: pnpm --filter @modrinth/app-frontend build
       - name: Test version metadata writes
         run: cargo test --package theseus writing_version_info_creates_missing_parent_directory
-      - run: cargo check --package theseus_gui --features updater
+      - run: cargo check --package ymcl_gui --features updater
       - name: Build modern Windows installer
         if: runner.os == 'Windows'
         run: pnpm --filter @modrinth/app tauri build --config tauri-release.conf.json --config tauri-modern.conf.json

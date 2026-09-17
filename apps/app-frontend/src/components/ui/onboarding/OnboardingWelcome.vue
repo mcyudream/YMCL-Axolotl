@@ -135,8 +135,8 @@ async function toggleFollowSystem() {
 				<div class="onboarding-welcome-logo">
 					<AxolotlLogo icon-only />
 				</div>
-				<div class="onboarding-welcome-wordmark" aria-label="Axolotl Launcher">
-					<span class="onboarding-welcome-wordmark-core" data-wordmark="Axolotl"> Axolotl </span>
+				<div class="onboarding-welcome-wordmark" aria-label="YMCL (YuDream Launcher)">
+					<span class="onboarding-welcome-wordmark-core" data-wordmark="YMCL"> YMCL </span>
 					<span class="onboarding-welcome-wordmark-suffix" data-wordmark="Launcher">
 						Launcher
 					</span>

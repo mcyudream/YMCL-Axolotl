@@ -236,7 +236,7 @@ const newRecord = ref(false)
 const endedManually = ref(false)
 const overtimeCount = ref(0)
 const messages = defineMessages({
-	title: { id: 'app.settings.about.game.title', defaultMessage: 'Axolotl merge' },
+	title: { id: 'app.settings.about.game.title', defaultMessage: 'YMCL merge' },
 	score: { id: 'app.settings.about.game.score', defaultMessage: 'Score: {score}' },
 	highestLevel: {
 		id: 'app.settings.about.game.highest-level',

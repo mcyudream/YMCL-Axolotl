@@ -29,7 +29,7 @@ struct TrayLabels {
 fn tray_labels(locale: &str) -> TrayLabels {
     if locale.eq_ignore_ascii_case("zh-CN") {
         TrayLabels {
-            show_launcher: "显示 Axolotl 启动器",
+            show_launcher: "显示 YMCL 启动器",
             launch_instance: "启动实例",
             lightweight_mode: "轻量模式",
             quit: "退出",
@@ -37,7 +37,7 @@ fn tray_labels(locale: &str) -> TrayLabels {
         }
     } else if locale.eq_ignore_ascii_case("zh-TW") {
         TrayLabels {
-            show_launcher: "顯示 Axolotl 啟動器",
+            show_launcher: "顯示 YMCL 啟動器",
             launch_instance: "啟動實例",
             lightweight_mode: "輕量模式",
             quit: "結束",
@@ -45,7 +45,7 @@ fn tray_labels(locale: &str) -> TrayLabels {
         }
     } else {
         TrayLabels {
-            show_launcher: "Show Axolotl Launcher",
+            show_launcher: "Show YMCL (YuDream Launcher)",
             launch_instance: "Launch instance",
             lightweight_mode: "Lightweight mode",
             quit: "Quit",
@@ -509,7 +509,7 @@ fn destroy_main_window(app: &AppHandle) -> Result<(), String> {
 fn create_lightweight_host_window(app: &AppHandle) -> Result<(), String> {
     if app.get_window(LIGHTWEIGHT_HOST_WINDOW_LABEL).is_none() {
         WindowBuilder::new(app, LIGHTWEIGHT_HOST_WINDOW_LABEL)
-            .title("Axolotl Launcher")
+            .title("YMCL (YuDream Launcher)")
             .visible(false)
             .focused(false)
             .focusable(false)
@@ -537,7 +537,7 @@ fn create_main_window(app: &AppHandle, route: &str) -> Result<(), String> {
             MAIN_WINDOW_LABEL,
             WebviewUrl::App(route.into()),
         )
-        .title("Axolotl Launcher")
+        .title("YMCL (YuDream Launcher)")
         .inner_size(1280.0, 800.0)
         .min_inner_size(1100.0, 700.0)
         .resizable(true)

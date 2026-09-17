@@ -1,6 +1,6 @@
 # 贡献指南 (Contributing)
 
-感谢你对 Axolotl Launcher 及其相关内容感兴趣！在提交代码前，请先阅读以下指南。
+感谢你对 YMCL (YuDream Launcher) 及其相关内容感兴趣！在提交代码前，请先阅读以下指南。
 
 我们希望所有参与者都能在友善、包容的环境中协作。请先阅读[行为准则 (CODE_OF_CONDUCT.md)](CODE_OF_CONDUCT.md)，了解社区期望和问题报告方式。
 
@@ -40,7 +40,7 @@ pnpm prepr:frontend:app
 # Rust 格式化检查
 cargo fmt --all --check
 # Rust 基础检查
-cargo check --package theseus_gui --features updater
+cargo check --package ymcl_gui --features updater
 ```
 
 ### 构建缓存与磁盘空间
@@ -111,14 +111,14 @@ node scripts/axolotl/downgrade-app-db.mjs --suffix pr538 --to 20260903120000 --a
 
 ## 仓库范围
 
-Axolotl 的产品改动主要位于：
+YMCL 的产品改动主要位于：
 
 - `apps/app-frontend`
 - `apps/app`
 - `packages/app-lib`
 - 上述包所需的共享 UI 与资源包
 
-本仓库**不包含** Modrinth 网站、Labrinth API 或其运营服务源码。桌面端保留对 Modrinth 公共 API 的客户端兼容；如果需要参考上游实现，请仅手动挑选与 Axolotl 产品相关的改动，避免直接合并无关代码。
+本仓库**不包含** Modrinth 网站、Labrinth API 或其运营服务源码。桌面端保留对 Modrinth 公共 API 的客户端兼容；如果需要参考上游实现，请仅手动挑选与 YMCL 产品相关的改动，避免直接合并无关代码。
 
 ## 发布新版本
 
@@ -127,7 +127,7 @@ Axolotl 的产品改动主要位于：
 打标签并推送到远端即可触发发布工作流：
 
 ```powershell
-git tag -a v1.2.3 -m "Axolotl Launcher 1.2.3"
+git tag -a v1.2.3 -m "YMCL (YuDream Launcher) 1.2.3"
 git push origin v1.2.3
 ```
 

@@ -1,6 +1,4 @@
-import type { Component } from 'vue'
-
-import AboutMergeGame from '../AboutMergeGame.vue'
+import { defineAsyncComponent, type Component } from 'vue'
 
 export type AboutMemberExperience = {
 	component: Component
@@ -9,7 +7,8 @@ export type AboutMemberExperience = {
 
 const memberExperiences: Record<string, AboutMemberExperience> = {
 	'axolotl-merge': {
-		component: AboutMergeGame,
+		// Lazy so Settings > About can open without pulling the merge-game graph.
+		component: defineAsyncComponent(() => import('../AboutMergeGame.vue')),
 		longPressDuration: 800,
 	},
 }

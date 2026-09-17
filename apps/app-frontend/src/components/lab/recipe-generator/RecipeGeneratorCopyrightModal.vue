@@ -47,7 +47,7 @@ const messages = defineMessages({
 	disclaimerBody: {
 		id: 'app.lab.recipe-generator.copyright.disclaimer-body',
 		defaultMessage:
-			'Minecraft assets are Copyright Mojang Studios / Microsoft and are used only to identify compatible content. Axolotl Launcher is not affiliated with or endorsed by Mojang Studios or Microsoft.',
+			'Minecraft assets are Copyright Mojang Studios / Microsoft and are used only to identify compatible content. YMCL (YuDream Launcher) is not affiliated with or endorsed by Mojang Studios or Microsoft.',
 	},
 })
 

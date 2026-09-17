@@ -269,6 +269,10 @@ pub enum CommandPayload {
         // URL query string describing the shared seed-map state
         query: String,
     },
+    AddSite {
+        // YAP domain site origin (ymcl://add-site?url={origin})
+        url: String,
+    },
 }
 
 #[derive(Serialize, Clone)]

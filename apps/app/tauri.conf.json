@@ -61,14 +61,14 @@
 			}
 		]
 	},
-	"productName": "Axolotl Launcher",
+	"productName": "YMCL",
 	"version": "../app-frontend/package.json",
-	"mainBinaryName": "Axolotl Launcher",
+	"mainBinaryName": "YMCL",
 	"identifier": "red.ghs.axolotl",
 	"plugins": {
 		"deep-link": {
 			"desktop": {
-				"schemes": ["axolotl"]
+				"schemes": ["ymcl"]
 			},
 			"mobile": []
 		}
@@ -83,7 +83,7 @@
 				"fullscreen": false,
 				"height": 800,
 				"resizable": true,
-				"title": "Axolotl Launcher",
+				"title": "YMCL (YuDream Launcher)",
 				"label": "main",
 				"width": 1280,
 				"minHeight": 700,
@@ -103,31 +103,34 @@
 					"$CONFIG/caches/icons/*",
 					"$APPDATA/profiles/*/saves/*/icon.png",
 					"$APPCONFIG/profiles/*/saves/*/icon.png",
-					"$CONFIG/profiles/*/saves/*/icon.png"
+					"$CONFIG/profiles/*/saves/*/icon.png",
+					"$APPDATA/ymcl_bundles/**",
+					"$APPCONFIG/ymcl_bundles/**",
+					"$CONFIG/ymcl_bundles/**"
 				],
 				"enable": true
 			},
 			"capabilities": ["core", "plugins"],
 			"devCsp": {
 				"default-src": "'self' customprotocol: asset:",
-				"connect-src": "ipc: http://ipc.localhost http://localhost:5201 ws://localhost:5201 https://modrinth.com https://*.modrinth.com https://api.mclo.gs http://textures.minecraft.net https://textures.minecraft.net https://fill.papermc.io https://api.papermc.io https://piston-meta.mojang.com https://launchermeta.mojang.com https://meta.fabricmc.net https://files.minecraftforge.net https://maven.minecraftforge.net https://api.purpurmc.org https://mod.mcimirror.top https://mod.tianpao.top https://admin.axlmc.org 'self' data: blob:",
+				"connect-src": "ipc: http://ipc.localhost http://localhost:5201 ws://localhost:5201 https://modrinth.com https://*.modrinth.com https://api.mclo.gs http://textures.minecraft.net https://textures.minecraft.net https://fill.papermc.io https://api.papermc.io https://piston-meta.mojang.com https://launchermeta.mojang.com https://meta.fabricmc.net https://files.minecraftforge.net https://maven.minecraftforge.net https://api.purpurmc.org https://mod.mcimirror.top https://mod.tianpao.top https://admin.axlmc.org http://localhost:9002 http://127.0.0.1:9002 'self' data: blob:",
 				"font-src": ["'self'", "data:", "https://cdn-raw.modrinth.com/fonts/"],
-				"img-src": "https: 'unsafe-inline' 'self' asset: http://asset.localhost http://textures.minecraft.net blob: data:",
+				"img-src": "https: http: 'unsafe-inline' 'self' asset: http://asset.localhost http://textures.minecraft.net blob: data:",
 				"style-src": "'unsafe-inline' 'self'",
-				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval'",
+				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
 				"worker-src": "'self' blob:",
-				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' http://axolotl-skin.localhost axolotl-skin://localhost",
+				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' asset: http://asset.localhost https://asset.localhost http://axolotl-skin.localhost axolotl-skin://localhost",
 				"media-src": "'self' data: https://*.githubusercontent.com"
 			},
 			"csp": {
 				"default-src": "'self' customprotocol: asset:",
-				"connect-src": "ipc: http://ipc.localhost https://modrinth.com https://*.modrinth.com https://api.mclo.gs http://textures.minecraft.net https://textures.minecraft.net https://fill.papermc.io https://api.papermc.io https://piston-meta.mojang.com https://launchermeta.mojang.com https://meta.fabricmc.net https://files.minecraftforge.net https://maven.minecraftforge.net https://api.purpurmc.org https://mod.mcimirror.top https://mod.tianpao.top https://admin.axlmc.org 'self' data: blob:",
+				"connect-src": "ipc: http://ipc.localhost https://modrinth.com https://*.modrinth.com https://api.mclo.gs http://textures.minecraft.net https://textures.minecraft.net https://fill.papermc.io https://api.papermc.io https://piston-meta.mojang.com https://launchermeta.mojang.com https://meta.fabricmc.net https://files.minecraftforge.net https://maven.minecraftforge.net https://api.purpurmc.org https://mod.mcimirror.top https://mod.tianpao.top https://admin.axlmc.org http://localhost:9002 http://127.0.0.1:9002 'self' data: blob:",
 				"font-src": ["'self'", "data:", "https://cdn-raw.modrinth.com/fonts/"],
-				"img-src": "https: 'unsafe-inline' 'self' asset: http://asset.localhost http://textures.minecraft.net blob: data:",
+				"img-src": "https: http: 'unsafe-inline' 'self' asset: http://asset.localhost http://textures.minecraft.net blob: data:",
 				"style-src": "'unsafe-inline' 'self'",
-				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval'",
+				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
 				"worker-src": "'self' blob:",
-				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' axolotl-skin://localhost http://axolotl-skin.localhost",
+				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' asset: http://asset.localhost https://asset.localhost axolotl-skin://localhost http://axolotl-skin.localhost",
 				"media-src": "'self' data: https://*.githubusercontent.com"
 			}
 		}

@@ -277,7 +277,7 @@ impl Error {
         ) = self.raw.as_ref()
         {
             return format!(
-                "The app database was created by a newer Axolotl build (migration {version} is missing from this build), so this build cannot open it. Install the newer build again, or downgrade the database before starting this build."
+                "The app database was created by a newer YMCL build (migration {version} is missing from this build), so this build cannot open it. Install the newer build again, or downgrade the database before starting this build."
             );
         }
         self.to_string()
@@ -328,7 +328,7 @@ mod tests {
         let message = error.user_facing_message();
 
         assert!(
-            message.contains("was created by a newer Axolotl build"),
+            message.contains("was created by a newer YMCL build"),
             "the frontend matches on this wording, got: {message}"
         );
         assert!(

@@ -164,13 +164,13 @@ mod windows {
         fn applies_a_custom_installer_directory() {
             assert_eq!(
                 decide_pending_directory(
-                    Some(r"D:\Minecraft\Axolotl"),
+                    Some(r"D:\Minecraft\YMCL"),
                     &default_directory(),
                     false,
                     false,
                 ),
                 PendingDirectoryDecision::Apply {
-                    custom_dir: r"D:\Minecraft\Axolotl".to_string(),
+                    custom_dir: r"D:\Minecraft\YMCL".to_string(),
                     prev_custom_dir: default_directory()
                         .to_string_lossy()
                         .to_string(),
@@ -195,7 +195,7 @@ mod windows {
         fn does_not_override_existing_settings() {
             assert_eq!(
                 decide_pending_directory(
-                    Some(r"D:\Minecraft\Axolotl"),
+                    Some(r"D:\Minecraft\YMCL"),
                     &default_directory(),
                     true,
                     false,
@@ -223,7 +223,7 @@ mod windows {
         fn portable_mode_leaves_the_pending_value_for_the_installed_app() {
             assert_eq!(
                 decide_pending_directory(
-                    Some(r"D:\Minecraft\Axolotl"),
+                    Some(r"D:\Minecraft\YMCL"),
                     &default_directory(),
                     false,
                     true,
@@ -238,7 +238,7 @@ mod windows {
                 custom_dir: _,
                 prev_custom_dir,
             } = decide_pending_directory(
-                Some(r"D:\Minecraft\Axolotl"),
+                Some(r"D:\Minecraft\YMCL"),
                 &default_directory(),
                 false,
                 false,

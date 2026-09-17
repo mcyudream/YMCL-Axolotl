@@ -1,5 +1,5 @@
-# Axolotl Launcher
+# YMCL (YuDream Launcher)
 
-Axolotl Launcher is the Tauri desktop shell for the Axolotl Minecraft launcher.
+YMCL is the Tauri desktop shell for the YMCL Minecraft launcher.
 
 Run `pnpm install` and `pnpm app:dev` from the workspace root to start a development build.

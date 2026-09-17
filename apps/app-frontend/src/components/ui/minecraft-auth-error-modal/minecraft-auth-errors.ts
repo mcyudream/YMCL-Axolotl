@@ -10,9 +10,9 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 	{
 		errorMatchers: ['Failed to deserialize response to JSON during step RefreshOAuthToken:'],
 		whatHappened:
-			'Your saved Microsoft sign-in token has expired or was revoked, so Axolotl Launcher cannot refresh your Minecraft session.',
+			'Your saved Microsoft sign-in token has expired or was revoked, so YMCL (YuDream Launcher) cannot refresh your Minecraft session.',
 		stepsToFix: [
-			'Sign out of the affected Minecraft account in Axolotl Launcher',
+			'Sign out of the affected Minecraft account in YMCL (YuDream Launcher)',
 			'Sign in to the account again',
 			'Once the new sign-in finishes, try launching Minecraft again',
 		],
@@ -25,7 +25,7 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 			'Open your system date and time settings',
 			'Turn on automatic time zone and automatic time, if available',
 			'Use the sync option in your system settings to synchronize the clock',
-			'Restart Axolotl Launcher',
+			'Restart YMCL (YuDream Launcher)',
 			'Try signing in again',
 		],
 	},
@@ -37,7 +37,7 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 			'Microsoft or Minecraft temporarily blocked the sign-in request because there were too many recent attempts.',
 		stepsToFix: [
 			'Wait about an hour before trying again',
-			'Restart Axolotl Launcher after waiting',
+			'Restart YMCL (YuDream Launcher) after waiting',
 			'Try signing in once more',
 			'If the same message appears, wait longer before retrying so the temporary limit can clear',
 		],
@@ -47,7 +47,7 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 			message.includes('Failed to deserialize response to JSON during step MinecraftToken:') &&
 			/Status Code: 5\d\d/.test(message),
 		whatHappened:
-			"Minecraft's authentication service is returning a server error, so Axolotl Launcher cannot finish signing you in right now.",
+			"Minecraft's authentication service is returning a server error, so YMCL (YuDream Launcher) cannot finish signing you in right now.",
 		stepsToFix: [
 			'Wait a few minutes and try signing in again',
 			'Check <a href="https://support.xbox.com/xbox-live-status">Xbox Status</a> for current service issues',
@@ -63,8 +63,8 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 			'Sign in with the <a href="https://www.minecraft.net/en-us/download">official Minecraft Launcher</a>',
 			'Launch Minecraft: Java Edition once from the official launcher',
 			'Wait up to an hour if the purchase or profile setup was recent',
-			'Make sure you are using the Microsoft account that owns Minecraft. Visit <a href="https://github.com/Mystic-Stars/Axolotl/issues">Axolotl support</a> for help',
-			'Try signing in to Axolotl Launcher again',
+			'Make sure you are using the Microsoft account that owns Minecraft. Visit <a href="https://github.com/Mystic-Stars/YMCL/issues">YMCL support</a> for help',
+			'Try signing in to YMCL (YuDream Launcher) again',
 		],
 	},
 	{
@@ -79,11 +79,11 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 				'live.com',
 			].some((domain) => message.includes(domain)),
 		whatHappened:
-			'Axolotl Launcher could not connect to a Microsoft, Xbox, or Minecraft service needed for sign-in. This is usually caused by a local network, DNS, proxy, firewall, hosts file, VPN, or antivirus issue.',
+			'YMCL (YuDream Launcher) could not connect to a Microsoft, Xbox, or Minecraft service needed for sign-in. This is usually caused by a local network, DNS, proxy, firewall, hosts file, VPN, or antivirus issue.',
 		stepsToFix: [
-			'Restart Axolotl Launcher and try signing in again',
+			'Restart YMCL (YuDream Launcher) and try signing in again',
 			'Check that your internet connection is working',
-			'Allow Axolotl Launcher through your firewall, antivirus, proxy, VPN, and hosts file rules',
+			'Allow YMCL (YuDream Launcher) through your firewall, antivirus, proxy, VPN, and hosts file rules',
 			'Try a different network or temporarily disable VPN/proxy software if you use one',
 			'If routing or DNS is the issue, a service like Cloudflare WARP can sometimes help',
 		],
@@ -173,11 +173,11 @@ export const minecraftAuthErrors: MinecraftAuthError[] = [
 	{
 		errorMatchers: ['Failed to deserialize response to JSON during step XstsAuthorize:'],
 		whatHappened:
-			'Xbox services rejected the request to authorize this account for Minecraft services, but did not return a specific account restriction that Axolotl Launcher recognizes.',
+			'Xbox services rejected the request to authorize this account for Minecraft services, but did not return a specific account restriction that YMCL (YuDream Launcher) recognizes.',
 		stepsToFix: [
 			'Sign in with the <a href="https://www.minecraft.net/en-us/download">official Minecraft Launcher</a>',
 			'Complete any prompts shown by Microsoft, Xbox, or Minecraft',
-			'Try signing in to Axolotl Launcher again',
+			'Try signing in to YMCL (YuDream Launcher) again',
 			'If the official launcher also fails, follow the error shown there or contact Xbox Support',
 		],
 	},

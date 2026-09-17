@@ -33,7 +33,7 @@ const messages = defineMessages({
 	intro: {
 		id: 'app.privacy-consent.intro',
 		defaultMessage:
-			'Choose what Axolotl may send or display. Nothing is sent until you confirm these choices.',
+			'Choose what YMCL may send or display. Nothing is sent until you confirm these choices.',
 	},
 	telemetry: {
 		id: 'app.privacy-consent.telemetry',

@@ -762,7 +762,7 @@ pub static DEFAULT_SKINS: LazyLock<Vec<Skin>> = LazyLock::new(|| {
     },
     Skin {
         texture_key: Arc::from("8d0484011053097a9809f14c0301166981369b3a660150afea1e753ae7e54685"),
-        name: Some(Arc::from("Baby Axolotl")),
+        name: Some(Arc::from("Baby YMCL")),
         section: Some(Arc::from(TINY_TAKEOVER_SKIN_PACK_SECTION)),
         variant: MinecraftSkinVariant::Classic,
         cape_id: None,

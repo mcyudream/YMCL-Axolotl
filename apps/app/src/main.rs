@@ -614,7 +614,7 @@ fn raise_file_descriptor_limit() {
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
-    // Initialize portable mode first (checks .Axolotl folder and sets THESEUS_CONFIG_DIR)
+    // Initialize portable mode first (checks .YMCL folder and sets THESEUS_CONFIG_DIR)
     // SAFETY: Called at the start of main() before any threads or tokio runtime are spawned
     let _portable = unsafe { portable::init_portable_mode() };
 
@@ -698,7 +698,7 @@ fn main() {
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
 
-    tracing::info!("Initialized tracing subscriber. Loading Axolotl Launcher!");
+    tracing::info!("Initialized tracing subscriber. Loading YMCL (YuDream Launcher)!");
 
     let mut builder = tauri::Builder::default().register_uri_scheme_protocol(
         "axolotl-skin",
@@ -785,11 +785,16 @@ fn main() {
             lightweight_mode::init(&app.handle());
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                // Dev builds sometimes finish the webview shell before Vue
+                // calls show_window; surface the window so the user does not
+                // stare at a blank/transparent frame forever.
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 if let Some(window) = app_handle.get_window("main")
                     && !window.is_visible().unwrap_or(true)
                 {
+                    tracing::warn!("Main window still hidden after 2s; forcing show");
                     let _ = window.show();
+                    let _ = window.set_focus();
                 }
             });
 
@@ -1050,7 +1055,7 @@ fn main() {
                     DialogBuilder::message()
                         .set_level(MessageLevel::Error)
                         .set_title("Initialization error")
-                        .set_text("Your Microsoft Edge WebView2 installation is corrupt.\n\nMicrosoft Edge WebView2 is required to run Axolotl Launcher.\n\nRepair or reinstall the Microsoft Edge WebView2 Runtime, then start Axolotl again.")
+                        .set_text("Your Microsoft Edge WebView2 installation is corrupt.\n\nMicrosoft Edge WebView2 is required to run YMCL (YuDream Launcher).\n\nRepair or reinstall the Microsoft Edge WebView2 Runtime, then start YMCL again.")
                         .alert()
                         .show()
                         .unwrap();

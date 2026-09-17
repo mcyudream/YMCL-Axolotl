@@ -38,7 +38,7 @@ export const onboardingMessages = defineMessages({
 	},
 	welcomeFooter: {
 		id: 'app.onboarding.welcome.footer',
-		defaultMessage: 'Your last next launcher.',
+		defaultMessage: 'A launcher designed for B2B, powered by YuDream Admin Skin.',
 	},
 	start: { id: 'app.onboarding.action.start', defaultMessage: 'Take the tour' },
 	homeWidgetsTitle: {
@@ -168,7 +168,7 @@ export const onboardingMessages = defineMessages({
 	},
 	translationTitle: {
 		id: 'app.onboarding.translation.title',
-		defaultMessage: 'Translation, the Axolotl way',
+		defaultMessage: 'Translation, the YMCL way',
 	},
 	translationDescription: {
 		id: 'app.onboarding.translation.description',
@@ -217,7 +217,7 @@ export const onboardingMessages = defineMessages({
 	updatesTitle: { id: 'app.onboarding.updates.title', defaultMessage: 'Stay in the loop' },
 	updatesDescription: {
 		id: 'app.onboarding.updates.description',
-		defaultMessage: 'Choose when Axolotl checks for updates and whether it installs them for you.',
+		defaultMessage: 'Choose when YMCL checks for updates and whether it installs them for you.',
 	},
 	clickTab: { id: 'app.onboarding.action.click-tab', defaultMessage: 'Click this tab to continue' },
 	libraryTitle: { id: 'app.onboarding.library.title', defaultMessage: 'Your launch shelf' },
@@ -392,7 +392,7 @@ export const onboardingMessages = defineMessages({
 			'Open a local .litematic or .schem file, or choose one from an installed instance. The 3D workspace keeps viewing, measurement, layer controls, materials, and local edits together.',
 	},
 	skip: { id: 'app.onboarding.action.skip', defaultMessage: 'Leave the tour' },
-	mascotAlt: { id: 'app.onboarding.mascot-alt', defaultMessage: 'Axolotl guide' },
+	mascotAlt: { id: 'app.onboarding.mascot-alt', defaultMessage: 'YMCL guide' },
 })
 
 const step = (

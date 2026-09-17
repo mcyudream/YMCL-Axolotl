@@ -54,7 +54,7 @@ const LOG_COMPACTION_THRESHOLD: usize = 20;
 const MAX_LOG_DISPLAY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOG_DISPLAY_LINE_BYTES: usize = 64 * 1024;
 const LOG_DISPLAY_TRUNCATION_MARKER: &str =
-    "\n… [log display truncated by Axolotl] …\n";
+    "\n… [log display truncated by YMCL] …\n";
 
 #[derive(Serialize, Debug)]
 pub struct LatestLogCursor {
@@ -190,7 +190,7 @@ fn push_compacted_log_run(
     if count >= LOG_COMPACTION_THRESHOLD {
         output.push_str(line);
         let _ =
-            write!(output, " (x{count} times - compacted by Axolotl Launcher)");
+            write!(output, " (x{count} times - compacted by YMCL (YuDream Launcher))");
         output.push_str(line_ending);
         stats.compacted_runs += 1;
         stats.compacted_lines += count;
@@ -379,7 +379,7 @@ async fn maybe_emit_log_compaction_warning(
     }
 
     let _ = crate::event::emit::emit_warning(&format!(
-        "Axolotl Launcher has compacted {} repeated log lines in {} before displaying it for performance reasons.",
+        "YMCL (YuDream Launcher) has compacted {} repeated log lines in {} before displaying it for performance reasons.",
         format_count(stats.compacted_lines),
         file_name,
     ))
@@ -395,7 +395,7 @@ async fn maybe_emit_log_display_truncation_warning(
     }
 
     let _ = crate::event::emit::emit_warning(&format!(
-        "Axolotl Launcher truncated {} before displaying it to keep the console responsive. The original log file remains unchanged.",
+        "YMCL (YuDream Launcher) truncated {} before displaying it to keep the console responsive. The original log file remains unchanged.",
         file_name,
     ))
     .await;
@@ -899,7 +899,7 @@ mod tests {
 
         assert!(compacted.display_truncated);
         assert!(compacted.output.len() <= MAX_LOG_DISPLAY_BYTES);
-        assert!(compacted.output.contains("truncated by Axolotl"));
+        assert!(compacted.output.contains("truncated by YMCL"));
         assert!(compacted.output.is_char_boundary(compacted.output.len()));
     }
 

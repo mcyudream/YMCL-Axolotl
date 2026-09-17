@@ -118,7 +118,7 @@ const messages = defineMessages({
 	appDirectory: { id: 'app.settings.resources.app-directory', defaultMessage: 'App directory' },
 	axolotlDataDirectory: {
 		id: 'app.settings.resources.axolotl-data-directory',
-		defaultMessage: 'Axolotl data directory',
+		defaultMessage: 'YMCL data directory',
 	},
 	appDirectoryDescription: {
 		id: 'app.settings.resources.app-directory-description',
@@ -137,7 +137,7 @@ const messages = defineMessages({
 	minecraftDirectoriesDescription: {
 		id: 'app.settings.resources.minecraft-directories-description',
 		defaultMessage:
-			'Add one or more .minecraft folders for instances that use an external game directory. These folders are kept separate from Axolotl data.',
+			'Add one or more .minecraft folders for instances that use an external game directory. These folders are kept separate from YMCL data.',
 	},
 	addMinecraftDirectory: {
 		id: 'app.settings.resources.add-minecraft-directory',
@@ -181,7 +181,7 @@ const messages = defineMessages({
 	appCacheDescription: {
 		id: 'app.settings.resources.app-cache-description',
 		defaultMessage:
-			'Axolotl Launcher caches data to speed up loading. Purging it forces the app to reload data and may temporarily slow the app down.',
+			'YMCL (YuDream Launcher) caches data to speed up loading. Purging it forces the app to reload data and may temporarily slow the app down.',
 	},
 	downloadMirrors: {
 		id: 'app.settings.resources.download-mirrors',

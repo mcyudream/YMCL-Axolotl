@@ -22,7 +22,7 @@ const messages = defineMessages({
 	intro: {
 		id: 'app.survey-promotion.intro',
 		defaultMessage:
-			'To help us improve Axolotl Launcher, we have prepared a short survey and would love to hear your feedback.',
+			'To help us improve YMCL (YuDream Launcher), we have prepared a short survey and would love to hear your feedback.',
 	},
 	reward: {
 		id: 'app.survey-promotion.reward',

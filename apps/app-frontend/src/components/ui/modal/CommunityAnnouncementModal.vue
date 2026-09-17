@@ -17,7 +17,7 @@ const messages = defineMessages({
 	response: {
 		id: 'app.community-announcement.response',
 		defaultMessage:
-			'Since Axolotl Launcher was promoted on video platforms, we have received far more love and attention than we expected, along with many thoughtful suggestions and high-quality reports.',
+			'Since YMCL (YuDream Launcher) was promoted on video platforms, we have received far more love and attention than we expected, along with many thoughtful suggestions and high-quality reports.',
 	},
 	thanks: {
 		id: 'app.community-announcement.thanks',
@@ -34,7 +34,7 @@ const messages = defineMessages({
 	},
 	feedbackSuffix: {
 		id: 'app.community-announcement.feedback-suffix',
-		defaultMessage: '. We look forward to improving Axolotl Launcher together!',
+		defaultMessage: '. We look forward to improving YMCL (YuDream Launcher) together!',
 	},
 })
 

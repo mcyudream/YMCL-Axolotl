@@ -142,7 +142,7 @@ pub(crate) async fn install_hmcl_pack_with_reporter(
             "optifine" => optifine_version = Some(addon.version.clone()),
             "labymod" => {
                 return Err(crate::ErrorKind::InputError(
-                    "Unsupported loader LabyMod: Axolotl does not install, update, or repair LabyMod instances"
+                    "Unsupported loader LabyMod: YMCL does not install, update, or repair LabyMod instances"
                         .to_string(),
                 )
                 .into());

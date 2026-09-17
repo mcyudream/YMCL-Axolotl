@@ -78,7 +78,7 @@ pub enum ImportLauncherType {
 impl fmt::Display for ImportLauncherType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ImportLauncherType::Axolotl => write!(f, "Axolotl"),
+            ImportLauncherType::Axolotl => write!(f, "YMCL"),
             ImportLauncherType::MultiMC => write!(f, "MultiMC"),
             ImportLauncherType::PrismLauncher => write!(f, "PrismLauncher"),
             ImportLauncherType::ATLauncher => write!(f, "ATLauncher"),
@@ -285,7 +285,7 @@ async fn get_hmcl_instances(
     Ok(collector.instances)
 }
 
-/// Collects Axolotl instances from a base path. A base path holding
+/// Collects YMCL instances from a base path. A base path holding
 /// `axolotl_config.json` is itself an instance; otherwise direct child
 /// folders with their own config are treated as instances.
 async fn get_axolotl_instances(

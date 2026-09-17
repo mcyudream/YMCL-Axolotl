@@ -61,7 +61,7 @@ static LOG_FILTER_RELOAD: std::sync::OnceLock<
 > = std::sync::OnceLock::new();
 
 fn log_level_directives(level: &str) -> String {
-    format!("theseus={level},theseus_gui={level}")
+    format!("theseus={level},ymcl_gui={level}")
 }
 
 fn add_third_party_directives(

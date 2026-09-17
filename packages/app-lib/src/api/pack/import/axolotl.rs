@@ -45,7 +45,7 @@ pub struct AxolotlContentSet {
     pub loader_version: Option<String>,
 }
 
-/// Imports an Axolotl instance by reading `axolotl_config.json` and applying
+/// Imports an YMCL instance by reading `axolotl_config.json` and applying
 /// the migratable fields to the new profile. Invalid or unsupported configs
 /// fall back to the generic instance import so the game files still arrive.
 pub(crate) async fn import_axolotl(
@@ -61,7 +61,7 @@ pub(crate) async fn import_axolotl(
         .await
         .unwrap_or_else(|error| {
             tracing::warn!(
-                "Axolotl import: could not read {}: {error}; falling back to generic import",
+                "YMCL import: could not read {}: {error}; falling back to generic import",
                 config_path.display()
             );
             (String::new(), encoding_rs::UTF_8)
@@ -72,7 +72,7 @@ pub(crate) async fn import_axolotl(
         Ok(config) => config,
         Err(error) => {
             tracing::warn!(
-                "Axolotl import: invalid config {}: {error}; falling back to generic import",
+                "YMCL import: invalid config {}: {error}; falling back to generic import",
                 config_path.display()
             );
             return generic::import_generic(
@@ -88,7 +88,7 @@ pub(crate) async fn import_axolotl(
         }
     };
     tracing::debug!(
-        "Axolotl import: config instance_id={} path={} generated_at={} symlink_target={:?}",
+        "YMCL import: config instance_id={} path={} generated_at={} symlink_target={:?}",
         config.instance_id,
         config.path,
         config.generated_at,
@@ -99,7 +99,7 @@ pub(crate) async fn import_axolotl(
         || config.content_set.game_version.trim().is_empty()
     {
         tracing::warn!(
-            "Axolotl import: unsupported schema or missing game version for {}; falling back to generic import",
+            "YMCL import: unsupported schema or missing game version for {}; falling back to generic import",
             config_path.display()
         );
         return generic::import_generic(

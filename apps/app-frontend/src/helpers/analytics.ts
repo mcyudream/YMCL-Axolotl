@@ -70,6 +70,6 @@ export const trackEvent = <E extends AnalyticsEvent>(
 	...args: OptionalArgs<AnalyticsEventMap[E]>
 ) => {
 	if (optedIn && debugEnabled) {
-		console.debug('[Axolotl telemetry disabled]', eventName, args[0])
+		console.debug('[YMCL telemetry disabled]', eventName, args[0])
 	}
 }

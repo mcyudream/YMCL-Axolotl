@@ -15,8 +15,8 @@ export async function areUpdatesEnabled() {
 	return await invoke('are_updates_enabled')
 }
 
-export async function checkAppUpdate(channel = 'release') {
-	return await invoke('check_app_update', { channel })
+export async function checkAppUpdate(channel = 'release', updateBase = null) {
+	return await invoke('check_app_update', { channel, updateBase })
 }
 
 export async function getUpdateSize(updateRid) {

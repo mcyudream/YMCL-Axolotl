@@ -11,6 +11,7 @@ import { onUnmounted, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { NewInstanceImage } from '@/assets/icons'
+import DomainPacksPanel from '@/components/ymcl/DomainPacksPanel.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { DIRECT_LINKS_SYNCED_EVENT } from '@/helpers/direct-link-sync'
 import { instance_listener } from '@/helpers/events.js'
@@ -70,6 +71,7 @@ onUnmounted(() => {
 				{ label: formatMessage(messages.saved), href: `/library/saved`, shown: false },
 			]"
 		/>
+		<DomainPacksPanel />
 		<template v-if="instances && instances.length > 0">
 			<RouterView v-if="route.path.startsWith('/library')" :instances="instances" />
 		</template>

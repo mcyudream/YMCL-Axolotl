@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import {
-	CheckIcon,
 	ChevronDownIcon,
-	CopyIcon,
-	EditIcon,
 	ExternalIcon,
 	GithubIcon,
-	GlobeIcon,
 	HeartHandshakeIcon,
 	IssuesIcon,
 	ScaleIcon,
@@ -14,22 +10,25 @@ import {
 } from '@modrinth/assets'
 import { Avatar, defineMessages, NewButton as Button, useVIntl } from '@modrinth/ui'
 import { getVersion } from '@tauri-apps/api/app'
-import { inject, nextTick, onScopeDispose, ref, shallowRef } from 'vue'
+import { defineAsyncComponent, inject, nextTick, onScopeDispose, ref, shallowRef } from 'vue'
 
-import AfdianIcon from '@/assets/external/afdian.png'
-import QqIcon from '@/assets/external/qq.svg?component'
-import EasterEggContributorsModal from '@/components/ui/easteregg/EasterEggContributorsModal.vue'
-import EasterEggGameModal from '@/components/ui/easteregg/EasterEggGameModal.vue'
+import aboutBanner from '@/assets/about/yudream-launcher-banner.jpg'
 import { AxolotlBrandConfig } from '@/config'
 import { contributors, type TeamMember, teamMembers } from '@/data/about'
 
-import AboutScene from '../AboutScene.vue'
 import { type AboutMemberExperience, getAboutMemberExperience } from './about-member-experiences'
-import QqChannelIcon from './QqChannelIcon.vue'
+
+const EasterEggGameModal = defineAsyncComponent(
+	() => import('@/components/ui/easteregg/EasterEggGameModal.vue'),
+)
+const EasterEggContributorsModal = defineAsyncComponent(
+	() => import('@/components/ui/easteregg/EasterEggContributorsModal.vue'),
+)
 
 const { formatMessage } = useVIntl()
-const version = await getVersion()
-const copied = ref(false)
+// Top-level await + dynamic imports previously broke HMR after ymcl edits;
+// keep setup synchronous-friendly so Settings > About stays enterable.
+const version = ref('')
 const experienceHost = ref<HTMLElement>()
 const activeMemberExperience = shallowRef<AboutMemberExperience>()
 const pressingMemberName = ref<string>()
@@ -38,17 +37,17 @@ let pressStart = { x: 0, y: 0 }
 let suppressNextMemberClick = false
 const replayOnboarding = inject<(mode: 'main' | 'instance') => Promise<void>>('replayOnboarding')
 
+void getVersion()
+	.then((value) => {
+		version.value = value
+	})
+	.catch(() => {
+		version.value = ''
+	})
+
 const licenseUrl = `${AxolotlBrandConfig.repositoryUrl}/blob/main/LICENSE`
 const copyingUrl = `${AxolotlBrandConfig.repositoryUrl}/blob/main/COPYING.md`
 const thirdPartyLicensesUrl = `${AxolotlBrandConfig.repositoryUrl}/tree/main/third-party/licenses`
-
-async function copyQqGroupNumber() {
-	await navigator.clipboard.writeText(AxolotlBrandConfig.qqGroupNumber)
-	copied.value = true
-	setTimeout(() => {
-		copied.value = false
-	}, 3000)
-}
 
 function cancelMemberLongPress() {
 	if (longPressTimer) window.clearTimeout(longPressTimer)
@@ -94,8 +93,8 @@ function closeMemberExperience() {
 	activeMemberExperience.value = undefined
 }
 
-const gameModal = ref<InstanceType<typeof EasterEggGameModal> | null>(null)
-const contributorsModal = ref<InstanceType<typeof EasterEggContributorsModal> | null>(null)
+const gameModal = ref<{ show: () => void } | null>(null)
+const contributorsModal = ref<{ show: () => void } | null>(null)
 
 let typedBuffer = ''
 const secretCodes = ['cyf112233', 'cxkcxkckx']
@@ -154,7 +153,7 @@ const messages = defineMessages({
 	},
 	productDescription: {
 		id: 'app.settings.about.description',
-		defaultMessage: 'Your last launcher.',
+		defaultMessage: 'A launcher designed for B2B, powered by YuDream Admin Skin.',
 	},
 	version: {
 		id: 'app.settings.about.version',
@@ -172,10 +171,6 @@ const messages = defineMessages({
 		id: 'app.settings.about.community-support',
 		defaultMessage: 'Project & community',
 	},
-	projectWebsite: {
-		id: 'app.settings.about.project-website',
-		defaultMessage: 'Project website',
-	},
 	repository: {
 		id: 'app.settings.about.repository',
 		defaultMessage: 'Source code',
@@ -184,50 +179,23 @@ const messages = defineMessages({
 		id: 'app.settings.about.report-issue',
 		defaultMessage: 'Issues & feedback',
 	},
-	qqGroup: {
-		id: 'app.settings.about.qq-group',
-		defaultMessage: 'Player QQ group',
-	},
-	qqChannel: {
-		id: 'app.settings.about.qq-channel',
-		defaultMessage: 'QQ channel',
-	},
-	copyQqGroup: {
-		id: 'app.settings.about.copy-qq-group',
-		defaultMessage: 'Copy group number',
-	},
-	copiedQqGroup: {
-		id: 'app.settings.about.copied-qq-group',
-		defaultMessage: 'Group number copied',
-	},
-	afdian: {
-		id: 'app.settings.about.afdian',
-		defaultMessage: 'Support on Afdian',
-	},
-	afdianDescription: {
-		id: 'app.settings.about.afdian-description',
-		defaultMessage: 'Help support continued development',
-	},
-	survey: {
-		id: 'app.settings.about.survey',
-		defaultMessage: 'Community survey',
-	},
-	surveyDescription: {
-		id: 'app.settings.about.survey-description',
-		defaultMessage: 'Help us improve Axolotl Launcher',
-	},
 	licenseAttribution: {
 		id: 'app.settings.about.license-attribution',
 		defaultMessage: 'License & attribution',
 	},
 	attribution: {
 		id: 'app.settings.about.attribution',
-		defaultMessage: 'Axolotl Launcher is a modified version of the open-source Modrinth codebase.',
+		defaultMessage:
+			'YMCL (YuDream Launcher) is an open-source Minecraft launcher secondary-developed from Axolotl Launcher.',
+	},
+	basedOnAxolotl: {
+		id: 'app.settings.about.based-on-axolotl',
+		defaultMessage: 'Based on secondary development of Axolotl',
 	},
 	notAffiliated: {
 		id: 'app.settings.about.not-affiliated',
 		defaultMessage:
-			'Modrinth is a trademark of Rinth, Inc. Axolotl Launcher is not affiliated with or endorsed by Rinth, Inc.',
+			'Modrinth is a trademark of Rinth, Inc. YMCL (YuDream Launcher) is not affiliated with or endorsed by Rinth, Inc.',
 	},
 	originalSource: {
 		id: 'app.settings.about.original-source',
@@ -257,11 +225,6 @@ const messages = defineMessages({
 
 const projectLinks = [
 	{
-		href: AxolotlBrandConfig.website,
-		label: messages.projectWebsite,
-		icon: GlobeIcon,
-	},
-	{
 		href: AxolotlBrandConfig.repositoryUrl,
 		label: messages.repository,
 		icon: GithubIcon,
@@ -270,11 +233,6 @@ const projectLinks = [
 		href: AxolotlBrandConfig.supportUrl,
 		label: messages.reportIssue,
 		icon: IssuesIcon,
-	},
-	{
-		href: AxolotlBrandConfig.qqChannelUrl,
-		label: messages.qqChannel,
-		icon: QqChannelIcon,
 	},
 ]
 </script>
@@ -291,7 +249,16 @@ const projectLinks = [
 						-webkit-mask-image: linear-gradient(to bottom, black 97%, transparent 100%);
 					"
 				>
-					<AboutScene />
+					<img
+						v-if="!activeMemberExperience"
+						class="size-full object-cover object-center"
+						:src="aboutBanner"
+						:alt="
+							formatMessage(messages.productTitle, {
+								productName: AxolotlBrandConfig.productName,
+							})
+						"
+					/>
 					<component
 						:is="activeMemberExperience?.component"
 						v-if="activeMemberExperience"
@@ -341,7 +308,21 @@ const projectLinks = [
 						@click="handleMemberClick"
 						@contextmenu="handleMemberContextMenu(member, $event)"
 					>
-						<Avatar :src="member.avatarUrl" :alt="member.name" size="4rem" circle no-shadow />
+					<Avatar
+						v-if="member.avatarUrl"
+						:src="member.avatarUrl"
+						:alt="member.name"
+						size="4rem"
+						circle
+						no-shadow
+					/>
+					<div
+						v-else
+						class="flex size-16 items-center justify-center rounded-full bg-surface-3 text-lg font-bold text-secondary"
+						aria-hidden="true"
+					>
+						{{ member.name.slice(0, 1) }}
+					</div>
 						<span class="block truncate text-center font-semibold text-contrast">{{
 							member.name
 						}}</span>
@@ -358,7 +339,7 @@ const projectLinks = [
 			<div class="grid gap-3 sm:grid-cols-2">
 				<a
 					v-for="link in projectLinks"
-					:key="link.label"
+					:key="link.label?.id ?? link.href"
 					:href="link.href"
 					target="_blank"
 					rel="noopener noreferrer"
@@ -371,81 +352,6 @@ const projectLinks = [
 					</span>
 					<span class="min-w-0 flex-1 font-semibold text-contrast">
 						{{ formatMessage(link.label) }}
-					</span>
-					<ExternalIcon class="size-5 shrink-0 text-secondary" />
-				</a>
-
-				<button
-					type="button"
-					:disabled="copied"
-					:aria-label="
-						copied ? formatMessage(messages.copiedQqGroup) : formatMessage(messages.copyQqGroup)
-					"
-					class="flex min-w-0 items-center gap-3 rounded-xl bg-surface-4 p-4 text-left transition-colors hover:bg-surface-5 disabled:cursor-default"
-					@click="copyQqGroupNumber"
-				>
-					<span
-						class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-contrast"
-					>
-						<QqIcon class="size-6" />
-					</span>
-					<span class="min-w-0 flex-1">
-						<span class="block font-semibold text-contrast">
-							{{ formatMessage(messages.qqGroup) }}
-						</span>
-						<span class="block text-sm text-secondary">
-							{{ AxolotlBrandConfig.qqGroupNumber }}
-						</span>
-					</span>
-					<span class="shrink-0" aria-live="polite">
-						<CheckIcon v-if="copied" class="size-5 text-green" />
-						<CopyIcon v-else class="size-5 text-secondary" />
-						<span class="sr-only">
-							{{
-								copied ? formatMessage(messages.copiedQqGroup) : formatMessage(messages.copyQqGroup)
-							}}
-						</span>
-					</span>
-				</button>
-
-				<a
-					:href="AxolotlBrandConfig.sponsorUrl"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="flex min-w-0 items-center gap-3 rounded-xl bg-surface-4 p-4 transition-colors hover:bg-surface-5"
-				>
-					<span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2">
-						<img :src="AfdianIcon" alt="" class="size-7 object-contain" />
-					</span>
-					<span class="min-w-0 flex-1">
-						<span class="block font-semibold text-contrast">
-							{{ formatMessage(messages.afdian) }}
-						</span>
-						<span class="block text-sm text-secondary">
-							{{ formatMessage(messages.afdianDescription) }}
-						</span>
-					</span>
-					<ExternalIcon class="size-5 shrink-0 text-secondary" />
-				</a>
-
-				<a
-					:href="AxolotlBrandConfig.surveyUrl"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="flex min-w-0 items-center gap-3 rounded-xl bg-surface-4 p-4 transition-colors hover:bg-surface-5 sm:col-span-2"
-				>
-					<span
-						class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-contrast"
-					>
-						<EditIcon class="size-6" />
-					</span>
-					<span class="min-w-0 flex-1">
-						<span class="block font-semibold text-contrast">
-							{{ formatMessage(messages.survey) }}
-						</span>
-						<span class="block text-sm text-secondary">
-							{{ formatMessage(messages.surveyDescription) }}
-						</span>
 					</span>
 					<ExternalIcon class="size-5 shrink-0 text-secondary" />
 				</a>
@@ -462,10 +368,32 @@ const projectLinks = [
 					{{ formatMessage(messages.attribution) }}
 				</p>
 				<p class="m-0 mt-2 text-sm text-secondary">
+					{{ formatMessage(messages.basedOnAxolotl) }}
+				</p>
+				<a
+					:href="AxolotlBrandConfig.repositoryUrl"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="mt-2 inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-brand hover:underline"
+				>
+					<GithubIcon class="size-4 shrink-0" />
+					<span class="truncate">{{ AxolotlBrandConfig.repositoryUrl }}</span>
+				</a>
+				<p class="m-0 mt-2 text-sm text-secondary">
 					{{ formatMessage(messages.notAffiliated) }}
 				</p>
 			</div>
 			<div class="mt-3 flex flex-wrap gap-2">
+				<a
+					:href="AxolotlBrandConfig.repositoryUrl"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="inline-flex items-center gap-2 rounded-lg bg-surface-4 px-3 py-2 text-sm font-semibold text-contrast transition-colors hover:bg-surface-5"
+				>
+					<GithubIcon class="size-4 text-secondary" />
+					{{ formatMessage(messages.basedOnAxolotl) }}
+					<ExternalIcon class="size-4 text-secondary" />
+				</a>
 				<a
 					:href="licenseUrl"
 					target="_blank"

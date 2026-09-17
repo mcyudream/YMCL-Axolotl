@@ -774,7 +774,7 @@ fn legacy_download_source(enabled: bool) -> DownloadSourceMode {
 ///
 /// Serialized as a plain string: either a preset name (`pink`, `orange`, ...)
 /// or `custom:#rrggbb` for a user-defined color. Unknown values fall back to
-/// [`AccentColor::Pink`], keeping older builds forward-compatible.
+/// [`AccentColor::Blue`], matching the YMCL brand default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccentColor {
     Pink,
@@ -799,7 +799,7 @@ impl AccentColor {
                 if Self::is_valid_custom(value) {
                     value
                 } else {
-                    "pink"
+                    "blue"
                 }
             }
         }
@@ -814,7 +814,7 @@ impl AccentColor {
             "system" => AccentColor::System,
             other => match Self::parse_custom(other) {
                 Some(custom) => custom,
-                None => AccentColor::Pink,
+                None => AccentColor::Blue,
             },
         }
     }
@@ -978,7 +978,7 @@ mod tests {
     }
 
     #[test]
-    fn accent_color_falls_back_to_pink_on_invalid_values() {
+    fn accent_color_falls_back_to_blue_on_invalid_values() {
         for value in [
             "",
             "magenta",
@@ -987,7 +987,7 @@ mod tests {
             "custom:#db2777aa",
             "custom:#db277g",
         ] {
-            assert_eq!(AccentColor::from_string(value), AccentColor::Pink);
+            assert_eq!(AccentColor::from_string(value), AccentColor::Blue);
         }
     }
 
@@ -1009,10 +1009,10 @@ mod tests {
     }
 
     #[test]
-    fn accent_color_serializes_invalid_custom_as_pink() {
+    fn accent_color_serializes_invalid_custom_as_blue() {
         let invalid = AccentColor::Custom("not-a-color".to_owned());
-        assert_eq!(invalid.as_str(), "pink");
-        assert_eq!(serde_json::to_string(&invalid).unwrap(), "\"pink\"");
+        assert_eq!(invalid.as_str(), "blue");
+        assert_eq!(serde_json::to_string(&invalid).unwrap(), "\"blue\"");
     }
 
     #[test]

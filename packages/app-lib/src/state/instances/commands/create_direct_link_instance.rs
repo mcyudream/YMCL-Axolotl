@@ -166,7 +166,7 @@ pub(crate) async fn create_direct_link_instance(
     tx.commit().await?;
 
     // Deliberately no config sync and no folder watcher: both would write
-    // into or monitor folders outside of Axolotl's own directories.
+    // into or monitor folders outside of YMCL's own directories.
 
     Ok(instance)
 }

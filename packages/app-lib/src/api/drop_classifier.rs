@@ -314,7 +314,7 @@ impl ZipEntrySet {
     }
 
     /// Whether a direct child folder under `base` has `axolotl_config.json`
-    /// (a container of Axolotl instances).
+    /// (a container of YMCL instances).
     fn has_direct_axolotl_config(&self, base: &str) -> bool {
         self.child_folders(base).iter().any(|child| {
             self.has_file(&format!("{base}{child}/"), "axolotl_config.json")
@@ -2003,8 +2003,8 @@ fn has_direct_version_json(path: &Path) -> bool {
     })
 }
 
-/// Whether `path` is an Axolotl instance root or a container whose direct
-/// child folders are Axolotl instances.
+/// Whether `path` is an YMCL instance root or a container whose direct
+/// child folders are YMCL instances.
 fn is_axolotl_folder(path: &Path) -> bool {
     path.join("axolotl_config.json").is_file()
         || has_direct_axolotl_config(path)

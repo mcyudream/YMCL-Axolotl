@@ -147,7 +147,7 @@ pub async fn import_curseforge(
 			let message = if loader_name.eq_ignore_ascii_case("labymod")
 				|| loader_name.to_ascii_lowercase().starts_with("labymod-")
 			{
-				"Unsupported loader LabyMod: Axolotl does not install, update, or repair LabyMod instances".to_string()
+				"Unsupported loader LabyMod: YMCL does not install, update, or repair LabyMod instances".to_string()
 			} else {
 				format!(
 					"Unsupported loader {loader_name}: the instance was not imported as Vanilla"

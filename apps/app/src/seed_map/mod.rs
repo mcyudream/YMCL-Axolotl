@@ -172,7 +172,7 @@ impl Dimension {
 }
 
 /*
- * Supported Java versions, newest first, using Axolotl version codes
+ * Supported Java versions, newest first, using YMCL version codes
  * (major * 10000 + minor * 100 + patch) that the cubiomes bridge maps to its
  * own engine versions.
  */

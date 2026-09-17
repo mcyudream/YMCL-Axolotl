@@ -37,7 +37,7 @@ const { formatMessage } = useVIntl()
 const messages = defineMessages({
 	title: {
 		id: 'drop.help.title',
-		defaultMessage: 'What can I drop into Axolotl?',
+		defaultMessage: 'What can I drop into YMCL?',
 	},
 	instancesTitle: {
 		id: 'drop.help.instances-title',

@@ -1,6 +1,6 @@
 //! Launcher-dialect resolution and launch glue for directly linked Minecraft
 //! installations. Linked folders are read in place; native archives are the
-//! only data copied, and they are extracted into Axolotl's own cache.
+//! only data copied, and they are extracted into YMCL's own cache.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -150,7 +150,7 @@ impl DirectLinkedLaunch {
         // copied installations commonly keep a user-facing folder name while
         // the actual JSON is named after the version ID. Resolving the exact
         // manifest here keeps those rows on the external runtime adapter,
-        // instead of later falling back to Axolotl's managed libraries.
+        // instead of later falling back to YMCL's managed libraries.
         let version_json = discover_version_json(dot_minecraft, folder_name)?;
         let version_id = version_json
             .file_stem()
@@ -435,7 +435,7 @@ fn resolve_hmcl_game_dir(
 /// it before those consumers run covers direct ensure, classpath, and
 /// launch at once. The Cleanroom LWJGL 3 line and `com.cleanroommc:lwjglxx`
 /// are untouched; the vanilla JNA platform and the Mojang ICU bundle are
-/// removed by the pre-existing Axolotl Cleanroom rule (not HMCL logic).
+/// removed by the pre-existing YMCL Cleanroom rule (not HMCL logic).
 /// Returns the removed coordinates for logging.
 pub(crate) fn normalize_merged_loader_libraries(
     loader: ModLoader,
@@ -614,7 +614,7 @@ fn hmcl_tokenize(input: &str) -> Vec<String> {
     tokens
 }
 
-/// Applies the HMCL private per-version settings that map onto Axolotl's
+/// Applies the HMCL private per-version settings that map onto YMCL's
 /// launch configuration. `java_major` is the major version of the JVM chosen
 /// for this launch; `None` means it could not be determined.
 ///
@@ -839,7 +839,7 @@ impl PclLaunchSettings {
     /// consumed by the same availability check as HMCL's candidates
     /// (`select_hmcl_java` in launcher/mod.rs).
     ///
-    /// If no candidate validates there, Axolotl falls back to its own Java
+    /// If no candidate validates there, YMCL falls back to its own Java
     /// discovery. Upstream instead aborts or prompts; silently continuing is
     /// deliberate so a stale linked-launcher preference never blocks a launch.
     pub(crate) fn java_candidates(
@@ -913,7 +913,7 @@ impl PclLaunchSettings {
                 }
                 1 => {
                     // Explicit Java version range (VersionArgumentJavaRange):
-                    // Axolotl cannot constrain its own discovery by that range
+                    // YMCL cannot constrain its own discovery by that range
                     // yet, so behave like automatic selection.
                     // TODO(direct-link): honor VersionArgumentJavaRange by
                     // filtering discovered runtimes through the parsed range.
@@ -985,7 +985,7 @@ impl PclLaunchSettings {
 
     /// Resolves the RAM setting to a heap size in MiB, mirroring pinned
     /// PCL-CE `PageInstanceSetup.GetRam` (and classic
-    /// `PageInstanceSetup.xaml.vb`). `None` keeps Axolotl's own memory
+    /// `PageInstanceSetup.xaml.vb`). `None` keeps YMCL's own memory
     /// setting.
     pub(crate) fn resolve_ram_mb(
         &self,
@@ -1012,7 +1012,7 @@ impl PclLaunchSettings {
             )),
             _ => {
                 // 跟随全局: resolve through the launcher-global keys; when the
-                // global configuration is unavailable keep Axolotl's default.
+                // global configuration is unavailable keep YMCL's default.
                 match config_i64(&self.global_values, "LaunchRamType") {
                     Some(0) => Some(pcl_auto_ram_gb(
                         available_memory_gb,
@@ -1028,7 +1028,7 @@ impl PclLaunchSettings {
                         tracing::debug!(
                             "Linked PCL instance follows the global memory \
                              setting but no launcher-global configuration was \
-                             found; keeping the Axolotl memory setting"
+                             found; keeping the YMCL memory setting"
                         );
                         None
                     }
@@ -2711,7 +2711,7 @@ mod tests {
             Some(1536)
         );
 
-        // Without any global configuration Axolotl keeps its own setting.
+        // Without any global configuration YMCL keeps its own setting.
         let orphan =
             pcl_direct(mc.path(), None, "demo", LinkedLauncherDialect::PclCe);
         assert_eq!(
@@ -3025,7 +3025,7 @@ mod tests {
         // `lwjgl_util`, and the native carrier `lwjgl-platform`) while
         // Cleanroom contributes the LWJGL 3 line; no LWJGL 2 jar may ever
         // share a launch with the LWJGL 3 files. The vanilla JNA platform
-        // and Mojang ICU bundle are removed by the pre-existing Axolotl
+        // and Mojang ICU bundle are removed by the pre-existing YMCL
         // Cleanroom rule as well.
         json!([
             {"name": "com.cleanroommc:cleanroom:0.6.11-alpha"},

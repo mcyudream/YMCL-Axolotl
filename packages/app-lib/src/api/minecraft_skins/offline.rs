@@ -122,7 +122,7 @@ pub(crate) async fn prepare_offline_skin_resource_pack(
         });
     };
 
-    if !credentials.is_offline() || !version.supports_resource_packs() {
+    if !credentials.uses_local_skins() || !version.supports_resource_packs() {
         remove_pack_if_present(&resource_pack_path).await?;
         return Ok(OfflineSkinPackOptions {
             enabled_pack_id: None,
@@ -197,7 +197,7 @@ fn build_resource_pack(
     let metadata = json!({
         "pack": {
             "pack_format": pack_format,
-            "description": "Axolotl Launcher offline skin"
+            "description": "YMCL (YuDream Launcher) offline skin"
         }
     });
 

@@ -698,7 +698,7 @@ Function PageLeaveOptions
     ${NSD_SetText} $OptionsError "$(axlResourceDirectoryNotWritable)"
     Abort
   ${EndIf}
-  FileWrite $0 "Axolotl Launcher"
+  FileWrite $0 "YMCL"
   FileClose $0
   Delete "$ResourceDir\.axolotl-write-test"
 FunctionEnd
@@ -842,7 +842,7 @@ FunctionEnd
   !include "{{this}}"
 {{/each}}
 
-LangString axlWelcomeTitle ${LANG_ENGLISH} "Install Axolotl Launcher"
+LangString axlWelcomeTitle ${LANG_ENGLISH} "Install YMCL (YuDream Launcher)"
 LangString axlWelcomeText ${LANG_ENGLISH} "A modern home for your Minecraft instances.$\r$\n$\r$\nVersion ${VERSION} · 64-bit · Current user"
 LangString axlStart ${LANG_ENGLISH} "Start"
 LangString axlOptionsTitle ${LANG_ENGLISH} "Installation settings"
@@ -861,11 +861,11 @@ LangString axlResourceDirectoryAbsolute ${LANG_ENGLISH} "Choose an absolute appl
 LangString axlResourceDirectoryRoot ${LANG_ENGLISH} "The root of a drive or network share cannot be used as the application directory."
 LangString axlResourceDirectoryInsideInstall ${LANG_ENGLISH} "The application directory must be separate from the program installation location."
 LangString axlResourceDirectoryNotWritable ${LANG_ENGLISH} "Axolotl cannot write to this application directory. Choose another location or change its permissions."
-LangString axlFinishTitle ${LANG_ENGLISH} "Axolotl Launcher is installed"
+LangString axlFinishTitle ${LANG_ENGLISH} "YMCL (YuDream Launcher) is installed"
 LangString axlFinishText ${LANG_ENGLISH} "Everything is ready. Your application directory is:$\r$\n$ResourceDir"
 LangString axlFinishButton ${LANG_ENGLISH} "Finish"
 
-LangString axlWelcomeTitle ${LANG_SIMPCHINESE} "安装 Axolotl Launcher"
+LangString axlWelcomeTitle ${LANG_SIMPCHINESE} "安装 YMCL (YuDream Launcher)"
 LangString axlWelcomeText ${LANG_SIMPCHINESE} "为你的 Minecraft 实例准备的现代化启动器。$\r$\n$\r$\n版本 ${VERSION} · 64 位 · 当前用户"
 LangString axlStart ${LANG_SIMPCHINESE} "开始"
 LangString axlOptionsTitle ${LANG_SIMPCHINESE} "安装设置"
@@ -884,7 +884,7 @@ LangString axlResourceDirectoryAbsolute ${LANG_SIMPCHINESE} "请选择有效的�
 LangString axlResourceDirectoryRoot ${LANG_SIMPCHINESE} "不能将磁盘或网络共享根目录直接用作应用目录。"
 LangString axlResourceDirectoryInsideInstall ${LANG_SIMPCHINESE} "应用目录必须与程序安装位置分开。"
 LangString axlResourceDirectoryNotWritable ${LANG_SIMPCHINESE} "Axolotl 无法写入该应用目录，请更换位置或调整目录权限。"
-LangString axlFinishTitle ${LANG_SIMPCHINESE} "Axolotl Launcher 已安装"
+LangString axlFinishTitle ${LANG_SIMPCHINESE} "YMCL (YuDream Launcher) 已安装"
 LangString axlFinishText ${LANG_SIMPCHINESE} "一切准备就绪。当前应用目录：$\r$\n$ResourceDir"
 LangString axlFinishButton ${LANG_SIMPCHINESE} "完成"
 

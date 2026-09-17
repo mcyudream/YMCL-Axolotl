@@ -9,7 +9,7 @@ const MAX_LOG_LINE_LENGTH = 64 * 1024
 const BATCH_TIMEOUT_MS = 300
 const INITIAL_BATCH_SIZE = 256
 const ENTRY_START_RE = /^\[\d{2}:\d{2}:\d{2}\]/
-const LOG_TRUNCATION_MARKER = ' … [log output truncated by Axolotl] … '
+const LOG_TRUNCATION_MARKER = ' … [log output truncated by YMCL] … '
 
 export interface ConsoleState {
 	output: Ref<LogLine[]>

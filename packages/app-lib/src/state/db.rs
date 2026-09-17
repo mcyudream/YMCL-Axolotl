@@ -199,7 +199,7 @@ pub async fn copy_database_between_channels(
     let active_channel = resolve_update_channel(&settings_dir).await?;
     if target_channel == active_channel {
         return Err(crate::ErrorKind::InputError(
-            "The active database cannot be overwritten while Axolotl is running".to_string(),
+            "The active database cannot be overwritten while YMCL is running".to_string(),
         )
         .into());
     }

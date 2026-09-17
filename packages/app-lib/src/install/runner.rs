@@ -190,7 +190,7 @@ pub async fn duplicate_instance(
     source_instance_id: String,
 ) -> crate::Result<InstallJobSnapshot> {
     // Directly associated instances own no files to copy: duplicating one
-    // would clone the linked launcher's `.minecraft` into Axolotl.
+    // would clone the linked launcher's `.minecraft` into YMCL.
     let state = State::get().await?;
     if let Some(metadata) =
         crate::state::get_instance(&source_instance_id, &state.pool).await?

@@ -33,7 +33,7 @@ use wry::{NewWindowResponse, WebView, WebViewBuilder, http::Request};
 
 const HTML: &str = include_str!("installer.html");
 const LOGO: &[u8] = include_bytes!("../../app/icons/128x128.png");
-const MAIN_BINARY_NAME: &str = "Axolotl Launcher.exe";
+const MAIN_BINARY_NAME: &str = "YMCL.exe";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
