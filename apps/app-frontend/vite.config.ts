@@ -12,6 +12,11 @@ const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const blockbenchRoot = resolve(projectRootDir, '../../third-party/blockbench')
 
+// tauri expects a fixed port, fail if that port is not available.
+// `pnpm app:dev:test` overrides the port via YMCL_DEV_PORT so a second dev
+// instance can run next to the normal one.
+const devPort = Number(process.env.YMCL_DEV_PORT) || 5201
+
 function blockbenchSkinDevAssets() {
 	return {
 		name: 'blockbench-skin-dev-assets',
@@ -118,9 +123,9 @@ export default defineConfig({
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	// prevent vite from obscuring rust errors
 	clearScreen: false,
-	// tauri expects a fixed port, fail if that port is not available
+	// tauri expects a fixed port, fail if that port is not available.
 	server: {
-		port: 5201,
+		port: devPort,
 		strictPort: true,
 		headers: {
 			'content-security-policy': Object.entries(tauriConf.app.security.csp)
@@ -128,7 +133,7 @@ export default defineConfig({
 					// An additional websocket connect-src is required for Vite dev tools to work
 					if (directive === 'connect-src') {
 						sources = Array.isArray(sources) ? sources : [sources]
-						sources.push('ws://localhost:5201')
+						sources.push(`ws://localhost:${devPort}`)
 					}
 					return Array.isArray(sources)
 						? `${directive} ${sources.join(' ')}`

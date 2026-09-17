@@ -86,6 +86,7 @@ access-jwt*.txt
 packages/tooling-config/script-utils/import-sort.js
 
 target/*
+target-dev/*
 
 # Temporary databases
 *.db
@@ -106,3 +107,9 @@ apps/app/resources/blockbench-skin/
 .netlify
 .cf-reconcile-test
 .cf-reconcile-state-a
+
+# Isolated launcher data for pnpm app:dev:test
+/.test-data/
+
+# Test instance build tree (pnpm app:dev:test)
+target-dev-test/*

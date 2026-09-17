@@ -6,6 +6,7 @@
 		"website:dev": "turbo run dev --filter=@axolotl/website",
 		"website:build": "turbo run build --filter=@axolotl/website",
 		"app:dev": "turbo run dev --filter=@modrinth/app",
+		"app:dev:test": "pnpm --filter @modrinth/app dev:test",
 		"app:build": "turbo run build --filter=@modrinth/app",
 		"build": "turbo run build --continue",
 		"lint": "turbo run lint lint:ancillary --continue",

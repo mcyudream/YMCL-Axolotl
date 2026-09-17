@@ -7,8 +7,11 @@ linker = "rust-lld"
 
 # Reproducible public-service defaults for downstream desktop builds. Private
 # Modrinth services remain disabled by Axolotl capabilities at runtime.
+# Values here must match packages/app-lib/.env exactly: build.rs bakes the
+# .env values via rustc-env, and a mismatch makes cargo flag theseus as dirty
+# on every single build (ChangedEnv check).
 [env]
-MODRINTH_API_BASE_URL = "https://api.modrinth.com"
+MODRINTH_API_BASE_URL = "https://api.modrinth.com/"
 MODRINTH_API_URL = "https://api.modrinth.com/v2/"
 MODRINTH_API_URL_V3 = "https://api.modrinth.com/v3/"
 MODRINTH_LAUNCHER_META_URL = "https://launcher-meta.modrinth.com/"
