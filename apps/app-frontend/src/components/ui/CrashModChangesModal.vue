@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {
 	ButtonStyled,
+	ConfirmModal,
 	defineMessages,
 	injectNotificationManager,
 	NewModal,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed, ref } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
 
 import type { CrashAnalysisResult } from '@/composables/useCrashAnalysis'
 import { refresh_content } from '@/helpers/instance'
@@ -17,6 +18,9 @@ const analysis = ref<CrashAnalysisResult | null>(null)
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
 const busy = ref<string | null>(null)
+/** `window.confirm` is unavailable in Tauri, so the undo gate is an in-app modal. */
+const undoConfirmModal = useTemplateRef<InstanceType<typeof ConfirmModal>>('undoConfirmModal')
+const pendingUndo = ref<CrashAnalysisResult['mod_changes'][number] | null>(null)
 
 const messages = defineMessages({
 	title: {
@@ -77,12 +81,19 @@ function show(nextAnalysis: CrashAnalysisResult): void {
 	modal.value?.show()
 }
 
-async function undo(change: (typeof groups.value)[number]['items'][number]): Promise<void> {
+function undo(change: CrashAnalysisResult['mod_changes'][number]): void {
 	if (change.kind !== 'added' || busy.value) return
+	if (!analysis.value || !change.current_sha256) return
+	pendingUndo.value = change
+	undoConfirmModal.value?.show()
+}
+
+async function confirmUndo(): Promise<void> {
+	const change = pendingUndo.value
 	const currentAnalysis = analysis.value
-	if (!currentAnalysis || !change.current_sha256) return
-	const name = change.project_title || change.filename
-	if (!window.confirm(formatMessage(messages.undoConfirm, { name }))) return
+	pendingUndo.value = null
+	if (!change || !currentAnalysis || change.kind !== 'added' || busy.value) return
+	if (!change.current_sha256) return
 	busy.value = change.filename
 	let removed = false
 	try {
@@ -164,4 +175,15 @@ defineExpose({ show })
 			</div>
 		</template>
 	</NewModal>
+
+	<ConfirmModal
+		ref="undoConfirmModal"
+		:title="
+			formatMessage(messages.undoConfirm, {
+				name: pendingUndo?.project_title || pendingUndo?.filename || '',
+			})
+		"
+		:proceed-label="formatMessage(messages.undo)"
+		@proceed="confirmUndo"
+	/>
 </template>
