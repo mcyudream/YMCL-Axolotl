@@ -156,13 +156,19 @@ pub fn authorize_url(
     url.to_string()
 }
 
+/// OAuth authorization-code exchange response (YAP §6.4). Its token only
+/// bootstraps the session: the launcher immediately swaps it for the host's
+/// login session, whose `refresh_token`/`expires_in` (not these — the OAuth
+/// provider's credentials never renew a domain session) are what get stored.
 #[derive(Deserialize, Debug)]
 struct TokenResponse {
     #[serde(alias = "token", alias = "accessToken")]
     access_token: String,
     #[serde(default, alias = "refreshToken")]
+    #[allow(dead_code)]
     refresh_token: Option<String>,
     #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
+    #[allow(dead_code)]
     expires_in: Option<i64>,
 }
 
