@@ -334,8 +334,12 @@ pub async fn get_available_skins() -> crate::Result<Vec<Skin>> {
 
     let current_skin = online_profile
         .as_ref()
-        .map(|profile| profile.current_skin())
-        .transpose()?;
+        // A freshly created Yggdrasil account can have no active skin at all
+        // (unlike Mojang profiles, which always equip one). That must not
+        // blank the whole library: the matching below falls back to the
+        // bundled default skin.
+        .map(|profile| profile.current_skin().ok())
+        .flatten();
     let current_cape_id = online_profile
         .as_ref()
         .and_then(|profile| profile.current_cape())
