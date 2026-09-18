@@ -136,9 +136,10 @@ pub async fn skins_enabled(domain_id: &str) -> crate::Result<bool> {
         || capabilities.skins.is_some())
 }
 
-/// Finds an added domain whose authlib-injector root matches a Minecraft
-/// account's `api_root`, so the skins page can tell which domain (if any)
-/// owns the active account.
+/// Finds an added domain whose Yggdrasil root matches a Minecraft account's
+/// `api_root`, so the skins page can tell which domain (if any) owns the
+/// active account. Both provider shapes are accepted, since the account was
+/// stored with whichever one the node served at login time.
 pub async fn domain_for_yggdrasil_root(
     api_root: &str,
 ) -> crate::Result<Option<YmclSkinDomainMatch>> {
@@ -148,7 +149,12 @@ pub async fn domain_for_yggdrasil_root(
         let Some(origin) = domain.origin.as_deref() else {
             continue;
         };
-        if format!("{origin}/api/plugins/authlib-injector") == normalized {
+        let matches = super::yggroot::YmclYggEndpoints::candidates(origin)
+            .iter()
+            .any(|endpoints| {
+                endpoints.yggdrasil_root.trim_end_matches('/') == normalized
+            });
+        if matches {
             let skins_enabled = skins_enabled(&domain.id).await?;
             return Ok(Some(YmclSkinDomainMatch {
                 domain_id: domain.id,

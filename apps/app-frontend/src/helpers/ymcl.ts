@@ -26,12 +26,27 @@ export function hasDomainPermission(
 }
 
 /**
- * Path yda serves its authlib-injector (Yggdrasil) API under, relative to the
- * domain origin. Domain Minecraft accounts authenticate against this root so
- * the in-game identity and the domain session share one account system.
+ * Every path yda may serve its Minecraft (Yggdrasil) API under, relative to
+ * the domain origin: the historical authlib-injector plugin and the yggc
+ * plugin. A domain Minecraft account authenticates against exactly one of
+ * them, so account-to-domain matching has to accept both shapes.
+ */
+export function domainYggdrasilRoots(origin: string): string[] {
+	const base = origin.replace(/\/+$/, '')
+	return [
+		`${base}/api/plugins/authlib-injector`,
+		`${base}/api/plugins/yggc/api/yggdrasil`,
+	]
+}
+
+/**
+ * Default Yggdrasil root of a domain origin (authlib-injector shape). The
+ * node's actual provider is resolved by the backend — `ymcl.yggRoot` probes
+ * once per session — so prefer that value for display; this sync helper only
+ * offers the fallback shape.
  */
 export function domainYggdrasilRoot(origin: string): string {
-	return `${origin.replace(/\/+$/, '')}/api/plugins/authlib-injector`
+	return domainYggdrasilRoots(origin)[0]
 }
 
 /**
@@ -528,6 +543,9 @@ export const ymcl = {
 		}),
 	yggProfiles: (domainId: string) =>
 		invoke<YmclYggProfile[]>('plugin:ymcl|ymcl_ygg_profiles', { domainId }),
+	/** Backend-resolved Yggdrasil root (authlib-injector or yggc shape). */
+	yggRoot: (domainId: string) =>
+		invoke<string | null>('plugin:ymcl|ymcl_ygg_root', { domainId }),
 	externalProviders: (domainId: string) =>
 		invoke<YmclExternalProvider[]>('plugin:ymcl|ymcl_auth_external_providers', { domainId }),
 	externalBegin: (domainId: string, provider: string) =>

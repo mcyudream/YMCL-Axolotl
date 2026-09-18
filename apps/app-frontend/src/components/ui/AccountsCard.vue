@@ -472,7 +472,7 @@ import DomainLoginModal from '@/components/ymcl/DomainLoginModal.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { compareMinecraftAccounts } from '@/helpers/accounts'
 import { trackEvent } from '@/helpers/analytics'
-import { ymcl, ymclErrorMessage } from '@/helpers/ymcl'
+import { domainYggdrasilRoots, ymcl, ymclErrorMessage } from '@/helpers/ymcl'
 import {
 	add_offline_user,
 	begin_yggdrasil_login,
@@ -752,17 +752,38 @@ watch(offline, async () => {
 	notifyAccountChange()
 })
 
-/** Personal accounts are everything not owned by a joined domain's
- * authlib-injector service; a domain account belongs to exactly one domain. */
-const domainYggRoots = computed(() =>
-	ymclStore.domains
-		.filter((domain) => !domain.is_personal && domain.origin)
-		.map((domain) => `${domain.origin}/api/plugins/authlib-injector`),
-)
+/** Personal accounts are everything not owned by a joined domain's Yggdrasil
+ * service; a domain account belongs to exactly one domain. A node serves that
+ * service through either the authlib-injector or the yggc plugin, so the
+ * backend-resolved root of every domain is collected alongside both candidate
+ * shapes and matching accepts whichever one the account was stored with. */
+const domainYggRoots = ref<string[]>([])
+let domainYggRootsGeneration = 0
+
+async function refreshDomainYggRoots() {
+	const generation = ++domainYggRootsGeneration
+	const roots = new Set<string>()
+	for (const domain of ymclStore.domains) {
+		const origin = domain.origin
+		if (domain.is_personal || !origin) continue
+		for (const candidate of domainYggdrasilRoots(origin)) roots.add(candidate)
+		try {
+			const resolved = await ymcl.yggRoot(domain.id)
+			if (resolved) roots.add(resolved.replace(/\/+$/, ''))
+		} catch {
+			/* best effort: the candidate shapes already cover both providers */
+		}
+	}
+	if (generation !== domainYggRootsGeneration) return
+	domainYggRoots.value = [...roots]
+}
+
+watch(() => ymclStore.domains, refreshDomainYggRoots, { immediate: true })
 
 function isDomainAccount(account: MinecraftCredential): boolean {
 	if (account.account_type !== 'yggdrasil' || !account.yggdrasil) return false
-	return domainYggRoots.value.includes(account.yggdrasil.api_root)
+	const apiRoot = account.yggdrasil.api_root.replace(/\/+$/, '')
+	return domainYggRoots.value.includes(apiRoot)
 }
 
 const visibleAccounts = computed(() =>
