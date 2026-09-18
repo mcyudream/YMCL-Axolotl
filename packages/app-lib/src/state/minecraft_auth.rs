@@ -1056,7 +1056,8 @@ impl Serialize for Credentials {
             }
         };
 
-        let mut ser = serializer.serialize_struct("Credentials", 7)?;
+        let mut ser = serializer.serialize_struct("Credentials", 8)?;
+        ser.serialize_field("account_id", &self.account_id)?;
         ser.serialize_field("profile", &*profile)?;
         ser.serialize_field("account_type", &self.account_type)?;
         ser.serialize_field("access_token", &self.access_token)?;

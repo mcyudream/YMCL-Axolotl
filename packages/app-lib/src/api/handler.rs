@@ -211,12 +211,18 @@ pub async fn parse_and_emit_command(command_string: &str) -> crate::Result<()> {
 mod tests {
     use super::*;
 
+    /// The scheme comes from the brand constant, so tests must build URLs
+    /// from it rather than hardcoding a scheme a fork may have renamed.
+    fn deep_link(rest: &str) -> String {
+        format!("{DEEP_LINK_SCHEME}://{rest}")
+    }
+
     #[tokio::test]
     async fn parses_launch_query_command() {
         let command =
-            parse_command(
-                "axolotl://launch?instance_id=example%20instance&server=example.org%3A25565",
-            )
+            parse_command(&deep_link(
+                "launch?instance_id=example%20instance&server=example.org%3A25565",
+            ))
             .await
             .unwrap();
         assert!(matches!(
@@ -229,8 +235,22 @@ mod tests {
     #[tokio::test]
     async fn parses_discovery_command() {
         assert!(matches!(
-            parse_command("axolotl://discovery").await.unwrap(),
+            parse_command(&deep_link("discovery")).await.unwrap(),
             CommandPayload::OpenDiscovery
+        ));
+    }
+
+    #[tokio::test]
+    async fn parses_add_site_command() {
+        let command = parse_command(&deep_link(
+            "add-site?url=https%3A%2F%2Fyda.example.com",
+        ))
+        .await
+        .unwrap();
+        assert!(matches!(
+            command,
+            CommandPayload::AddSite { url }
+                if url == "https://yda.example.com"
         ));
     }
 }
