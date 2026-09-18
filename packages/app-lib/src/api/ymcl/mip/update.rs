@@ -36,6 +36,9 @@ pub struct YmclUpdateCheck {
     pub pending_deletions: Option<usize>,
     /// Paths skipped during apply because every remote source failed.
     pub skipped_files: Option<Vec<String>>,
+    /// Release notes of the target version (publisher-attached, optional) —
+    /// shown to the player before they update.
+    pub notes: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -121,6 +124,10 @@ pub struct MipVersionEntry {
     pub version: String,
     #[serde(default)]
     pub channel: Option<String>,
+    /// Release notes the publisher attached at ingest (optional; absent for
+    /// versions published before the field existed).
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 pub(crate) fn versions_url(mip_base: &str, pack_id: &str) -> String {
@@ -280,47 +287,150 @@ impl ObjectFetcher for HttpFetcher<'_> {
 }
 
 /// Scans the instance directory into a local hash index (MIP WF-5 step 3).
-/// Protocol bookkeeping files are excluded.
+/// Paths that can never enter a pack (`is_excluded_from_publish`) are
+/// pruned before hashing — saves/logs alone can be gigabytes and none of
+/// them is ever a manifest entry. The cached variant
+/// ([`scan_local_hashes_cached`]) is what callers should usually prefer.
 pub fn scan_local_hashes(
     instance_dir: &Path,
 ) -> crate::Result<HashMap<String, String>> {
+    Ok(scan_instance_files(instance_dir, None)?.0)
+}
+
+/// Cached scan: sha512 results are reused for files whose size and mtime
+/// match the previous scan (persisted in `.pack-hashes.json`), so repeated
+/// publish diffs and update checks re-hash only what changed. A missing or
+/// corrupt cache degrades to a full rescan; the refreshed cache is written
+/// back atomically.
+pub fn scan_local_hashes_cached(
+    instance_dir: &Path,
+) -> crate::Result<HashMap<String, String>> {
+    let cached = read_hash_cache(instance_dir);
+    let (hashes, fresh) = scan_instance_files(instance_dir, cached)?;
+    write_hash_cache(instance_dir, &fresh);
+    Ok(hashes)
+}
+
+/// One cache entry: the stat fingerprint that makes a stored sha512 reusable.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct HashCacheEntry {
+    size: u64,
+    mtime_secs: u64,
+    mtime_nanos: u32,
+    sha512: String,
+}
+
+/// Walks the instance, pruning excluded paths, hashing what remains. When a
+/// cache is supplied, entries whose size+mtime fingerprint still match skip
+/// the file read entirely; the returned second map holds fresh entries for
+/// exactly the files seen this walk (stale cache entries drop out).
+fn scan_instance_files(
+    instance_dir: &Path,
+    cache: Option<std::collections::BTreeMap<String, HashCacheEntry>>,
+) -> crate::Result<(
+    HashMap<String, String>,
+    std::collections::BTreeMap<String, HashCacheEntry>,
+)> {
     let mut hashes = HashMap::new();
-    let mut stack = vec![instance_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut fresh: std::collections::BTreeMap<String, HashCacheEntry> =
+        std::collections::BTreeMap::new();
+    let mut stack = vec![(instance_dir.to_path_buf(), String::new())];
+    while let Some((dir, dir_relative)) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
-            let path = entry?.path();
+            let entry = entry?;
+            let path = entry.path();
             let name = path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or_default()
                 .to_string();
+            // Protocol bookkeeping never enters packs, wherever it sits.
+            if name == super::state::STATE_FILE_NAME
+                || name == super::state::HASH_CACHE_FILE_NAME
+            {
+                continue;
+            }
+            let relative = if dir_relative.is_empty() {
+                name.clone()
+            } else {
+                format!("{dir_relative}/{name}")
+            };
             if path.is_dir() {
-                if name == STAGING_DIR_NAME || name == BACKUP_DIR_NAME {
+                if name == STAGING_DIR_NAME
+                    || name == BACKUP_DIR_NAME
+                    || super::publish::is_excluded_from_publish(&relative)
+                {
                     continue;
                 }
-                stack.push(path);
-            } else if name == state::STATE_FILE_NAME {
+                stack.push((path, relative));
+            } else if super::publish::is_excluded_from_publish(&relative) {
                 continue;
             } else {
+                let metadata = std::fs::metadata(&path)?;
+                let size = metadata.len();
+                let (mtime_secs, mtime_nanos) = mtime_key(&metadata);
+                if let Some(hit) = cache
+                    .as_ref()
+                    .and_then(|cache| cache.get(&relative))
+                    .filter(|hit| {
+                        hit.size == size
+                            && hit.mtime_secs == mtime_secs
+                            && hit.mtime_nanos == mtime_nanos
+                    })
+                {
+                    hashes.insert(relative.clone(), hit.sha512.clone());
+                    fresh.insert(relative, hit.clone());
+                    continue;
+                }
                 let bytes = std::fs::read(&path)?;
                 let digest = Sha512::digest(&bytes);
-                let relative = path
-                    .strip_prefix(instance_dir)
-                    .map_err(|_| {
-                        crate::ErrorKind::OtherError(
-                            "Invalid instance path".to_string(),
-                        )
-                    })?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                hashes.insert(
+                let sha512: String =
+                    digest.iter().map(|byte| format!("{byte:02x}")).collect();
+                hashes.insert(relative.clone(), sha512.clone());
+                fresh.insert(
                     relative,
-                    digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+                    HashCacheEntry {
+                        size,
+                        mtime_secs,
+                        mtime_nanos,
+                        sha512,
+                    },
                 );
             }
         }
     }
-    Ok(hashes)
+    Ok((hashes, fresh))
+}
+
+fn mtime_key(metadata: &std::fs::Metadata) -> (u64, u32) {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or((0, 0))
+}
+
+fn read_hash_cache(
+    instance_dir: &Path,
+) -> Option<std::collections::BTreeMap<String, HashCacheEntry>> {
+    let bytes =
+        std::fs::read(instance_dir.join(super::state::HASH_CACHE_FILE_NAME)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_hash_cache(
+    instance_dir: &Path,
+    entries: &std::collections::BTreeMap<String, HashCacheEntry>,
+) {
+    let Ok(bytes) = serde_json::to_vec_pretty(entries) else {
+        return;
+    };
+    let path = instance_dir.join(super::state::HASH_CACHE_FILE_NAME);
+    let temp = instance_dir.join(format!("{}.tmp", super::state::HASH_CACHE_FILE_NAME));
+    if std::fs::write(&temp, bytes).is_ok() {
+        std::fs::rename(&temp, &path).ok();
+    }
 }
 
 /// Resolves the target version for a binding: pinned wins, else the latest
@@ -389,6 +499,7 @@ pub async fn check_instance(
             pending_changes: None,
             pending_deletions: None,
             skipped_files: None,
+            notes: None,
         });
     };
     let pack_id = pack_state.pack_id.clone();
@@ -467,7 +578,7 @@ pub async fn check_instance(
             .await?;
     let manifest: MipManifest = serde_json::from_value(manifest_value)?;
     manifest.validate()?;
-    let local_hashes = scan_local_hashes(&instance_dir)?;
+    let local_hashes = scan_local_hashes_cached(&instance_dir)?;
     let plan = compute_update_plan(&pack_state, &manifest, &local_hashes)?;
 
     let check = YmclUpdateCheck {
@@ -483,6 +594,10 @@ pub async fn check_instance(
         pending_changes: Some(plan.changes.len()),
         pending_deletions: Some(plan.deletions.len()),
         skipped_files: None,
+        notes: versions
+            .iter()
+            .find(|entry| entry.version == target_version)
+            .and_then(|entry| entry.notes.clone()),
     };
 
     if !apply {
@@ -535,6 +650,7 @@ pub async fn check_instance(
                 .map(|skipped| skipped.path.clone())
                 .collect(),
         ),
+        notes: check.notes,
     })
 }
 
@@ -572,6 +688,7 @@ fn unchanged(pack_state: &MipPackState, reason: &str) -> YmclUpdateCheck {
         pending_changes: Some(0),
         pending_deletions: Some(0),
         skipped_files: None,
+        notes: None,
     }
 }
 
@@ -765,7 +882,7 @@ pub async fn set_features(
     let new: HashSet<&str> = selected.iter().map(|id| id.as_str()).collect();
     let newly_selected: HashSet<&str> = new.difference(&old).copied().collect();
     let deselected: HashSet<&str> = old.difference(&new).copied().collect();
-    let local_hashes = scan_local_hashes(&instance_dir)?;
+    let local_hashes = scan_local_hashes_cached(&instance_dir)?;
 
     let mut plan = super::diff::UpdatePlan::default();
     let mut entries: HashMap<String, MipFileEntry> = HashMap::new();

@@ -1896,7 +1896,7 @@ fn system_memory() -> sysinfo::System {
     )
 }
 
-fn system_memory_bytes() -> u64 {
+pub(crate) fn system_memory_bytes() -> u64 {
     system_memory().total_memory()
 }
 
@@ -2015,7 +2015,7 @@ pub async fn get_memory_status(
         (false, 0)
     };
     let allocated_mb = if automatic {
-        automatic_memory_max_mb(available_bytes, mod_count, modded)
+        automatic_memory_max_mb(total_bytes, mod_count, modded)
     } else {
         requested_memory_mb
     };
@@ -2029,17 +2029,24 @@ pub async fn get_memory_status(
 }
 
 /// Calculates a launch heap using four progressively conservative stages.
+///
+/// The stage math runs against **total** physical RAM, matching PCL's
+/// automatic allocation: sizing from *available* RAM shrinks the heap
+/// whenever other apps are open, which starves modded installs and shows up
+/// as in-game stutter. The result is clamped to 3/4 of total RAM, and the
+/// per-mod minimum floor still wins on tiny systems.
 pub fn automatic_memory_max_mb(
-    available_memory_bytes: u64,
+    total_memory_bytes: u64,
     mod_count: usize,
     modded: bool,
 ) -> u32 {
     const BYTES_PER_GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-    let mut available_gib = ((available_memory_bytes as f64 / BYTES_PER_GIB)
+    let mut available_gib = ((total_memory_bytes as f64 / BYTES_PER_GIB)
         * 10.0)
-        .round_ties_even()
+    .round_ties_even()
         / 10.0;
+    let total_gib = available_gib;
     let (minimum, target1, target2, target3) = if modded {
         (
             0.5 + mod_count as f64 / 150.0,
@@ -2066,23 +2073,22 @@ pub fn automatic_memory_max_mb(
         }
     }
 
+    let allocated = allocated.min(total_gib * 0.75);
     let allocated_gib =
         (allocated.max(minimum) * 10.0).round_ties_even() / 10.0;
     (allocated_gib * 1024.0).floor().max(512.0) as u32
 }
 
-/// Calculates automatic memory from the current available RAM and installed mods.
+/// Calculates automatic memory from **total** physical RAM and the installed
+/// mods, matching PCL's allocation instead of shrinking whenever other apps
+/// occupy RAM at launch time.
 pub fn automatic_memory_max_mb_for_instance(
     instance_path: &std::path::Path,
     modded: bool,
 ) -> u32 {
     let mod_count = if modded { count_mods(instance_path) } else { 0 };
 
-    automatic_memory_max_mb(
-        available_memory_bytes(&system_memory()),
-        mod_count,
-        modded,
-    )
+    automatic_memory_max_mb(system_memory().total_memory(), mod_count, modded)
 }
 
 fn count_mods(instance_path: &std::path::Path) -> usize {
@@ -2144,7 +2150,9 @@ mod tests {
 
     #[test]
     fn automatic_memory_matches_vanilla_stages() {
-        assert_eq!(automatic_memory_max_mb(GIB, 0, false), 1024);
+        // 1 GiB total: the stage math yields 1 GiB, the 3/4 cap rounds the
+        // one-decimal grid down to 0.8 GiB.
+        assert_eq!(automatic_memory_max_mb(GIB, 0, false), 819);
         assert_eq!(automatic_memory_max_mb(4 * GIB, 0, false), 2969);
         assert_eq!(automatic_memory_max_mb(16 * GIB, 0, false), 5529);
     }
@@ -2153,5 +2161,14 @@ mod tests {
     fn automatic_memory_matches_mod_targets() {
         assert_eq!(automatic_memory_max_mb(8 * GIB, 100, true), 5836);
         assert_eq!(automatic_memory_max_mb(0, 300, true), 2560);
+    }
+
+    #[test]
+    fn automatic_memory_caps_at_three_quarters_of_total() {
+        // 1 GiB total, vanilla: the stage math yields 1 GiB, the 3/4 cap
+        // (on the one-decimal grid) wins.
+        assert_eq!(automatic_memory_max_mb(GIB, 0, false), 819);
+        // 300 mods on 1 GiB total: the per-mod minimum floor beats the cap.
+        assert_eq!(automatic_memory_max_mb(GIB, 300, true), 2560);
     }
 }

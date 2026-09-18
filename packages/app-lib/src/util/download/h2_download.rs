@@ -36,7 +36,6 @@ const ASSET_BATCH_EXPANSION_DELAY: Duration = Duration::from_millis(500);
 /// stream budget (currently 32). The remaining streams can then be assigned
 /// to a separate TCP congestion domain.
 const ASSET_BATCH_EXPANSION_STREAMS: usize = 24;
-const ASSET_RESOURCE_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
 
 fn should_expand_asset_batch_connection(
     elapsed: Duration,
@@ -142,14 +141,19 @@ pub(crate) async fn try_download_via_h2(
     let total_size = if let Some(size) = expected_size {
         size
     } else {
-        let _probe_stream_permit = match tokio::time::timeout(
-            ASSET_RESOURCE_WAIT_TIMEOUT,
-            super::h2_stream_budget::acquire(route),
-        )
-        .await
+        let probe_stream_permit = if let Some(cancellation) =
+            request.cancellation.as_ref()
         {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) | Err(_) => {
+            tokio::select! {
+                _ = cancellation.cancelled() => return H2DownloadOutcome::Canceled,
+                result = super::h2_stream_budget::acquire(route) => result,
+            }
+        } else {
+            super::h2_stream_budget::acquire(route).await
+        };
+        let _probe_stream_permit = match probe_stream_permit {
+            Ok(permit) => permit,
+            Err(_) => {
                 return H2DownloadOutcome::Fallback {
                     failure: H2DownloadFailure::Connect,
                     preserve_partial: false,
@@ -224,24 +228,20 @@ pub(crate) async fn try_download_via_h2(
         crate::install::DownloadItemStatus::WaitingForResource,
     )
     .await;
-    let stream_wait = tokio::time::timeout(
-        ASSET_RESOURCE_WAIT_TIMEOUT,
-        super::h2_stream_budget::acquire(route),
-    );
     let stream_wait_started = Instant::now();
     let stream_result = if let Some(cancellation) =
         request.cancellation.as_ref()
     {
         tokio::select! {
             _ = cancellation.cancelled() => return H2DownloadOutcome::Canceled,
-            result = stream_wait => result,
+            result = super::h2_stream_budget::acquire(route) => result,
         }
     } else {
-        stream_wait.await
+        super::h2_stream_budget::acquire(route).await
     };
     let _stream_permit = match stream_result {
-        Ok(Ok(permit)) => permit,
-        Ok(Err(_)) | Err(_) => {
+        Ok(permit) => permit,
+        Err(_) => {
             return H2DownloadOutcome::Fallback {
                 failure: H2DownloadFailure::Connect,
                 preserve_partial: false,
@@ -1070,16 +1070,7 @@ async fn download_asset_item(
         ..Integrity::default()
     };
     let destination_lock = fetch::destination_download_lock(&item.destination);
-    let _destination_guard = tokio::time::timeout(
-        ASSET_RESOURCE_WAIT_TIMEOUT,
-        destination_lock.lock(),
-    )
-    .await
-    .map_err(|_| {
-        crate::ErrorKind::NetworkError(
-            "timed out waiting for asset destination lock".to_string(),
-        )
-    })?;
+    let _destination_guard = destination_lock.lock().await;
     let fetch_permit = if apply_native_policy {
         let Some(semaphore) = native_semaphore else {
             return Err(crate::ErrorKind::OtherError(
@@ -1087,18 +1078,7 @@ async fn download_asset_item(
             )
             .into());
         };
-        Some(
-            tokio::time::timeout(
-                ASSET_RESOURCE_WAIT_TIMEOUT,
-                semaphore.0.acquire(),
-            )
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::NetworkError(
-                    "timed out waiting for asset fetch permit".to_string(),
-                )
-            })??,
-        )
+        Some(semaphore.0.acquire().await?)
     } else {
         None
     };
@@ -1141,19 +1121,7 @@ async fn download_asset_item(
         }
     };
     let _stream_permit = if apply_native_policy {
-        Some(
-            tokio::time::timeout(
-                ASSET_RESOURCE_WAIT_TIMEOUT,
-                super::h2_stream_budget::acquire_asset(route),
-            )
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::NetworkError(
-                    "timed out waiting for asset HTTP/2 stream permit"
-                        .to_string(),
-                )
-            })??,
-        )
+        Some(super::h2_stream_budget::acquire_asset(route).await?)
     } else {
         None
     };

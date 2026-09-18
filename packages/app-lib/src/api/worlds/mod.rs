@@ -910,6 +910,58 @@ pub async fn add_server_to_instance(
     Ok(insert_index)
 }
 
+/// Idempotently ensures an entry with `address` exists in the instance's
+/// `servers.dat`: an existing entry with the same ip is left untouched,
+/// a missing one is inserted where [`add_server_to_instance`] would put it.
+/// Returns `true` when an entry was added.
+pub async fn ensure_server_in_instance(
+    instance_id: &str,
+    name: String,
+    address: String,
+) -> Result<bool> {
+    let state = State::get().await?;
+    let (instance_id, instance_path, game_dir_override) =
+        resolve_instance_identity(instance_id, &state).await?;
+    let instance_dir = resolve_instance_data_dir(
+        &instance_id,
+        &instance_path,
+        game_dir_override.as_deref(),
+        &state,
+    )
+    .await?;
+    let mut servers = servers_data::read(&instance_dir).await?;
+    if !ensure_server_entry(&mut servers, name, address) {
+        return Ok(false);
+    }
+    servers_data::write(&instance_dir, &servers).await?;
+    Ok(true)
+}
+
+fn ensure_server_entry(
+    servers: &mut Vec<servers_data::ServerData>,
+    name: String,
+    address: String,
+) -> bool {
+    if servers.iter().any(|x| x.ip == address) {
+        return false;
+    }
+    let insert_index = servers
+        .iter()
+        .position(|x| x.hidden)
+        .unwrap_or(servers.len());
+    servers.insert(
+        insert_index,
+        servers_data::ServerData {
+            name,
+            ip: address,
+            accept_textures: None,
+            hidden: false,
+            icon: None,
+        },
+    );
+    true
+}
+
 pub async fn edit_server_in_instance(
     instance_id: &str,
     index: usize,
@@ -1241,5 +1293,54 @@ mod tests {
         assert!(read_hardcore(&modern));
 
         assert!(!read_hardcore(&NbtCompound::new()));
+    }
+
+    fn server(ip: &str) -> super::servers_data::ServerData {
+        super::servers_data::ServerData {
+            hidden: false,
+            icon: None,
+            ip: ip.to_string(),
+            name: ip.to_string(),
+            accept_textures: None,
+        }
+    }
+
+    #[test]
+    fn server_entry_injection_adds_missing_and_skips_existing() {
+        let mut servers = vec![server("mc.example.org")];
+
+        // 有就不管：同 ip 条目（不管叫什么名字）不重复注入。
+        assert!(!super::ensure_server_entry(
+            &mut servers,
+            "other".to_string(),
+            "mc.example.org".to_string()
+        ));
+        assert_eq!(servers.len(), 1);
+
+        // 无就加：追加到末尾。
+        assert!(super::ensure_server_entry(
+            &mut servers,
+            "backup".to_string(),
+            "backup.example.org:25565".to_string()
+        ));
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[1].ip, "backup.example.org:25565");
+    }
+
+    #[test]
+    fn server_entry_injection_lands_before_hidden_placeholders() {
+        let mut servers = vec![server("mc.example.org"), {
+            let mut hidden = server("direct-connect");
+            hidden.hidden = true;
+            hidden
+        }];
+
+        assert!(super::ensure_server_entry(
+            &mut servers,
+            "backup".to_string(),
+            "backup.example.org".to_string()
+        ));
+        assert_eq!(servers[1].ip, "backup.example.org");
+        assert!(servers[2].hidden);
     }
 }

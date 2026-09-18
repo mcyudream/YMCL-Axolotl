@@ -21,6 +21,10 @@ test('Mojang G1GC args include official launcher parameters', () => {
 	assert.ok(args.includes('-XX:MaxGCPauseMillis=200'))
 	assert.ok(args.includes('-XX:G1MixedGCCountTarget=4'))
 	assert.ok(args.includes('-XX:SurvivorRatio=8'))
+	// PCL launch parity: no startup whole-heap commit, plus the Windows
+	// perf-data jitter mitigation.
+	assert.ok(!args.includes('-XX:+AlwaysPreTouch'))
+	assert.ok(args.includes('-XX:+PerfDisableSharedMem'))
 	assert.ok(!args.includes('-XX:G1UncommitBias=1'))
 })
 

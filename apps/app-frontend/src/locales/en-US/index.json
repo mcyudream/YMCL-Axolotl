@@ -800,24 +800,6 @@
 	"app.close-launcher.tray": {
 		"message": "Hide to tray"
 	},
-	"app.community-announcement.feedback-middle": {
-		"message": ", or share them with us through "
-	},
-	"app.community-announcement.feedback-prefix": {
-		"message": "If you have more ideas or suggestions, please join the player QQ group: "
-	},
-	"app.community-announcement.feedback-suffix": {
-		"message": ". We look forward to improving YMCL (YuDream Launcher) together!"
-	},
-	"app.community-announcement.response": {
-		"message": "Since YMCL (YuDream Launcher) was promoted on video platforms, we have received far more love and attention than we expected, along with many thoughtful suggestions and high-quality reports."
-	},
-	"app.community-announcement.thanks": {
-		"message": "I have done my best to personally reply to every comment on the videos. Thank you sincerely for all your support!"
-	},
-	"app.community-announcement.title": {
-		"message": "To all our users"
-	},
 	"app.content-favorites.add": {
 		"message": "Add to favorites"
 	},
@@ -8723,21 +8705,6 @@
 	"app.splash.updating-app-directory": {
 		"message": "Updating app directory..."
 	},
-	"app.survey-promotion.defer-hint": {
-		"message": "If you close this dialog, you can still find the survey later in Settings > About."
-	},
-	"app.survey-promotion.fill-survey": {
-		"message": "Fill out the survey"
-	},
-	"app.survey-promotion.intro": {
-		"message": "To help us improve YMCL (YuDream Launcher), we have prepared a short survey and would love to hear your feedback."
-	},
-	"app.survey-promotion.reward": {
-		"message": "Lucky participants will be drawn to win a genuine Minecraft account (redeemable for cash)."
-	},
-	"app.survey-promotion.title": {
-		"message": "Community survey"
-	},
 	"app.symlink-capability.unsupported": {
 		"message": "This system does not support creating symbolic links."
 	},
@@ -9557,6 +9524,9 @@
 	"app.ymcl.manage.update-available": {
 		"message": "Update to {version} available"
 	},
+	"app.ymcl.manage.update-notes": {
+		"message": "What's new: {notes}"
+	},
 	"app.ymcl.manage.update-failed": {
 		"message": "Update failed"
 	},
@@ -9656,8 +9626,23 @@
 	"app.ymcl.publish.content-hint": {
 		"message": "Check the files to include in the initial pack; player-side files (saves/logs etc.) are excluded automatically."
 	},
+	"app.ymcl.publish.content-hint-managed": {
+		"message": "Check which changed files ship with this update; unchecked paths are recorded in the exclusion policy and won't show up in future changes."
+	},
 	"app.ymcl.publish.content-title": {
 		"message": "Pack contents"
+	},
+	"app.ymcl.publish.notes-label": {
+		"message": "Release notes (optional)"
+	},
+	"app.ymcl.publish.notes-placeholder": {
+		"message": "Players see this when updating, e.g. Added Twilight Forest; fixed crafting table conflicts."
+	},
+	"app.ymcl.publish.recover-hint": {
+		"message": "These files were excluded earlier and don't appear in the changes above. Checking one re-manages it: it ships with this update and its exclusion rule is removed."
+	},
+	"app.ymcl.publish.recover-title": {
+		"message": "Files hidden by the exclusion policy"
 	},
 	"app.ymcl.publish.feature-conflict-unknown": {
 		"message": "Conflict references an unknown ID: {id}"

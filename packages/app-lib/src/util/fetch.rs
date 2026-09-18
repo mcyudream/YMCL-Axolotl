@@ -86,7 +86,6 @@ const MAX_GLOBAL_TAIL_HEDGES: usize = 8;
 pub(crate) const MAX_REDIRECT_LOCATION_BYTES: usize = 8 * 1024;
 const FILE_TRANSFER_CONNECT_TIMEOUT: time::Duration =
     time::Duration::from_secs(20);
-const RESOURCE_WAIT_TIMEOUT: time::Duration = time::Duration::from_secs(45);
 #[cfg(not(test))]
 const FILE_TRANSFER_READ_TIMEOUT: time::Duration =
     time::Duration::from_secs(60);
@@ -5264,14 +5263,14 @@ async fn try_h2_download(
     part_path: &Path,
     semaphore: &FetchSemaphore,
 ) -> crate::Result<H2AttemptResult> {
-    let _permit =
-        tokio::time::timeout(RESOURCE_WAIT_TIMEOUT, semaphore.0.acquire())
-            .await
-            .map_err(|_| {
-                ErrorKind::NetworkError(
-                    "timed out waiting for HTTP/2 download permit".to_string(),
-                )
-            })??;
+    let _permit = if let Some(cancellation) = request.cancellation.as_ref() {
+        tokio::select! {
+            _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("download canceled while waiting for HTTP/2 download permit".to_string()).into()),
+            permit = semaphore.0.acquire() => permit,
+        }
+    } else {
+        semaphore.0.acquire().await
+    }?;
     let started = Instant::now();
     match crate::util::download::h2_download::try_download_via_h2(
         request,
@@ -5358,19 +5357,14 @@ async fn download_to_path_inner(
     }
     let download_lock = destination_download_lock(destination);
     let lock_started = Instant::now();
-    let lock_wait =
-        tokio::time::timeout(RESOURCE_WAIT_TIMEOUT, download_lock.lock());
     let _download_guard = if let Some(cancellation) = request.cancellation.as_ref() {
         tokio::select! {
             _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("download canceled while waiting for destination lock".to_string()).into()),
-            result = lock_wait => result,
+            guard = download_lock.lock() => guard,
         }
     } else {
-        lock_wait.await
-    }
-    .map_err(|_| ErrorKind::NetworkError(
-        "timed out waiting for destination download lock".to_string(),
-    ))?;
+        download_lock.lock().await
+    };
     tracing::debug!(
         destination = %destination.display(),
         wait_ms = lock_started.elapsed().as_millis(),
@@ -8668,25 +8662,15 @@ async fn run_native_route_attempts(
             DownloadItemStatus::WaitingForResource,
         )
         .await;
-        let permit_wait = tokio::time::timeout(
-            RESOURCE_WAIT_TIMEOUT,
-            acquire_native_connection(route, semaphore),
-        );
         let resource_wait_started = Instant::now();
         let permit = if let Some(cancellation) = request.cancellation.as_ref() {
             tokio::select! {
                 _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("download canceled while waiting for native resources".to_string()).into()),
-                result = permit_wait => result,
+                result = acquire_native_connection(route, semaphore) => result,
             }
         } else {
-            permit_wait.await
-        }
-        .map_err(|_| {
-            ErrorKind::NetworkError(
-                "timed out waiting for native download resources"
-                    .to_string(),
-            )
-        })??;
+            acquire_native_connection(route, semaphore).await
+        }?;
         tracing::debug!(
             route = %sanitize_url_for_log(&route.url),
             resource = "native_connection_and_fetch",

@@ -62,6 +62,9 @@
 					"url": "https://update.axlmc.org/*"
 				},
 				{
+					"url": "https://www.swustmc.cn/api/plugins/ymcl-content/*"
+				},
+				{
 					"url": "https://admin.axlmc.org/*"
 				},
 				{

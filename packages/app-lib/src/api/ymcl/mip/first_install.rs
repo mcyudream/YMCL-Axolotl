@@ -17,8 +17,8 @@ use serde::Serialize;
 use super::manifest::MipManifest;
 use super::state::{self, MipInstanceBinding, MipPackState, StateFile};
 use super::update::{
-    MipServerBinding, MipVersionEntry, fetch_json, manifest_url,
-    resolve_mip_base, resolve_target_version, servers_url,
+    MipServerBinding, MipServerEndpoint, MipVersionEntry, fetch_json,
+    manifest_url, resolve_mip_base, resolve_target_version, servers_url,
     validate_feature_selection, versions_url,
 };
 use crate::State;
@@ -516,9 +516,9 @@ pub async fn adopt_pack_state(
         files,
         ..MipPackState::default()
     };
-    // 记录来源服务器/赛季（YAP §7 绑定语义）。赛季查询失败不阻断安装收尾：
+    // 记录来源服务器/赛季（YAP §7 绑定语义）。服务器查询失败不阻断安装收尾：
     // 更新检查对 season 缺失本就是容忍的。
-    let season_id = async {
+    let bound_server: Option<MipServerBinding> = async {
         let servers_value = fetch_json(&state, &servers_url(&mip_base)).await?;
         let servers: Vec<MipServerBinding> = serde_json::from_value(
             servers_value
@@ -526,22 +526,95 @@ pub async fn adopt_pack_state(
                 .cloned()
                 .unwrap_or(serde_json::Value::Array(vec![])),
         )?;
-        crate::Result::Ok(servers
-            .iter()
-            .find(|server| server.server_id == server_id)
-            .and_then(|server| server.current_season.as_ref())
-            .and_then(|season| season.season_id.clone()))
+        crate::Result::Ok(
+            servers
+                .into_iter()
+                .find(|server| server.server_id == server_id),
+        )
     }
     .await
     .unwrap_or_else(|error| {
-        tracing::warn!("MIP adopt: season lookup failed for {server_id}: {error}");
+        tracing::warn!("MIP adopt: server lookup failed for {server_id}: {error}");
         None
     });
     pack_state.binding = Some(MipInstanceBinding {
         server_id: server_id.to_string(),
-        season_id,
+        season_id: bound_server
+            .as_ref()
+            .and_then(|server| server.current_season.as_ref())
+            .and_then(|season| season.season_id.clone()),
     });
-    state::save(&instance_dir, &pack_state).await
+    state::save(&instance_dir, &pack_state).await?;
+
+    // 注入连接地址到实例的服务器列表（主线+备用线路，有就不管，无就加），
+    // 玩家在 MC 多人游戏列表里直接就有这台服。注入失败不回滚安装。
+    if let Some(server) = &bound_server {
+        let server_name = server.name.clone().filter(|name| !name.is_empty());
+        for address in server_join_addresses(server) {
+            let entry_name = server_name.clone().unwrap_or_else(|| address.clone());
+            match crate::api::worlds::ensure_server_in_instance(
+                instance_id,
+                entry_name,
+                address.clone(),
+            )
+            .await
+            {
+                Ok(true) => tracing::info!(
+                    "MIP adopt: injected server address {address} into instance {instance_id}"
+                ),
+                Ok(false) => {}
+                Err(error) => tracing::warn!(
+                    "MIP adopt: server entry injection failed for {address}: {error}"
+                ),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The server-list injection set for a domain server: every joinable line,
+/// primary first then backups in adapter order, falling back to `mcAddress`
+/// when the adapter declares no usable endpoints (MIP appendix B.2).
+/// Deduplicated: repeated lines and a backup equal to the primary only
+/// enter once.
+fn server_join_addresses(server: &MipServerBinding) -> Vec<String> {
+    let joinable = |endpoint: &MipServerEndpoint| {
+        // 基岩版线路进不了 Java 启动器的服务器列表。
+        endpoint
+            .edition
+            .as_deref()
+            .is_none_or(|edition| edition.eq_ignore_ascii_case("java"))
+            && endpoint
+                .address
+                .as_deref()
+                .is_some_and(|address| !address.trim().is_empty())
+    };
+    let mut endpoints: Vec<&MipServerEndpoint> = server
+        .endpoints
+        .iter()
+        .flatten()
+        .filter(|endpoint| joinable(endpoint))
+        .collect();
+    // 主线路排最前；稳定排序保持同旗标间适配器给的顺序。
+    endpoints.sort_by_key(|endpoint| !endpoint.primary.unwrap_or(false));
+    let mut addresses: Vec<String> = Vec::new();
+    let mut push = |address: Option<&String>| {
+        if let Some(address) = address
+            .map(|address| address.trim())
+            .filter(|address| !address.is_empty())
+            && !addresses.iter().any(|existing| existing == address)
+        {
+            addresses.push(address.to_string());
+        }
+    };
+    if endpoints.is_empty() {
+        push(server.mc_address.as_ref());
+    } else {
+        for endpoint in endpoints {
+            push(endpoint.address.as_ref());
+        }
+    }
+    addresses
 }
 
 #[cfg(test)]
@@ -757,5 +830,87 @@ mod tests {
             url: "test://mip".to_string(),
         }
         .into()));
+    }
+
+    fn join_server(mc_address: Option<&str>, endpoints: Vec<MipServerEndpoint>) -> MipServerBinding {
+        MipServerBinding {
+            server_id: "srv".to_string(),
+            name: None,
+            status: None,
+            binding: None,
+            mc_address: mc_address.map(str::to_string),
+            endpoints: (!endpoints.is_empty()).then_some(endpoints),
+            current_season: None,
+        }
+    }
+
+    fn endpoint(address: &str, primary: bool, edition: Option<&str>) -> MipServerEndpoint {
+        MipServerEndpoint {
+            address: Some(address.to_string()),
+            primary: Some(primary),
+            edition: edition.map(str::to_string),
+            name: None,
+        }
+    }
+
+    #[test]
+    fn join_addresses_cover_primary_and_backup_lines() {
+        // 主线 + 备用线路都进列表；与主线重复的备用行只进一次。
+        let server = join_server(
+            Some("main.example.org"),
+            vec![
+                endpoint("main.example.org", true, None),
+                endpoint("backup-1.example.org:25566", false, None),
+                endpoint("main.example.org", false, None),
+            ],
+        );
+        assert_eq!(
+            server_join_addresses(&server),
+            vec!["main.example.org", "backup-1.example.org:25566"]
+        );
+    }
+
+    #[test]
+    fn join_addresses_put_flagged_primary_first_without_losing_order() {
+        // 无 primary 旗标时首个线路当主线，适配器给的顺序保持。
+        let server = join_server(
+            None,
+            vec![
+                endpoint("line-b.example.org", false, None),
+                endpoint("line-a.example.org", false, None),
+            ],
+        );
+        assert_eq!(
+            server_join_addresses(&server),
+            vec!["line-b.example.org", "line-a.example.org"]
+        );
+    }
+
+    #[test]
+    fn join_addresses_fall_back_to_mc_address() {
+        let server = join_server(Some("main.example.org"), vec![]);
+        assert_eq!(server_join_addresses(&server), vec!["main.example.org"]);
+
+        // 端点存在但地址全空同样回落到 mcAddress。
+        let empty = join_server(
+            Some("main.example.org"),
+            vec![endpoint("   ", true, None)],
+        );
+        assert_eq!(
+            server_join_addresses(&empty),
+            vec!["main.example.org"]
+        );
+    }
+
+    #[test]
+    fn join_addresses_drop_non_java_lines_and_trim() {
+        let server = join_server(
+            None,
+            vec![
+                endpoint("  main.example.org  ", true, Some("java")),
+                endpoint("bedrock.example.org", false, Some("bedrock")),
+            ],
+        );
+        assert_eq!(server_join_addresses(&server), vec!["main.example.org"]);
     }
 }

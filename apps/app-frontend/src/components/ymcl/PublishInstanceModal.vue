@@ -21,7 +21,7 @@ import {
 import { join } from '@tauri-apps/api/path'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
 import { invoke } from '@tauri-apps/api/core'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import PublishChangeListModal from '@/components/ymcl/PublishChangeListModal.vue'
 import { get_full_path, get_pack_export_candidates } from '@/helpers/instance'
@@ -114,6 +114,28 @@ const messages = defineMessages({
 		id: 'app.ymcl.publish.content-hint',
 		defaultMessage: '勾选要打进初始包的文件，玩家侧文件（存档/日志等）已自动排除。',
 	},
+	contentHintManaged: {
+		id: 'app.ymcl.publish.content-hint-managed',
+		defaultMessage:
+			'勾选随本次更新下发的变更文件；取消勾选的路径会记入排除策略，之后不再出现在变更里。',
+	},
+	notesLabel: {
+		id: 'app.ymcl.publish.notes-label',
+		defaultMessage: '更新说明（可选）',
+	},
+	notesPlaceholder: {
+		id: 'app.ymcl.publish.notes-placeholder',
+		defaultMessage: '写了什么玩家会在更新时看到，例如：新增暮色森林模组；修复合成表冲突。',
+	},
+	recoverTitle: {
+		id: 'app.ymcl.publish.recover-title',
+		defaultMessage: '被排除策略隐藏的文件',
+	},
+	recoverHint: {
+		id: 'app.ymcl.publish.recover-hint',
+		defaultMessage:
+			'这些文件此前被排除，不会出现在上方变更里。勾选即重新纳管：随本次更新下发，对应排除规则移除。',
+	},
 	publishedOptional: {
 		id: 'app.ymcl.publish.published-optional',
 		defaultMessage: '原版增强包已发布并绑定到服务器。',
@@ -177,6 +199,10 @@ const messages = defineMessages({
 	added: { id: 'app.ymcl.publish.added', defaultMessage: '新增' },
 	deleted: { id: 'app.ymcl.publish.deleted', defaultMessage: '删除' },
 	moved: { id: 'app.ymcl.publish.moved', defaultMessage: '移动' },
+	recovered: {
+		id: 'app.ymcl.publish.recovered',
+		defaultMessage: '找回',
+	},
 	viewChanges: {
 		id: 'app.ymcl.publish.view-changes',
 		defaultMessage: '查看全部',
@@ -254,7 +280,7 @@ const messages = defineMessages({
 	},
 	excluded: {
 		id: 'app.ymcl.publish.excluded',
-		defaultMessage: '已排除（玩家侧文件）',
+		defaultMessage: '已排除（玩家侧文件与排除策略）',
 	},
 	published: {
 		id: 'app.ymcl.publish.published',
@@ -269,15 +295,39 @@ interface PublishDiffEntry {
 	size?: number | null
 }
 
+/** 管理员的持久化发布档案：首发排除路径 + 最近一次的 features/policies 声明。 */
+interface PublishProfile {
+	excluded: string[]
+	features: {
+		id: string
+		name: string | null
+		default: boolean
+		conflicts: string[]
+		files: string[]
+	}[]
+	policies: { glob: string; policy: string }[]
+}
+
+/** 后端内建发布过滤规则（与 is_excluded_from_publish 单一来源同步）。 */
+interface PublishFilters {
+	top_level: string[]
+	file_names: string[]
+	suffixes: string[]
+}
+
 interface PublishDiff {
 	managed: boolean
 	pack_id?: string | null
 	base_version?: string | null
+	bound_server_id?: string | null
 	changed: PublishDiffEntry[]
 	added: PublishDiffEntry[]
 	deleted: string[]
 	moved: PublishDiffEntry[]
 	excluded: string[]
+	profile?: PublishProfile | null
+	excluded_by_policy?: PublishDiffEntry[]
+	filters?: PublishFilters | null
 }
 
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
@@ -286,6 +336,8 @@ const checking = ref(false)
 const pushing = ref(false)
 const version = ref('')
 const channel = ref('stable')
+/** 本次发布的更新说明：随 notes 字段上传，玩家更新前可见。 */
+const updateNotes = ref('')
 const servers = ref<MipServerOption[]>([])
 const serverId = ref('')
 /** 服务器列表加载失败的原因（呈现给管理员并允许重试，而不是静默藏掉绑定区）。 */
@@ -296,6 +348,11 @@ const bindOptional = ref(false)
 interface MipServerOption {
 	serverId: string
 	name?: string | null
+	/** 适配器返回的包绑定：用来推断本实例当前的绑定方式（必装/原版增强）。 */
+	binding?: {
+		packId?: string | null
+		optionalPackId?: string | null
+	} | null
 }
 
 const serverOptions = computed(() => [
@@ -305,6 +362,26 @@ const serverOptions = computed(() => [
 		label: server.name || server.serverId,
 	})),
 ])
+
+/**
+ * 绑定下拉的默认值：实例已有绑定优先（别让管理员重复选），否则单服务器
+ * 域自动选中（绑定是玩家能下载到包的前提）。checkDiff 和 loadServers 谁后
+ * 到谁触发，两处都调、幂等。
+ */
+function applyDefaultServerBinding() {
+	const bound = diff.value?.bound_server_id
+	if (bound && servers.value.some((server) => server.serverId === bound)) {
+		serverId.value = bound
+	} else if (servers.value.length === 1) {
+		serverId.value = servers.value[0].serverId
+	}
+	const server = servers.value.find((item) => item.serverId === serverId.value)
+	const packId = diff.value?.pack_id
+	if (server?.binding && packId) {
+		if (server.binding.optionalPackId === packId) bindOptional.value = true
+		else if (server.binding.packId === packId) bindOptional.value = false
+	}
+}
 
 const gate = computed(() => {
 	if (ymclStore.isPersonal) return 'domain'
@@ -442,10 +519,10 @@ function showChanges(options?: { pickMode?: boolean; selected?: string[] }) {
 	if (!diff.value) return
 	changeListModal.value?.show(
 		{
-			changed: diff.value.changed,
-			added: diff.value.added,
-			deleted: diff.value.deleted,
-			moved: diff.value.moved,
+			changed: effectiveDiff.value.changed,
+			added: effectiveDiff.value.added,
+			deleted: effectiveDiff.value.deleted,
+			moved: effectiveDiff.value.moved,
 		},
 		options,
 	)
@@ -482,6 +559,7 @@ function onPickFiles(paths: string[]) {
 	feature.globsText = lines.join('\n')
 }
 
+/** 原始差异规模：只用于区块显隐，统计展示走 effectiveDiff。 */
 const totalChanges = computed(() =>
 	diff.value
 		? diff.value.changed.length +
@@ -489,6 +567,39 @@ const totalChanges = computed(() =>
 			diff.value.deleted.length +
 			diff.value.moved.length
 		: 0,
+)
+
+/**
+ * 实际随本次更新下发的差异：在包内容树取消勾选的路径从这里扣除（删除
+ * 项没有勾选通道，始终下发），找回的文件不在原始差异里、单独计数。统计
+ * 卡、变更明细、发布按钮都以它为准，和树的选择保持一致。
+ */
+const effectiveDiff = computed(() => {
+	const d = diff.value
+	if (!d) {
+		return {
+			changed: [] as PublishDiffEntry[],
+			added: [] as PublishDiffEntry[],
+			deleted: [] as string[],
+			moved: [] as PublishDiffEntry[],
+		}
+	}
+	const excluded = excludedContentPaths.value
+	const keep = (entry: PublishDiffEntry) => !isPathExcluded(entry.path, excluded)
+	return {
+		changed: d.changed.filter(keep),
+		added: d.added.filter(keep),
+		deleted: d.deleted,
+		moved: d.moved.filter(keep),
+	}
+})
+
+const effectiveTotal = computed(
+	() =>
+		effectiveDiff.value.changed.length +
+		effectiveDiff.value.added.length +
+		effectiveDiff.value.deleted.length +
+		effectiveDiff.value.moved.length,
 )
 
 type DiffRowKind = 'changed' | 'added' | 'deleted' | 'moved'
@@ -500,10 +611,10 @@ interface DiffRow {
 	size?: number | null
 }
 
-/** Per-file detail rows for the change list, ordered by operation type. */
+/** Per-file detail rows for the change list, ordered by operation type.
+ * Built from the effective diff so the明细 matches what ships. */
 const diffRows = computed<DiffRow[]>(() => {
-	const d = diff.value
-	if (!d) return []
+	const d = effectiveDiff.value
 	return [
 		...d.changed.map((entry) => ({
 			kind: 'changed' as const,
@@ -560,6 +671,12 @@ async function checkDiff() {
 		} else {
 			publishedVersions.value = []
 		}
+		// 内建过滤规则与发布档案随 diff 一起到位后再建树：增量树要列变更
+		// 文件，首发树要按档案预排除。
+		publishFilters.value = diff.value.filters ?? null
+		applyProfile(diff.value.profile)
+		applyDefaultServerBinding()
+		void initContentTree()
 	} catch (error) {
 		addNotification({
 			title: formatMessage(messages.checkFailed),
@@ -571,7 +688,29 @@ async function checkDiff() {
 	}
 }
 
-const publishedVersions = ref<{ version: string; channel?: string | null }[]>([])
+/** 用持久化的发布档案预填可选内容/文件策略声明，管理员只改本次的增量。 */
+function applyProfile(profile: PublishProfile | null | undefined) {
+	if (!profile) return
+	if (features.value.length === 0 && profile.features.length > 0) {
+		features.value = profile.features.map((feature) => ({
+			id: feature.id,
+			name: feature.name ?? '',
+			defaultChecked: feature.default,
+			conflicts: [...feature.conflicts],
+			globsText: feature.files.join('\n'),
+		}))
+	}
+	if (policies.value.length === 0 && profile.policies.length > 0) {
+		policies.value = profile.policies.map((rule) => ({
+			glob: rule.glob,
+			policy: rule.policy,
+		}))
+	}
+}
+
+const publishedVersions = ref<{ version: string; channel?: string | null; notes?: string | null }[]>(
+	[],
+)
 const withdrawingVersion = ref<string | null>(null)
 
 async function loadPublishedVersions() {
@@ -615,26 +754,30 @@ async function loadServers() {
 	serversError.value = null
 	try {
 		servers.value = await invoke<MipServerOption[]>('plugin:ymcl|ymcl_mip_servers')
-		// 单服务器域直接选中：绑定是玩家能下载到包的前提，别让管理员漏选。
-		if (servers.value.length === 1) {
-			serverId.value = servers.value[0].serverId
-		}
+		applyDefaultServerBinding()
 	} catch (error) {
 		serversError.value = ymclErrorMessage(error)
 	}
 }
 
-// ==== 初始包内容树（融合「导出整合包」的文件勾选体验）====
+// ==== 包内容树（首发勾选打包内容；增量勾选本次下发并沉淀排除策略）====
 
-/** 初始包永不收录的顶层目录/文件（与后端 PUBLISH_EXCLUDED_TOP_LEVEL 对齐）。 */
-const CONTENT_EXCLUDED_TOP_LEVEL = [
-	'saves',
-	'logs',
-	'crash-reports',
-	'screenshots',
-	'.pack-staging',
-	'.pack-backup',
-]
+// 内建过滤的兜底副本：仅用于 diff 尚未返回的间隙，正常路径以后端下发的
+// filters 为准（与 is_excluded_from_publish 单一来源同步）。
+const FALLBACK_FILTERS: PublishFilters = {
+	top_level: [
+		'saves',
+		'logs',
+		'crash-reports',
+		'screenshots',
+		'.pack-staging',
+		'.pack-backup',
+	],
+	file_names: ['.pack-state.json', '.pack-hashes.json'],
+	suffixes: ['log', 'replay'],
+}
+
+const publishFilters = ref<PublishFilters | null>(null)
 
 const contentFiles = ref<{ path: string; type: string; size?: number; modified?: number; count?: number }[]>([])
 const selectedContentPaths = ref<string[]>([])
@@ -642,19 +785,69 @@ const contentTreeKey = ref(0)
 const contentLoadId = ref(0)
 const contentRoot = ref('')
 const contentLoadedDirs = ref(new Set<string>())
+/** 树里列出的全部路径（首发=打包候选；增量=本次变更文件）。 */
 const contentCandidates = ref<string[]>([])
-/** 管理员取消勾选的路径 = push_initial 的 exclude。 */
+/** 管理员取消勾选的路径：首发=push_initial 的 exclude；增量=本次并进排除策略。 */
 const excludedContentPaths = computed(() =>
 	contentCandidates.value.filter((path) => !selectedContentPaths.value.includes(path)),
 )
 
+/** 找回树：被排除策略隐藏的文件，勾选后随本次更新下发并移除对应规则。 */
+const selectedRecoverPaths = ref<string[]>([])
+const recoverItems = computed(() =>
+	(diff.value?.excluded_by_policy ?? []).map((entry) => ({
+		path: entry.path,
+		type: 'file',
+		size: entry.size ?? undefined,
+	})),
+)
+
+/** 排除规则语义与后端一致：精确路径或目录前缀。 */
+function isPathExcluded(path: string, excluded: string[]): boolean {
+	return excluded.some((rule) => path === rule || path.startsWith(`${rule}/`))
+}
+
+/**
+ * 目录勾选与文件勾选双向同步（仅首发树有显式目录项）：勾上/取消目录时，
+ * 其下已知文件一起勾上/取消。否则会出现「父目录已取消、子文件仍显示勾选」
+ * 的错位——后端按目录前缀排除，界面却像是在下发该文件。
+ */
+watch(selectedContentPaths, (value, oldValue) => {
+	if (!oldValue) return
+	const before = new Set(oldValue)
+	const after = new Set(value)
+	const dirPaths = contentFiles.value
+		.filter((file) => file.type === 'directory')
+		.map((file) => file.path)
+	let next = value
+	for (const dir of dirPaths) {
+		const gained = after.has(dir) && !before.has(dir)
+		const lost = !after.has(dir) && before.has(dir)
+		if (!gained && !lost) continue
+		const descendants = contentCandidates.value.filter((path) =>
+			path.startsWith(`${dir}/`),
+		)
+		if (gained) {
+			const merged = new Set(next)
+			for (const path of descendants) merged.add(path)
+			next = [...merged]
+		} else {
+			next = next.filter((path) => !descendants.includes(path))
+		}
+	}
+	if (next !== value) selectedContentPaths.value = next
+})
+
 function contentPathAllowed(path: string): boolean {
-	const top = path.split('/')[0]
-	const fileName = path.split('/').pop() ?? path
+	const filters = publishFilters.value ?? FALLBACK_FILTERS
+	const segments = path.split('/')
+	const fileName = segments[segments.length - 1]
+	const dot = fileName.lastIndexOf('.')
+	const extension = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : ''
 	return (
-		!CONTENT_EXCLUDED_TOP_LEVEL.includes(top) &&
-		path !== '.pack-state.json' &&
-		!fileName.toLowerCase().endsWith('.log')
+		!filters.top_level.includes(segments[0]) &&
+		!filters.file_names.includes(fileName) &&
+		!filters.suffixes.includes(extension)
 	)
 }
 
@@ -662,7 +855,42 @@ async function initContentTree() {
 	const loadId = ++contentLoadId.value
 	contentFiles.value = []
 	selectedContentPaths.value = []
+	selectedRecoverPaths.value = []
 	contentCandidates.value = []
+	contentLoadedDirs.value = new Set()
+	// 重新检查后保留管理员已取消勾选的路径，不丢选择。
+	const previousExcluded = excludedContentPaths.value
+	if (!diff.value?.managed) {
+		await initInitialContentTree(loadId, previousExcluded)
+		return
+	}
+	// 增量模式：树只列本次变更（changed/added/moved），目录由组件按路径
+	// 段自动合成；取消勾选即为排除并沉淀进发布档案。
+	const entries = [
+		...diff.value.changed,
+		...diff.value.added,
+		...diff.value.moved,
+	]
+	const seen = new Set<string>()
+	const items: typeof contentFiles.value = []
+	for (const entry of entries) {
+		if (seen.has(entry.path)) continue
+		seen.add(entry.path)
+		items.push({
+			path: entry.path,
+			type: 'file',
+			size: entry.size ?? undefined,
+		})
+	}
+	contentFiles.value = items
+	contentCandidates.value = [...seen]
+	selectedContentPaths.value = previousExcluded.length
+		? [...seen].filter((path) => !isPathExcluded(path, previousExcluded))
+		: [...seen]
+	contentTreeKey.value += 1
+}
+
+async function initInitialContentTree(loadId: number, previousExcluded: string[]) {
 	try {
 		const [candidates, root] = await Promise.all([
 			get_pack_export_candidates(props.instanceId),
@@ -675,7 +903,14 @@ async function initContentTree() {
 		const items = await Promise.all(allowed.map((path) => buildContentItem(root, path)))
 		if (loadId !== contentLoadId.value) return
 		contentFiles.value = items
-		selectedContentPaths.value = allowed
+		// 上次发布档案里排除过的路径默认保持不勾，管理员不用重新排除。
+		const excludedRules = [
+			...previousExcluded,
+			...(diff.value?.profile?.excluded ?? []),
+		]
+		selectedContentPaths.value = excludedRules.length
+			? allowed.filter((path) => !isPathExcluded(path, excludedRules))
+			: allowed
 		contentTreeKey.value += 1
 	} catch {
 		// 树加载失败不阻断发布（后端仍按全量候选打包）。
@@ -722,9 +957,26 @@ async function loadContentDirectory(path: string) {
 		const known = new Map(contentFiles.value.map((file) => [file.path, file]))
 		for (const child of children) known.set(child.path, child)
 		contentFiles.value = [...known.values()]
+		// 深层文件也进候选集合：取消勾选才会真正进 exclude 列表。
+		const newlyListed = children.map((child) => child.path)
+		const knownCandidates = new Set(contentCandidates.value)
+		for (const path of newlyListed) knownCandidates.add(path)
+		contentCandidates.value = [...knownCandidates]
+		// 新展开的文件默认纳入勾选（除非管理员整体取消过其父目录）。
+		const selected = new Set(selectedContentPaths.value)
+		for (const path of newlyListed) {
+			if (!isPathExcluded(path, excludedContentPaths.value)) selected.add(path)
+		}
+		selectedContentPaths.value = [...selected]
 	} catch {
 		contentLoadedDirs.value.delete(path)
 	}
+}
+
+/** 增量模式的目录是按变更路径合成的虚拟目录，展开只看已知变更、不读盘。 */
+function onContentNavigate(path: string) {
+	if (diff.value?.managed) return
+	void loadContentDirectory(path)
 }
 
 async function push() {
@@ -756,6 +1008,11 @@ async function push() {
 				bind,
 				features: featurePayload,
 				policies: policyPayload,
+				// 本次取消勾选的路径：不进 delta，并沉淀进发布档案。
+				exclude: excludedContentPaths.value,
+				// 找回树勾选的路径：随本次下发，并从排除策略移除规则。
+				include: selectedRecoverPaths.value,
+				notes: updateNotes.value.trim() || null,
 			})
 		} else {
 			// packId 不传：由启动器生成 `slug-<uuid>`，避免重名冲突。
@@ -766,7 +1023,8 @@ async function push() {
 				bind,
 				features: featurePayload,
 				policies: policyPayload,
-				exclude: diff.value?.managed ? [] : excludedContentPaths.value,
+				exclude: excludedContentPaths.value,
+				notes: updateNotes.value.trim() || null,
 			})
 		}
 		const publishedPackId =
@@ -810,15 +1068,17 @@ defineExpose({
 		diff.value = null
 		version.value = ''
 		channel.value = 'stable'
+		updateNotes.value = ''
 		bindOptional.value = false
 		features.value = []
 		policies.value = []
 		publishedVersions.value = []
 		withdrawingVersion.value = null
+		publishFilters.value = null
 		modal.value?.show()
+		// 内容树由 checkDiff 在 diff（含内建过滤规则与发布档案）返回后建立。
 		void checkDiff()
 		void loadServers()
-		void initContentTree()
 	},
 })
 </script>
@@ -853,20 +1113,27 @@ defineExpose({
 				<template v-else-if="diff">
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						<div class="rounded-xl bg-bg-raised p-3">
-							<div class="text-xl font-bold text-contrast">{{ diff.changed.length }}</div>
+							<div class="text-xl font-bold text-contrast">{{ effectiveDiff.changed.length }}</div>
 							<div class="text-xs text-secondary">{{ formatMessage(messages.changed) }}</div>
 						</div>
 						<div class="rounded-xl bg-bg-raised p-3">
-							<div class="text-xl font-bold text-green">{{ diff.added.length }}</div>
+							<div class="text-xl font-bold text-green">{{ effectiveDiff.added.length }}</div>
 							<div class="text-xs text-secondary">{{ formatMessage(messages.added) }}</div>
 						</div>
 						<div class="rounded-xl bg-bg-raised p-3">
-							<div class="text-xl font-bold text-red">{{ diff.deleted.length }}</div>
+							<div class="text-xl font-bold text-red">{{ effectiveDiff.deleted.length }}</div>
 							<div class="text-xs text-secondary">{{ formatMessage(messages.deleted) }}</div>
 						</div>
 						<div class="rounded-xl bg-bg-raised p-3">
-							<div class="text-xl font-bold text-contrast">{{ diff.moved.length }}</div>
+							<div class="text-xl font-bold text-contrast">{{ effectiveDiff.moved.length }}</div>
 							<div class="text-xs text-secondary">{{ formatMessage(messages.moved) }}</div>
+						</div>
+						<div
+							v-if="selectedRecoverPaths.length > 0"
+							class="rounded-xl bg-bg-raised p-3"
+						>
+							<div class="text-xl font-bold text-green">{{ selectedRecoverPaths.length }}</div>
+							<div class="text-xs text-secondary">{{ formatMessage(messages.recovered) }}</div>
 						</div>
 					</div>
 
@@ -914,6 +1181,12 @@ defineExpose({
 								</span>
 								<span v-if="entry.channel" class="text-xs text-secondary">
 									{{ entry.channel }}
+								</span>
+								<span
+									v-if="entry.notes?.trim()"
+									class="whitespace-pre-line text-xs text-secondary"
+								>
+									{{ entry.notes.trim() }}
 								</span>
 							</div>
 							<ButtonStyled size="small" color="red">
@@ -1208,25 +1481,31 @@ defineExpose({
 						</div>
 					</div>
 
-					<template v-if="totalChanges > 0">
-						<div
-							v-if="!diff.managed && contentFiles.length > 0"
-							class="flex flex-col gap-2 rounded-xl bg-bg-raised p-3"
-						>
-							<p class="m-0 text-sm font-semibold text-contrast">
-								{{ formatMessage(messages.contentTitle) }}
-							</p>
-							<p class="m-0 text-xs text-secondary">
-								{{ formatMessage(messages.contentHint) }}
-							</p>
-							<FileTreeSelect
-								:key="contentTreeKey"
-								v-model="selectedContentPaths"
-								class="min-w-0"
-								:items="contentFiles"
-								@navigate="loadContentDirectory"
-							/>
-						</div>
+					<template v-if="totalChanges > 0 || selectedRecoverPaths.length > 0">
+					<div
+						v-if="contentFiles.length > 0"
+						class="flex flex-col gap-2 rounded-xl bg-bg-raised p-3"
+					>
+						<p class="m-0 text-sm font-semibold text-contrast">
+							{{ formatMessage(messages.contentTitle) }}
+						</p>
+						<p class="m-0 text-xs text-secondary">
+							{{
+								formatMessage(
+									diff.managed
+										? messages.contentHintManaged
+										: messages.contentHint,
+								)
+							}}
+						</p>
+						<FileTreeSelect
+							:key="contentTreeKey"
+							v-model="selectedContentPaths"
+							class="min-w-0"
+							:items="contentFiles"
+							@navigate="onContentNavigate"
+						/>
+					</div>
 						<div class="grid grid-cols-2 gap-4">
 							<div class="labeled_input w-full">
 								<p class="text-contrast font-semibold">
@@ -1241,10 +1520,41 @@ defineExpose({
 								<StyledInput v-model="channel" :disabled="pushing" wrapper-class="w-full" />
 							</div>
 						</div>
+						<div class="labeled_input w-full">
+							<p class="text-contrast font-semibold">
+								{{ formatMessage(messages.notesLabel) }}
+							</p>
+							<textarea
+								v-model="updateNotes"
+								:disabled="pushing"
+								rows="3"
+								class="w-full rounded-lg bg-bg-raised px-3 py-2 text-sm text-contrast"
+								:placeholder="formatMessage(messages.notesPlaceholder)"
+							/>
+						</div>
 					</template>
 					<p v-else class="m-0 text-sm text-secondary">
 						{{ formatMessage(messages.nothingToDo) }}
 					</p>
+
+					<div
+						v-if="diff.managed && recoverItems.length > 0"
+						class="flex flex-col gap-2 rounded-xl bg-bg-raised p-3"
+					>
+						<p class="m-0 text-sm font-semibold text-contrast">
+							{{ formatMessage(messages.recoverTitle) }}（{{ recoverItems.length }}）
+						</p>
+						<p class="m-0 text-xs text-secondary">
+							{{ formatMessage(messages.recoverHint) }}
+						</p>
+						<FileTreeSelect
+							:key="`${contentTreeKey}-recover`"
+							v-model="selectedRecoverPaths"
+							class="min-w-0"
+							:items="recoverItems"
+							@navigate="onContentNavigate"
+						/>
+					</div>
 				</template>
 			</template>
 		</div>
@@ -1257,7 +1567,12 @@ defineExpose({
 					</button>
 				</ButtonStyled>
 				<ButtonStyled
-					v-if="diff && (diff.managed ? totalChanges > 0 : diff.added.length > 0)"
+					v-if="
+						diff &&
+						(diff.managed
+							? effectiveTotal > 0 || selectedRecoverPaths.length > 0
+							: diff.added.length > 0)
+					"
 					color="brand"
 				>
 					<button

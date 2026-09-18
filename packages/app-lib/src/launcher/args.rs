@@ -253,6 +253,22 @@ pub fn get_jvm_arguments(
         parsed_arguments.push(class_paths.to_string());
     }
 
+    // Hard ceiling at 3/4 of total physical RAM: an oversized explicit heap
+    // (e.g. 32G on a 32G machine) starves the OS at commit time and makes
+    // every GC pause worse, so the user's value is capped rather than
+    // forwarded verbatim.
+    let memory_cap_mb =
+        ((crate::api::jre::system_memory_bytes() / 1024 / 1024) * 3 / 4)
+            as u32;
+    let mut memory = memory;
+    if memory_cap_mb > 0 && memory.maximum > memory_cap_mb {
+        tracing::warn!(
+            requested = memory.maximum,
+            capped = memory_cap_mb,
+            "Requested Minecraft heap exceeds 3/4 of total RAM; capping"
+        );
+        memory.maximum = memory_cap_mb;
+    }
     parsed_arguments.push(format!("-Xmx{}M", memory.maximum));
 
     if let Some(LoggingConfiguration::Log4j2Xml { argument, file }) = log_config

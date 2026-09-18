@@ -355,6 +355,8 @@ export interface YmclUpdateCheck {
 	pending_deletions?: number | null
 	/** Paths skipped during apply because every remote source failed. */
 	skipped_files?: string[] | null
+	/** 发布者写的目标版本更新说明（可选），更新前展示给玩家。 */
+	notes?: string | null
 }
 
 export interface YmclUpdateResult {
@@ -450,6 +452,7 @@ export interface YmclSkinDomainMatch {
 export interface YmclPackVersionInfo {
 	version: string
 	channel?: string | null
+	notes?: string | null
 }
 
 export const ymcl = {

@@ -12,7 +12,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 struct H2Range {
     start: u64,
@@ -195,13 +194,9 @@ async fn download_range(
         crate::install::DownloadItemStatus::WaitingForResource,
     )
     .await;
-    let _permit = tokio::time::timeout(
-        Duration::from_secs(45),
-        super::h2_stream_budget::acquire(route),
-    )
-    .await
-    .map_err(|_| H2DownloadFailure::Connect)?
-    .map_err(|_| H2DownloadFailure::Connect)?;
+    let _permit = super::h2_stream_budget::acquire(route)
+        .await
+        .map_err(|_| H2DownloadFailure::Connect)?;
     super::h2_download::record_install_stage(
         request,
         crate::install::DownloadItemStatus::Downloading,

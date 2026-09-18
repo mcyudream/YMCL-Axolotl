@@ -36,6 +36,10 @@ const messages = defineMessages({
 		id: 'app.ymcl.manage.update-available',
 		defaultMessage: '可更新到 {version}',
 	},
+	updateNotes: {
+		id: 'app.ymcl.manage.update-notes',
+		defaultMessage: '本次更新：{notes}',
+	},
 	updateNow: {
 		id: 'app.ymcl.manage.update-now',
 		defaultMessage: '更新整合包',
@@ -132,19 +136,27 @@ onMounted(() => void refresh())
 		class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-bg-raised p-3 text-sm"
 	>
 		<PackageIcon class="h-5 w-5 shrink-0 text-secondary" />
-		<span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-			<span class="font-semibold text-contrast">
-				{{ formatMessage(messages.managedBy, { pack: check.pack_id }) }}
+		<span class="flex min-w-0 flex-col gap-1">
+			<span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+				<span class="font-semibold text-contrast">
+					{{ formatMessage(messages.managedBy, { pack: check.pack_id }) }}
+				</span>
+				<span class="text-secondary">
+					{{ formatMessage(messages.currentVersion, { version: check.current_version }) }}
+				</span>
+				<span v-if="!hasUpdate()" class="text-secondary">
+					· {{ formatMessage(messages.upToDate) }}
+				</span>
+				<span v-else class="flex items-center gap-1 text-orange">
+					<UpdatedIcon class="h-4 w-4" />
+					{{ formatMessage(messages.updateAvailable, { version: check.target_version }) }}
+				</span>
 			</span>
-			<span class="text-secondary">
-				{{ formatMessage(messages.currentVersion, { version: check.current_version }) }}
-			</span>
-			<span v-if="!hasUpdate()" class="text-secondary">
-				· {{ formatMessage(messages.upToDate) }}
-			</span>
-			<span v-else class="flex items-center gap-1 text-orange">
-				<UpdatedIcon class="h-4 w-4" />
-				{{ formatMessage(messages.updateAvailable, { version: check.target_version }) }}
+			<span
+				v-if="hasUpdate() && check.notes?.trim()"
+				class="whitespace-pre-line text-xs text-secondary"
+			>
+				{{ formatMessage(messages.updateNotes, { notes: check.notes.trim() }) }}
 			</span>
 		</span>
 		<ButtonStyled v-if="hasUpdate()" color="brand" size="small">

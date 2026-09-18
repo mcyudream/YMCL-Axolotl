@@ -800,24 +800,6 @@
 	"app.close-launcher.tray": {
 		"message": "隐藏至托盘"
 	},
-	"app.community-announcement.feedback-middle": {
-		"message": "，或在 "
-	},
-	"app.community-announcement.feedback-prefix": {
-		"message": "如果您还有更多、更好的想法与建议，欢迎加入玩家交流 QQ 群："
-	},
-	"app.community-announcement.feedback-suffix": {
-		"message": " 中向我们提出。期待与大家共同完善 YMCL (YuDream Launcher)！"
-	},
-	"app.community-announcement.response": {
-		"message": "自 YMCL (YuDream Launcher) 在视频平台宣传以来，我们收获了远超预期的喜爱与关注，同时也收到了许多高质量的反馈与建议。"
-	},
-	"app.community-announcement.thanks": {
-		"message": "对于视频评论区里的留言，我都已尽可能地逐一回复。承蒙各位厚爱，在此表达最诚挚的感谢！"
-	},
-	"app.community-announcement.title": {
-		"message": "致各位用户"
-	},
 	"app.content-favorites.add": {
 		"message": "添加到收藏夹"
 	},
@@ -8740,21 +8722,6 @@
 	"app.splash.updating-app-directory": {
 		"message": "正在更新应用目录……"
 	},
-	"app.survey-promotion.defer-hint": {
-		"message": "关闭此弹窗后，你仍可以随时在“设置 → 关于”页面中找到并填写问卷。"
-	},
-	"app.survey-promotion.fill-survey": {
-		"message": "填写问卷"
-	},
-	"app.survey-promotion.intro": {
-		"message": "为了更好地改进 YMCL (YuDream Launcher)，我们准备了一份简短的调查问卷，期待听到你的反馈。"
-	},
-	"app.survey-promotion.reward": {
-		"message": "我们将从填写问卷的用户中抽取幸运用户，赠送 Minecraft 正版账号（可折现）。"
-	},
-	"app.survey-promotion.title": {
-		"message": "调查问卷"
-	},
 	"app.symlink-capability.unsupported": {
 		"message": "系统不支持软链接。"
 	},
@@ -9574,6 +9541,9 @@
 	"app.ymcl.manage.update-available": {
 		"message": "可更新到 {version}"
 	},
+	"app.ymcl.manage.update-notes": {
+		"message": "本次更新：{notes}"
+	},
 	"app.ymcl.manage.update-failed": {
 		"message": "更新失败"
 	},
@@ -9673,8 +9643,23 @@
 	"app.ymcl.publish.content-hint": {
 		"message": "勾选要打进初始包的文件，玩家侧文件（存档/日志等）已自动排除。"
 	},
+	"app.ymcl.publish.content-hint-managed": {
+		"message": "勾选随本次更新下发的变更文件；取消勾选的路径会记入排除策略，之后不再出现在变更里。"
+	},
 	"app.ymcl.publish.content-title": {
 		"message": "包内容"
+	},
+	"app.ymcl.publish.notes-label": {
+		"message": "更新说明（可选）"
+	},
+	"app.ymcl.publish.notes-placeholder": {
+		"message": "玩家更新时会看到这段说明，例如：新增暮色森林模组；修复合成表冲突。"
+	},
+	"app.ymcl.publish.recover-hint": {
+		"message": "这些文件此前被排除，不会出现在上方变更里。勾选即重新纳管：随本次更新下发，对应排除规则移除。"
+	},
+	"app.ymcl.publish.recover-title": {
+		"message": "被排除策略隐藏的文件"
 	},
 	"app.ymcl.publish.feature-conflict-unknown": {
 		"message": "互斥项引用了不存在的 ID：{id}"

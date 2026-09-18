@@ -32,6 +32,13 @@ pub struct MipPackState {
     /// server/season it came from. Absent for manually imported packs.
     #[serde(default)]
     pub binding: Option<MipInstanceBinding>,
+    /// Admin publish profile (YAP §7): the file exclusions chosen at the
+    /// initial publish plus the latest feature/policy declarations, so later
+    /// delta publishes reuse the same selection instead of resurfacing
+    /// intentionally-excluded files as additions and re-asking for feature
+    /// globs. `None` for states written before this field existed.
+    #[serde(default)]
+    pub publish_profile: Option<PublishProfile>,
 }
 
 /// Which domain server/season an installed pack came from.
@@ -40,6 +47,41 @@ pub struct MipInstanceBinding {
     pub server_id: String,
     #[serde(default)]
     pub season_id: Option<String>,
+}
+
+/// Admin's persisted publish selection (YAP §7): paths kept out of the pack
+/// (files or directories, `/`-separated, matched exact or as a directory
+/// prefix) and the mip.json feature/policy declarations from the latest
+/// publish. Publisher-side only; players never read this.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct PublishProfile {
+    #[serde(default)]
+    pub excluded: Vec<String>,
+    #[serde(default)]
+    pub features: Vec<PublishFeature>,
+    #[serde(default)]
+    pub policies: Vec<PublishPolicy>,
+}
+
+/// Persisted optional-content declaration (mip.json features, MIP §3.5).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PublishFeature {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub default: bool,
+    #[serde(default)]
+    pub conflicts: Vec<String>,
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
+/// Persisted file-policy rule (mip.json policies, MIP §3.5).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PublishPolicy {
+    pub glob: String,
+    pub policy: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -59,6 +101,11 @@ fn default_policy() -> String {
 }
 
 pub const STATE_FILE_NAME: &str = ".pack-state.json";
+
+/// Local scan cache (`path → size/mtime/sha512`) beside the state file, so
+/// repeated publish diffs and update checks re-hash only changed files.
+/// Bookkeeping only: excluded from scans and packs like the state file.
+pub const HASH_CACHE_FILE_NAME: &str = ".pack-hashes.json";
 
 /// Loads the pack state for an instance directory; `Ok(None)` when the
 /// instance is not an MIP-managed instance.

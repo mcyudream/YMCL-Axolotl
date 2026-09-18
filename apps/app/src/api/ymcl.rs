@@ -647,7 +647,7 @@ pub async fn ymcl_publish_diff(
 }
 
 // Push the diff as an incremental delta to the domain (release console)
-// invoke('plugin:ymcl|ymcl_publish_push', { instanceId, version, channel, bind, features, policies })
+// invoke('plugin:ymcl|ymcl_publish_push', { instanceId, version, channel, bind, features, policies, exclude?, include?, notes? })
 #[tauri::command]
 pub async fn ymcl_publish_push(
     instance_id: String,
@@ -656,6 +656,9 @@ pub async fn ymcl_publish_push(
     bind: Option<serde_json::Value>,
     features: Option<Vec<theseus::ymcl::mip::publish::PublishFeatureInput>>,
     policies: Option<Vec<theseus::ymcl::mip::publish::PublishPolicyInput>>,
+    exclude: Option<Vec<String>>,
+    include: Option<Vec<String>>,
+    notes: Option<String>,
 ) -> Result<serde_json::Value> {
     Ok(
         theseus::ymcl::mip::publish::push_delta(
@@ -665,12 +668,15 @@ pub async fn ymcl_publish_push(
             bind,
             features.unwrap_or_default(),
             policies.unwrap_or_default(),
+            exclude.unwrap_or_default(),
+            include.unwrap_or_default(),
+            notes.as_deref(),
         )
         .await?,
     )
 }
 
-// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude? })
+// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude?, notes? })
 // packId omitted → the launcher generates a unique `slug-<uuid>` id.
 #[tauri::command]
 pub async fn ymcl_publish_initial(
@@ -682,6 +688,7 @@ pub async fn ymcl_publish_initial(
     features: Option<Vec<theseus::ymcl::mip::publish::PublishFeatureInput>>,
     policies: Option<Vec<theseus::ymcl::mip::publish::PublishPolicyInput>>,
     exclude: Option<Vec<String>>,
+    notes: Option<String>,
 ) -> Result<serde_json::Value> {
     Ok(
         theseus::ymcl::mip::publish::push_initial(
@@ -693,6 +700,7 @@ pub async fn ymcl_publish_initial(
             features.unwrap_or_default(),
             policies.unwrap_or_default(),
             exclude.unwrap_or_default(),
+            notes.as_deref(),
         )
         .await?,
     )

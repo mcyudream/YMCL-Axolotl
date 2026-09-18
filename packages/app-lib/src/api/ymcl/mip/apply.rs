@@ -616,6 +616,9 @@ fn build_new_state(
         locked_paths: base.locked_paths.clone(),
         disabled_paths: base.disabled_paths.clone(),
         binding: base.binding.clone(),
+        // The admin's publish selection survives updates applied from the
+        // domain, so excluded files don't resurface in the next delta.
+        publish_profile: base.publish_profile.clone(),
     }
 }
 

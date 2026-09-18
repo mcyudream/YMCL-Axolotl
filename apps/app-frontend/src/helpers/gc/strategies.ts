@@ -3,6 +3,11 @@ import type { GcContext, GcStrategyDefinition, GcStrategyId, ResolvedGcStrategyI
 // Official Minecraft launcher G1GC tuning. `-XX:SurvivorRatio=8` (the flag in
 // the leak of the original list was misspelled "SurvialRation", which JVMs
 // would reject).
+// Diverges from the Mojang list for launch parity with PCL: no
+// `-XX:+AlwaysPreTouch` (it physically commits the whole heap at startup —
+// sluggish launches and instant RAM exhaustion when the heap is sized
+// generously), plus `-XX:+PerfDisableSharedMem` (skips the Windows perf-data
+// mmap that adds periodic GC jitter).
 function buildG1gcMojangArgs(): string {
 	return [
 		'-XX:+UseG1GC',
@@ -10,7 +15,7 @@ function buildG1gcMojangArgs(): string {
 		'-XX:MaxGCPauseMillis=200',
 		'-XX:+UnlockExperimentalVMOptions',
 		'-XX:+DisableExplicitGC',
-		'-XX:+AlwaysPreTouch',
+		'-XX:+PerfDisableSharedMem',
 		'-XX:G1NewSizePercent=30',
 		'-XX:G1MaxNewSizePercent=40',
 		'-XX:G1HeapRegionSize=8M',

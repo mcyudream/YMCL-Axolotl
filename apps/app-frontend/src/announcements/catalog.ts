@@ -1105,12 +1105,6 @@ export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 					'zh-CN': '新增未开启版本隔离的导入支持。',
 				},
 			],
-			changed: [
-				{
-					'en-US': 'The official QQ group is now 737601250.',
-					'zh-CN': '官方 QQ 群号变更为 737601250。',
-				},
-			],
 		},
 	},
 	{
