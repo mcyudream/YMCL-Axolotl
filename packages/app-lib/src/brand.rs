@@ -4,6 +4,18 @@ pub const WEBSITE: &str = "https://www.ghs.red";
 pub const BUNDLE_IDENTIFIER: &str = "red.ghs.axolotl";
 pub const DEEP_LINK_SCHEME: &str = "ymcl";
 
+/// Reverse-DNS namespace the launcher keeps its data under: the settings
+/// directory (database, logs) and the default content directory resolve to
+/// `{data_dir}/{DATA_NAMESPACE}`.
+///
+/// Deliberately independent of `BUNDLE_IDENTIFIER`, which keys OS-level
+/// identity (webview storage, installer registration) and must stay stable.
+/// The data namespace moved off the bundle identifier's `red.ghs.axolotl`
+/// value so builds from the two launcher generations never share one
+/// database; the switch landed before any player-facing release, so nothing
+/// migrates data across the two namespaces.
+pub const DATA_NAMESPACE: &str = "red.ghs.ymcl";
+
 /// Longest accepted data directory suffix; enough to name a branch or a build.
 const MAX_DATA_DIR_SUFFIX_LEN: usize = 32;
 
@@ -19,8 +31,8 @@ pub fn user_agent(version: &str, os: &str) -> String {
 /// directory, and a database touched by a newer build can no longer be opened
 /// by an older one. Releases leave the variable unset, so they resolve to the
 /// plain identifier.
-pub fn app_data_dir_identifier(app_identifier: &str) -> String {
-    data_dir_identifier(app_identifier, option_env!("AXOLOTL_DATA_DIR_SUFFIX"))
+pub fn app_data_dir_identifier() -> String {
+    data_dir_identifier(DATA_NAMESPACE, option_env!("AXOLOTL_DATA_DIR_SUFFIX"))
 }
 
 /// Appends a sanitized suffix to the identifier.
@@ -71,6 +83,11 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn app_data_dir_identifier_resolves_to_the_data_namespace() {
+        assert_eq!(app_data_dir_identifier(), DATA_NAMESPACE);
+    }
+
     fn data_dir_identifier_without_suffix_keeps_the_identifier() {
         assert_eq!(
             data_dir_identifier("red.ghs.axolotl", None),

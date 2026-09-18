@@ -1315,7 +1315,7 @@ fn credential_entry(
     // (AXOLOTL_DATA_DIR_SUFFIX) also keeps its own credentials. A release
     // resolves to the plain identifier and is unaffected.
     Entry::new(
-        &crate::brand::app_data_dir_identifier(crate::brand::BUNDLE_IDENTIFIER),
+        &crate::brand::app_data_dir_identifier(),
         &format!("{KEYRING_PREFIX}:{provider_id}:{credential}"),
     )
     .map_err(|error| {
