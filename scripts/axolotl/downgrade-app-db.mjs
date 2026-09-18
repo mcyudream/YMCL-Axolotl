@@ -43,37 +43,74 @@ const APP_DB = 'app.db'
 const CHANNELS = ['release', 'beta']
 
 // Schema added by known migrations, used to undo it. Every migration a
-// downgrade is allowed to pass needs an entry here: `ALTER TABLE ... ADD COLUMN`
-// cannot be reversed in place, and leaving the column behind breaks the next
-// install of a build that carries the migration. A migration that only moves
-// data (DELETE, UPDATE) gets an empty list - there is nothing to drop, but
-// naming it keeps the downgrade from stopping on a migration it could pass.
+// downgrade is allowed to pass needs an entry here: added columns and tables
+// cannot be left behind, or the next install of a build carrying the migration
+// fails on duplicate schema. A migration that only moves data (DELETE, UPDATE)
+// gets an empty object; naming it keeps the downgrade from stopping on a
+// migration it can safely pass.
 //
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
-const REVERTIBLE_COLUMNS = {
+const REVERTIBLE_SCHEMA = {
 	// settings.close_behavior
-	20260903120000: [{ table: 'settings', column: 'close_behavior' }],
+	20260903120000: { columns: [{ table: 'settings', column: 'close_behavior' }] },
 	// instances: the direct link columns
-	20260904120000: [
-		{ table: 'instances', column: 'linked_launcher' },
-		{ table: 'instances', column: 'linked_launcher_root' },
-		{ table: 'instances', column: 'linked_dot_minecraft' },
-		{ table: 'instances', column: 'linked_version_id' },
-		{ table: 'instances', column: 'linked_version_json_path' },
-	],
+	20260904120000: {
+		columns: [
+			{ table: 'instances', column: 'linked_launcher' },
+			{ table: 'instances', column: 'linked_launcher_root' },
+			{ table: 'instances', column: 'linked_dot_minecraft' },
+			{ table: 'instances', column: 'linked_version_id' },
+			{ table: 'instances', column: 'linked_version_json_path' },
+		],
+	},
 	// telemetry samples; the tables stay, so nothing to drop
-	20260905000000: [],
+	20260905000000: {},
 	// settings.mc_maximize_window
-	20260908000000: [{ table: 'settings', column: 'mc_maximize_window' }],
+	20260908000000: { columns: [{ table: 'settings', column: 'mc_maximize_window' }] },
 	// instances.linked_game_dir_mode
-	20260908010000: [{ table: 'instances', column: 'linked_game_dir_mode' }],
+	20260908010000: { columns: [{ table: 'instances', column: 'linked_game_dir_mode' }] },
 	// crash_analysis_ai_settings.ai_source
-	20260911120000: [{ table: 'crash_analysis_ai_settings', column: 'ai_source' }],
+	20260911120000: {
+		columns: [{ table: 'crash_analysis_ai_settings', column: 'ai_source' }],
+	},
 	// settings.log_level
-	20260912120000: [{ table: 'settings', column: 'log_level' }],
+	20260912120000: { columns: [{ table: 'settings', column: 'log_level' }] },
 	// log level default normalization; data only
-	20260913170000: [],
+	20260913170000: {},
+	// instance synchronization and screenshot center
+	20260914090000: {
+		columns: [
+			{ table: 'settings', column: 'sync_features_across_devices' },
+			{ table: 'settings', column: 'show_files_tab_in_instances' },
+			{ table: 'settings', column: 'show_worlds_tab_in_instances' },
+			{ table: 'settings', column: 'show_screenshots_tab_in_instances' },
+			{ table: 'settings', column: 'show_skin_selector_in_sidebar' },
+		],
+		// Reverse creation order keeps dependent tables ahead of their parents.
+		tables: [
+			'synced_pack_instances',
+			'synced_pack_catalog',
+			'screenshot_group_memberships',
+			'screenshot_groups',
+			'screenshots',
+			'instance_server_pack_state',
+			'instance_server_projection_entries',
+			'instance_servers',
+			'synced_servers',
+			'synced_server_state',
+			'synced_hotbar_state',
+			'instance_sync_checkpoints',
+			'game_option_locale_origins',
+			'instance_game_option_update_state',
+			'instance_game_option_pack_bases',
+			'synced_game_option_preferences',
+			'synced_game_option_values',
+			'synced_game_option_state',
+			'instance_sync_preferences',
+			'sync_feature_settings',
+		],
+	},
 }
 
 function fail(message) {
@@ -336,6 +373,21 @@ function columnsPresent(db, columns) {
 	return present
 }
 
+function tablesPresent(db, tables) {
+	if (tables.length === 0) return []
+
+	const database = openReadOnly(db)
+	const present = tables.map((table) => ({
+		table,
+		present:
+			database
+				.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+				.get(table) !== undefined,
+	}))
+	database.close()
+	return present
+}
+
 // Names a running launcher can appear under. Installed builds use the configured
 // main binary name and a `tauri dev` binary keeps the crate name; a fork may
 // rename it again, so AXOLOTL_LAUNCHER_IMAGES replaces the list.
@@ -427,8 +479,9 @@ function planDowngrade(db, target) {
 
 	const plan = applied.map((version) => ({
 		version,
-		mapped: REVERTIBLE_COLUMNS[version] !== undefined,
-		columns: columnsPresent(db, REVERTIBLE_COLUMNS[version] ?? []),
+		mapped: REVERTIBLE_SCHEMA[version] !== undefined,
+		columns: columnsPresent(db, REVERTIBLE_SCHEMA[version]?.columns ?? []),
+		tables: tablesPresent(db, REVERTIBLE_SCHEMA[version]?.tables ?? []),
 	}))
 
 	return { applied, failed, plan }
@@ -436,7 +489,7 @@ function planDowngrade(db, target) {
 
 function reportPlan({ applied, failed, plan }) {
 	note(`migrations to remove: ${applied.join(', ')}`)
-	for (const { version, mapped, columns } of plan) {
+	for (const { version, mapped, columns, tables } of plan) {
 		if (!mapped) {
 			note(`  ${version}: no known schema for this migration, removing its record only`)
 			continue
@@ -446,6 +499,11 @@ function reportPlan({ applied, failed, plan }) {
 				present
 					? `  ${version}: drop ${table}.${column}`
 					: `  ${version}: ${table}.${column} is NOT in the database`,
+			)
+		}
+		for (const { table, present } of tables) {
+			note(
+				present ? `  ${version}: drop table ${table}` : `  ${version}: table ${table} is MISSING`,
 			)
 		}
 	}
@@ -466,12 +524,16 @@ function reportPlan({ applied, failed, plan }) {
 // to repair, so stop instead.
 function checkMappings(plan) {
 	const mismatched = plan
-		.filter(({ mapped, columns }) => mapped && columns.some((column) => !column.present))
+		.filter(
+			({ mapped, columns, tables }) =>
+				mapped &&
+				(columns.some((column) => !column.present) || tables.some((table) => !table.present)),
+		)
 		.map(({ version }) => version)
 
 	if (mismatched.length > 0) {
 		fail(
-			`the schema recorded here for ${mismatched.join(', ')} does not match this database.\nRefusing to remove the records: reinstalling that build would then fail on a duplicate\ncolumn, and neither build could open the database. Check REVERTIBLE_COLUMNS against\npackages/app-lib/migrations, and use --list to inspect the database.`,
+			`the schema recorded here for ${mismatched.join(', ')} does not match this database.\nRefusing to remove the records: reinstalling that build would then fail on a duplicate\nschema object, and neither build could open the database. Check REVERTIBLE_SCHEMA against\npackages/app-lib/migrations, and use --list to inspect the database.`,
 		)
 	}
 }
@@ -541,7 +603,10 @@ function main() {
 		writable.exec('PRAGMA foreign_keys = OFF')
 		writable.exec('BEGIN')
 		try {
-			for (const { columns } of state.plan) {
+			for (const { columns, tables } of state.plan) {
+				for (const { table, present } of tables) {
+					if (present) writable.exec(`DROP TABLE ${table}`)
+				}
 				for (const { table, column, present } of columns) {
 					if (present) writable.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`)
 				}

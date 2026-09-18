@@ -133,6 +133,7 @@ where
             let minecraft_users_len = minecraft_auth.users.len();
             for (uuid, legacy_credentials) in minecraft_auth.users {
                 Credentials {
+                    account_id: None,
                     offline_profile: MinecraftProfile {
                         id: legacy_credentials.id,
                         name: legacy_credentials.username,

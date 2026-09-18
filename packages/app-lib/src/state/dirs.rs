@@ -24,6 +24,9 @@ pub struct DirectoryInfo {
 }
 
 impl DirectoryInfo {
+    pub(crate) fn synced_options_dir(&self) -> std::path::PathBuf {
+        self.config_dir.join("synced-options")
+    }
     pub fn global_handle_if_ready() -> Option<&'static Self> {
         LAUNCHER_STATE.get().map(|x| &x.directories)
     }

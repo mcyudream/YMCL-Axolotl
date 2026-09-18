@@ -1,0 +1,1 @@
+export const MAX_INSTANCE_GROUP_NAME_LENGTH = 64

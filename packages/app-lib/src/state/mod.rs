@@ -29,12 +29,22 @@ pub use self::instances::*;
 mod settings;
 pub use self::settings::*;
 
+mod game_options;
+pub use self::game_options::*;
+
 mod proxy_settings;
 
 mod installer_settings;
 
 mod process;
 pub use self::process::*;
+
+pub(crate) async fn instance_has_running_process(
+    instance_id: &str,
+    state: &State,
+) -> crate::Result<bool> {
+    Ok(state.process_manager.has_instance_process(instance_id))
+}
 
 mod java_globals;
 pub use self::java_globals::*;
@@ -145,6 +155,29 @@ pub struct State {
     configured_http_client_update: AsyncMutex<()>,
 
     pub(crate) file_watcher: FileWatcher,
+	pub(crate) screenshot_locks: DashMap<String, Arc<AsyncMutex<()>>>,
+	pub(crate) synced_options_lock: Arc<AsyncMutex<()>>,
+	pub(crate) game_locale_indexer: crate::api::instance::synced_options::game_options::locales::GameLocaleIndexer,
+}
+
+impl State {
+    pub(crate) async fn lock_instance_screenshots(
+        &self,
+        instance_id: &str,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        self.screenshot_locks
+            .entry(instance_id.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
+            .lock_owned()
+            .await
+    }
+
+    pub(crate) async fn lock_synced_options(
+        &self,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        self.synced_options_lock.clone().lock_owned().await
+    }
 }
 
 #[derive(Default)]
@@ -610,8 +643,26 @@ impl State {
         config: &crate::util::proxy::ProxyConfig,
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
-        let client = crate::util::fetch::build_configured_client(config)?;
+        let settings = Settings::get(&self.pool).await?;
+        let client = crate::util::fetch::build_configured_client(
+            config,
+            settings.ignore_ssl_errors,
+        )?;
         crate::state::proxy_settings::set(&self.pool, config).await?;
+        *self.configured_http_client.write() = client;
+        Ok(())
+    }
+
+    pub(crate) async fn update_http_client_for_settings(
+        &self,
+        settings: &Settings,
+    ) -> crate::Result<()> {
+        let _update = self.configured_http_client_update.lock().await;
+        let proxy = crate::state::proxy_settings::get(&self.pool).await?;
+        let client = crate::util::fetch::build_configured_client(
+            &proxy,
+            settings.ignore_ssl_errors,
+        )?;
         *self.configured_http_client.write() = client;
         Ok(())
     }
@@ -837,7 +888,10 @@ impl State {
         let auto_prefers_mirror = settings.auto_prefers_mirror();
         let proxy_config = proxy_settings::get(&pool).await?;
         let configured_http_client =
-            crate::util::fetch::build_configured_client(&proxy_config)?;
+            crate::util::fetch::build_configured_client(
+                &proxy_config,
+                settings.ignore_ssl_errors,
+            )?;
 
         tracing::info!("Initializing directories");
         DirectoryInfo::move_launcher_directory(
@@ -911,6 +965,9 @@ impl State {
             configured_http_client: RwLock::new(configured_http_client),
             configured_http_client_update: AsyncMutex::new(()),
             file_watcher,
+            screenshot_locks: DashMap::new(),
+            synced_options_lock: Arc::new(AsyncMutex::new(())),
+            game_locale_indexer: Default::default(),
             // app_identifier,
         }))
     }
@@ -939,8 +996,11 @@ pub(crate) async fn test_state(
 ) -> crate::Result<Arc<State>> {
     let file_watcher = instances::watcher::init_watcher().await?;
     let proxy_config = proxy_settings::get(&pool).await?;
-    let configured_http_client =
-        crate::util::fetch::build_configured_client(&proxy_config)?;
+    let settings = Settings::get(&pool).await?;
+    let configured_http_client = crate::util::fetch::build_configured_client(
+        &proxy_config,
+        settings.ignore_ssl_errors,
+    )?;
 
     Ok(Arc::new(State {
         directories,
@@ -978,6 +1038,9 @@ pub(crate) async fn test_state(
         configured_http_client: RwLock::new(configured_http_client),
         configured_http_client_update: AsyncMutex::new(()),
         file_watcher,
+        screenshot_locks: DashMap::new(),
+        synced_options_lock: Arc::new(AsyncMutex::new(())),
+        game_locale_indexer: Default::default(),
     }))
 }
 

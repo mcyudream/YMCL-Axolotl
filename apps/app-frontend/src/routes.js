@@ -110,6 +110,12 @@ export default new createRouter({
 			},
 		},
 		{
+			path: '/screenshots',
+			name: 'Screenshots',
+			component: () => import('@/pages/Screenshots.vue'),
+			meta: { breadcrumb: [{ name: 'Screenshots' }] },
+		},
+		{
 			path: '/lab',
 			name: 'Lab',
 			component: () => import('@/pages/Lab.vue'),

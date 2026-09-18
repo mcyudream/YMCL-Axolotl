@@ -150,6 +150,13 @@ async fn run_credentials(
     launch_preparation_timeout: u64,
 ) -> crate::Result<(ProcessMetadata, Option<GcLaunchReport>)> {
     let state = State::get().await?;
+    if let Err(error) =
+        crate::api::instance::sync_game_options_before_launch(instance_id).await
+    {
+        tracing::warn!(
+            "Failed to reconcile game options before launching {instance_id}: {error}"
+        );
+    }
     let settings = Settings::get(&state.pool).await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(
@@ -259,6 +266,12 @@ async fn run_credentials(
     } else if settings.force_fullscreen {
         mc_set_options.push(("fullscreen".to_string(), "true".to_string()));
     }
+
+    crate::api::instance::apply_game_options_launcher_overrides(
+        instance_id,
+        &mc_set_options,
+    )
+    .await?;
 
     if credentials.is_microsoft()
         && let Some(project_id) = server_play_project_id(&context.link)

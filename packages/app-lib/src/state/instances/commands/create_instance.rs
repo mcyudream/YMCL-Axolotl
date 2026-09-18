@@ -135,6 +135,12 @@ pub(crate) async fn create_instance(
 
         let mut tx = state.pool.begin().await?;
         instance_rows::insert_instance(&instance, &mut tx).await?;
+        sqlx::query(
+            "INSERT INTO instance_sync_preferences (instance_id, feature, enabled) SELECT ?, feature, new_instance_default FROM sync_feature_settings",
+        )
+        .bind(&instance_id)
+        .execute(&mut *tx)
+        .await?;
         content_rows::insert_content_set(&content_set, &mut tx).await?;
         loader_component_rows::replace_loader_components(
             &instance_id,

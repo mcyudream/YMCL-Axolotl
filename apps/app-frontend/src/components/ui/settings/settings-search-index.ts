@@ -468,6 +468,17 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		label: message('app.settings.tabs.ymcl-domains', 'Domains'),
 	},
 	{
+		id: 'resources-ignore-ssl-errors',
+		categoryId: 'content-downloads',
+		targetId: 'settings-target-resources-ignore-ssl-errors',
+		label: message('app.settings.resources.ignore-ssl-errors', 'Ignore SSL certificate errors'),
+		description: message(
+			'app.settings.resources.ignore-ssl-errors-description',
+			'Allows downloads through proxies or network tools that replace HTTPS certificates. This disables certificate verification and can expose downloads to tampering. Enable it only when necessary.',
+		),
+		keywords: [message('app.settings.resources.proxy-settings', 'Proxy settings')],
+	},
+	{
 		id: 'resources-download-concurrency',
 		categoryId: 'content-downloads',
 		targetId: 'settings-target-resources-maximum-downloads',

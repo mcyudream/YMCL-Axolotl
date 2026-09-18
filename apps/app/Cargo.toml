@@ -1,7 +1,7 @@
 [package]
 name = "ymcl_gui"
 # The actual version is set by the theseus-build workflow on tagging
-version = "1.9.6-beta.7"
+version = "1.9.7-beta.1"
 edition.workspace = true
 description = "YMCL (YuDream Launcher) is a cross-platform Minecraft launcher"
 homepage = "https://www.ghs.red"
@@ -69,7 +69,10 @@ cc = { workspace = true }
 tauri-build = { workspace = true, features = ["codegen"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13.13", features = ["settings"] }
+ashpd = { version = "0.13.13", default-features = false, features = [
+  "async-io",
+  "settings",
+] }
 tauri-plugin-updater = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

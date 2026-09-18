@@ -273,6 +273,7 @@ pub enum CommandPayload {
         // YAP domain site origin (ymcl://add-site?url={origin})
         url: String,
     },
+    OpenDiscovery,
 }
 
 #[derive(Serialize, Clone)]
@@ -314,6 +315,7 @@ pub enum InstancePayloadType {
         revision: u64,
     },
     ServersUpdated,
+    ScreenshotsUpdated,
     WorldUpdated {
         world: String,
     },

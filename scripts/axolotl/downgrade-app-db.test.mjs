@@ -274,7 +274,7 @@ console.log('resolving the settings directory')
 console.log('keeping the migration mapping honest')
 {
 	const source = fs.readFileSync(script, 'utf8')
-	const block = source.slice(source.indexOf('const REVERTIBLE_COLUMNS = {'))
+	const block = source.slice(source.indexOf('const REVERTIBLE_SCHEMA = {'))
 	const body = block.slice(0, block.indexOf('\n}'))
 	const registered = [...body.matchAll(/^\t(\d{14}):/gm)].map((match) => Number(match[1]))
 

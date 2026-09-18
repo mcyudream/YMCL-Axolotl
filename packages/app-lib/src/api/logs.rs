@@ -555,7 +555,6 @@ async fn get_output_by_filename_from_path(
     let credentials = Credentials::get_all(&state.pool)
         .await?
         .into_iter()
-        .map(|x| x.1)
         .collect::<Vec<_>>();
 
     if let Some(ext) = path.extension() {
@@ -672,7 +671,6 @@ pub async fn get_live_log_buffer(
     let credentials = Credentials::get_all(&state.pool)
         .await?
         .into_iter()
-        .map(|x| x.1)
         .collect::<Vec<_>>();
     maybe_emit_log_compaction_warning("live log", compacted.stats).await;
     maybe_emit_log_display_truncation_warning(
@@ -758,7 +756,6 @@ pub async fn get_generic_live_log_cursor(
     let credentials = Credentials::get_all(&state.pool)
         .await?
         .into_iter()
-        .map(|x| x.1)
         .collect::<Vec<_>>();
     maybe_emit_log_compaction_warning(log_file_name, compacted.stats).await;
     maybe_emit_log_display_truncation_warning(

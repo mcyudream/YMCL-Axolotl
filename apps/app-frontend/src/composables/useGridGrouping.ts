@@ -12,6 +12,7 @@ export type GridSortOption =
 export interface GridDisplayState {
 	group: GridGroupingOption
 	sortBy: GridSortOption
+	sortAscending: boolean
 	collapsedGroups: string[]
 }
 
@@ -34,6 +35,7 @@ export function useGridGrouping<T extends Record<string, unknown>>(
 		{
 			group: 'Group',
 			sortBy: 'Name',
+			sortAscending: true,
 			collapsedGroups: [],
 		},
 		localStorage,
@@ -62,7 +64,7 @@ export function useGridGrouping<T extends Record<string, unknown>>(
 		state.value.collapsedGroups = [...collapsedSections]
 	}
 
-	function sortInstances(instances: T[], sortBy: GridSortOption): T[] {
+	function sortInstances(instances: T[], sortBy: GridSortOption, ascending: boolean): T[] {
 		const sorted = [...instances]
 		const getGameVersion = options.getGameVersion ?? ((i: T) => i.game_version ?? '')
 		const getLastPlayed = options.getLastPlayed ?? ((i: T) => i.last_played ?? 0)
@@ -79,16 +81,19 @@ export function useGridGrouping<T extends Record<string, unknown>>(
 				)
 				break
 			case 'Last played':
-				sorted.sort((a, b) => dayjs(getLastPlayed(b)).diff(dayjs(getLastPlayed(a))))
+				sorted.sort((a, b) => dayjs(getLastPlayed(a)).diff(dayjs(getLastPlayed(b))))
 				break
 			case 'Date created':
-				sorted.sort((a, b) => dayjs(getDateCreated(b)).diff(dayjs(getDateCreated(a))))
+				sorted.sort((a, b) => dayjs(getDateCreated(a)).diff(dayjs(getDateCreated(b))))
 				break
 			case 'Date modified':
-				sorted.sort((a, b) => dayjs(getDateModified(b)).diff(dayjs(getDateModified(a))))
+				sorted.sort((a, b) => dayjs(getDateModified(a)).diff(dayjs(getDateModified(b))))
 				break
 		}
 
+		if (!ascending) {
+			sorted.reverse()
+		}
 		return sorted
 	}
 
@@ -163,9 +168,9 @@ export function useGridGrouping<T extends Record<string, unknown>>(
 	}
 
 	const filteredResults = computed(() => {
-		const { group = 'Group', sortBy = 'Name' } = state.value
+		const { group = 'Group', sortBy = 'Name', sortAscending = true } = state.value
 
-		const sorted = sortInstances(instances.value, sortBy)
+		const sorted = sortInstances(instances.value, sortBy, sortAscending)
 		const grouped = groupInstances(sorted, group)
 		return sortSections(grouped, group)
 	})

@@ -12,6 +12,17 @@ mod paths;
 mod planet_minecraft;
 mod projects;
 mod run;
+mod screenshot_groups;
+mod screenshots;
+pub(crate) mod synced_options;
+pub(crate) mod synced_packs {
+    pub(crate) use super::synced_packs_axolotl::{
+        capture_resource_pack_selection_change, detach,
+        prepare_instance_update, reconcile, seed_from_instance,
+    };
+}
+mod synced_packs_axolotl;
+pub(crate) mod synced_servers;
 mod upgrade;
 
 pub use self::content::{
@@ -73,6 +84,61 @@ pub use self::run::{
     run_with_extra_launch_args, run_with_extra_launch_args_with_gc,
     try_update_playtime_by_instance_id,
 };
+pub use self::screenshot_groups::{
+    ScreenshotGroup, ScreenshotGroupImport, ScreenshotGroupMembershipUpdate,
+    create_screenshot_group, delete_screenshot_group, import_screenshot_groups,
+    list_screenshot_groups, rename_screenshot_group,
+    set_screenshot_group_memberships,
+};
+pub(crate) use self::screenshots::reconcile_screenshots;
+pub use self::screenshots::{
+    InstanceScreenshot, ScreenshotEditSaveMode, ScreenshotKey,
+    delete_screenshots, export_screenshots, get_screenshot_path,
+    list_all_screenshots, list_screenshots, list_synced_screenshots,
+    move_screenshots, save_edited_screenshot,
+};
+pub use self::synced_options::game_options::{
+    GameOptionsSourceCandidate, GameSettingLocaleLabels,
+    GameSettingsEditorState, SaveGameSettingsResult, UpdateGameSettingsRequest,
+    get_config as get_synced_game_options_config,
+    get_game_setting_locale_labels,
+    get_local_config as get_local_game_options_config,
+    list_sync_sources as list_game_options_sync_sources,
+    preview_changes as preview_synced_game_option_changes,
+    preview_local_changes as preview_local_game_option_changes,
+    save_changes as save_synced_game_option_changes,
+    save_local_changes as save_local_game_option_changes,
+};
+pub(crate) use self::synced_options::game_options::{
+    apply_launcher_overrides as apply_game_options_launcher_overrides,
+    sync_before_launch as sync_game_options_before_launch,
+};
+pub use self::synced_options::{
+    GlobalSyncedOptions, SyncedOptionCapability, SyncedOptionJoinAction,
+    SyncedOptionJoinPreview, SyncedOptionJoinResolution, SyncedOptionsOverview,
+    get_capabilities as get_synced_option_capabilities,
+    get_command_history as get_synced_command_history,
+    get_global_options as get_global_synced_options,
+    get_initialized_options as get_initialized_synced_options,
+    get_instance_option_join_preview as get_synced_option_join_preview,
+    get_overview as get_synced_options_overview,
+    set_command_history as set_synced_command_history,
+    set_global_option as set_global_synced_option,
+    set_instance_option as set_instance_synced_option,
+};
+pub(crate) use self::synced_options::{
+    reconcile_changed_file as reconcile_synced_option_file,
+    remove_generated_instance_files,
+};
+pub use self::synced_packs_axolotl::{
+    PackSyncPreview, PackSyncTarget, desync_pack, get_pack_sync_preview,
+    list_synced_packs, remove_synced_pack, set_synced_pack_enabled, sync_pack,
+    upload_synced_pack,
+};
+pub use self::synced_servers::{
+    DesyncServerMode, ServerSource, SyncedServer, desync_server,
+    list_synced_servers, remove_synced_server, update_synced_server,
+};
 pub use self::upgrade::{
     dismiss_instance_post_upgrade_notice, execute_instance_upgrade,
     get_instance_post_upgrade_notice, get_instance_upgrade_plan,
@@ -81,3 +147,4 @@ pub use self::upgrade::{
     update_instance_upgrade_resolution, update_instance_upgrade_resolutions,
 };
 pub use crate::state::{DailyPlaytime, DailyPlaytimeEntry};
+pub use crate::state::{InstanceSyncedOptions, SyncedOption};

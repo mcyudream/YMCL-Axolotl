@@ -1,15 +1,19 @@
 <script setup>
 import {
+	ArrowUpDownIcon,
 	ClipboardCopyIcon,
 	CollectionIcon,
 	EyeIcon,
 	FolderOpenIcon,
 	GridIcon,
+	LayersIcon,
 	MoreVerticalIcon,
 	PinIcon,
 	PlayIcon,
 	PlusIcon,
 	SearchIcon,
+	SortAscIcon,
+	SortDescIcon,
 	StopCircleIcon,
 	TrashIcon,
 	XIcon,
@@ -29,6 +33,7 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import ContextMenu from '@/components/ui/ContextMenu.vue'
 import Instance from '@/components/ui/Instance.vue'
@@ -45,12 +50,17 @@ import {
 const { handleError } = injectNotificationManager()
 
 const { formatMessage } = useVIntl()
+const router = useRouter()
 
 const messages = defineMessages({
 	search: { id: 'app.instances.search', defaultMessage: 'Search' },
 	select: { id: 'app.instances.select', defaultMessage: 'Select...' },
-	groupBy: { id: 'app.instances.group-by', defaultMessage: 'Group by:' },
+	groupBy: { id: 'app.instances.group-by', defaultMessage: 'Group by' },
 	addContent: { id: 'app.instances.add-content', defaultMessage: 'Add content' },
+	createInstance: {
+		id: 'app.library.create-instance',
+		defaultMessage: 'Create new instance',
+	},
 	viewInstance: { id: 'app.instances.view-instance', defaultMessage: 'View instance' },
 	duplicateInstance: {
 		id: 'app.instances.duplicate-instance',
@@ -64,9 +74,9 @@ const messages = defineMessages({
 	dateCreated: { id: 'app.instances.sort.date-created', defaultMessage: 'Date created' },
 	dateModified: { id: 'app.instances.sort.date-modified', defaultMessage: 'Date modified' },
 	gameVersion: { id: 'app.instances.group.game-version', defaultMessage: 'Game version' },
-	group: { id: 'app.instances.group.group', defaultMessage: 'Group' },
+	group: { id: 'app.instances.group.group', defaultMessage: 'Custom group' },
 	loader: { id: 'app.instances.group.loader', defaultMessage: 'Loader' },
-	none: { id: 'app.instances.group.none', defaultMessage: 'None' },
+	none: { id: 'app.instances.group.none', defaultMessage: 'No grouping' },
 	ungrouped: { id: 'app.instances.group.ungrouped', defaultMessage: 'No group' },
 	editGroups: { id: 'app.instances.edit-groups', defaultMessage: 'Edit groups' },
 	selectAll: { id: 'app.instances.select-all', defaultMessage: 'Select all' },
@@ -78,6 +88,39 @@ const messages = defineMessages({
 	view: { id: 'app.library.view', defaultMessage: 'View' },
 	standardView: { id: 'app.library.view.standard', defaultMessage: 'Standard grid' },
 	cardsView: { id: 'app.library.view.cards', defaultMessage: 'Library cards' },
+	sortBy: { id: 'app.instances.sort-by', defaultMessage: 'Sort by' },
+	ascAlphabetical: {
+		id: 'app.instances.sort.direction.asc-alphabetical',
+		defaultMessage: 'A–Z',
+	},
+	descAlphabetical: {
+		id: 'app.instances.sort.direction.desc-alphabetical',
+		defaultMessage: 'Z–A',
+	},
+	ascVersion: {
+		id: 'app.instances.sort.direction.asc-version',
+		defaultMessage: 'Oldest version first',
+	},
+	descVersion: {
+		id: 'app.instances.sort.direction.desc-version',
+		defaultMessage: 'Newest version first',
+	},
+	ascRecency: {
+		id: 'app.instances.sort.direction.asc-recency',
+		defaultMessage: 'Least recent first',
+	},
+	descRecency: {
+		id: 'app.instances.sort.direction.desc-recency',
+		defaultMessage: 'Most recent first',
+	},
+	ascDate: {
+		id: 'app.instances.sort.direction.asc-date',
+		defaultMessage: 'Oldest first',
+	},
+	descDate: {
+		id: 'app.instances.sort.direction.desc-date',
+		defaultMessage: 'Newest first',
+	},
 })
 
 const optionMessages = {
@@ -139,6 +182,25 @@ const { state, grouping, filteredResults, isSectionCollapsed, setSectionCollapse
 	useGridGrouping(props.label, filteredInstances, {
 		formatLoader: (loader) => formatLoader(formatMessage, loader),
 	})
+
+const isSortAscending = computed(() => state.value.sortAscending ?? true)
+
+const sortDirectionLabels = {
+	Name: { asc: messages.ascAlphabetical, desc: messages.descAlphabetical },
+	'Game version': { asc: messages.ascVersion, desc: messages.descVersion },
+	'Last played': { asc: messages.ascRecency, desc: messages.descRecency },
+	'Date created': { asc: messages.ascDate, desc: messages.descDate },
+	'Date modified': { asc: messages.ascDate, desc: messages.descDate },
+}
+
+const sortDirectionLabel = computed(() => {
+	const labels = sortDirectionLabels[state.value.sortBy] ?? sortDirectionLabels['Name']
+	return formatMessage(isSortAscending.value ? labels.asc : labels.desc)
+})
+
+function toggleSortDirection() {
+	state.value.sortAscending = !state.value.sortAscending
+}
 
 async function deleteInstance() {
 	if (currentDeleteInstance.value) {
@@ -359,6 +421,55 @@ function onBatchEditApplied() {
 			clearable
 			wrapper-class="flex-1"
 		/>
+		<ButtonStyled color="brand">
+			<button @click="router.push('/create')">
+				<PlusIcon />
+				{{ formatMessage(messages.createInstance) }}
+			</button>
+		</ButtonStyled>
+	</div>
+	<div class="flex flex-wrap items-center gap-2">
+		<DropdownSelect
+			v-slot="{ selected }"
+			v-model="state.sortBy"
+			v-tooltip="{ content: formatMessage(messages.sortBy), triggers: ['hover'] }"
+			class="!w-auto"
+			name="Sort Dropdown"
+			:options="['Name', 'Last played', 'Date created', 'Date modified', 'Game version']"
+			:display-name="formatOption"
+			:placeholder="formatMessage(messages.select)"
+		>
+			<div class="flex items-center gap-1">
+				<ArrowUpDownIcon class="size-5 shrink-0 text-primary" />
+				<span class="font-semibold text-secondary">{{ selected }}</span>
+			</div>
+		</DropdownSelect>
+		<button
+			v-tooltip="{ content: sortDirectionLabel, triggers: ['hover'] }"
+			type="button"
+			class="flex h-[40px] w-[40px] shrink-0 cursor-pointer items-center justify-center rounded-xl border-none bg-button-bg p-0 text-button-text transition-all hover:bg-button-bg hover:text-contrast active:scale-[0.97]"
+			:aria-label="sortDirectionLabel"
+			:aria-pressed="isSortAscending"
+			@click="toggleSortDirection()"
+		>
+			<SortAscIcon v-if="isSortAscending" class="size-5" />
+			<SortDescIcon v-else class="size-5" />
+		</button>
+		<div class="mx-2 h-6 w-px bg-surface-5" />
+		<DropdownSelect
+			v-slot="{ selected }"
+			v-model="state.group"
+			v-tooltip="{ content: formatMessage(messages.groupBy), triggers: ['hover'] }"
+			name="Group Dropdown"
+			:options="['Group', 'Loader', 'Game version', 'None']"
+			:display-name="formatOption"
+			:placeholder="formatMessage(messages.select)"
+		>
+			<div class="flex items-center gap-1">
+				<LayersIcon class="size-5 shrink-0 text-primary" />
+				<span class="font-semibold text-secondary">{{ selected }}</span>
+			</div>
+		</DropdownSelect>
 		<PopoutMenu :tooltip="formatMessage(messages.view)" placement="bottom-end">
 			<ButtonStyled circular>
 				<button :aria-label="formatMessage(messages.view)">
@@ -384,32 +495,6 @@ function onBatchEditApplied() {
 				</div>
 			</template>
 		</PopoutMenu>
-		<DropdownSelect
-			v-slot="{ selected }"
-			v-model="state.sortBy"
-			name="Sort Dropdown"
-			class="max-w-[16rem]"
-			:options="['Name', 'Last played', 'Date created', 'Date modified', 'Game version']"
-			:display-name="formatOption"
-			:placeholder="formatMessage(messages.select)"
-		>
-			<span class="font-semibold text-primary">{{
-				formatMessage(commonMessages.sortByLabel)
-			}}</span>
-			<span class="font-semibold text-secondary">{{ selected }}</span>
-		</DropdownSelect>
-		<DropdownSelect
-			v-slot="{ selected }"
-			v-model="state.group"
-			class="max-w-[16rem]"
-			name="Group Dropdown"
-			:options="['Group', 'Loader', 'Game version', 'None']"
-			:display-name="formatOption"
-			:placeholder="formatMessage(messages.select)"
-		>
-			<span class="font-semibold text-primary">{{ formatMessage(messages.groupBy) }} </span>
-			<span class="font-semibold text-secondary">{{ selected }}</span>
-		</DropdownSelect>
 	</div>
 	<Accordion
 		v-for="instanceSection in Array.from(filteredResults, ([key, value]) => ({

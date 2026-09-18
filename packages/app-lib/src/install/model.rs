@@ -350,6 +350,7 @@ mod tests {
             });
         job.rollback = Some(InstallRollbackState {
             instance: InstanceMetadata {
+                synced_options: Default::default(),
                 instance: Instance {
                     id: instance_id.clone(),
                     path: "instance".to_string(),

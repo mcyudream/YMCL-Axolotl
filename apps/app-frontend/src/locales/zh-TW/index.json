@@ -3029,6 +3029,33 @@
   "app.instances.sort.name": {
     "message": "名稱"
   },
+  "app.instances.sort-by": {
+    "message": "排序方式"
+  },
+  "app.instances.sort.direction.asc-alphabetical": {
+    "message": "A–Z 正序"
+  },
+  "app.instances.sort.direction.desc-alphabetical": {
+    "message": "Z–A 倒序"
+  },
+  "app.instances.sort.direction.asc-version": {
+    "message": "舊版本在前"
+  },
+  "app.instances.sort.direction.desc-version": {
+    "message": "新版本在前"
+  },
+  "app.instances.sort.direction.asc-recency": {
+    "message": "最早遊玩在前"
+  },
+  "app.instances.sort.direction.desc-recency": {
+    "message": "最近遊玩在前"
+  },
+  "app.instances.sort.direction.asc-date": {
+    "message": "最早的在前"
+  },
+  "app.instances.sort.direction.desc-date": {
+    "message": "最新的在前"
+  },
   "app.instances.unpin-from-home": {
     "message": "取消固定"
   },
@@ -8509,6 +8536,21 @@
   },
   "instance.settings.tabs.general.deleting.button": {
     "message": "刪除中..."
+  },
+  "instance.settings.tabs.general.desktop-shortcut": {
+    "message": "桌面捷徑"
+  },
+  "instance.settings.tabs.general.desktop-shortcut.create": {
+    "message": "建立桌面捷徑"
+  },
+  "instance.settings.tabs.general.desktop-shortcut.created": {
+    "message": "桌面捷徑已建立"
+  },
+  "instance.settings.tabs.general.desktop-shortcut.creating": {
+    "message": "正在建立捷徑……"
+  },
+  "instance.settings.tabs.general.desktop-shortcut.description": {
+    "message": "在桌面建立可直接啟動此實例的捷徑。"
   },
   "instance.settings.tabs.general.duplicate-button": {
     "message": "複製"

@@ -1075,9 +1075,13 @@ pub fn build_proxied_client(
 
 pub(crate) fn build_configured_client(
     proxy: &crate::util::proxy::ProxyConfig,
+    ignore_ssl_errors: bool,
 ) -> crate::Result<reqwest::Client> {
     proxy
-        .apply(reqwest_client_builder())?
+        .apply(
+            reqwest_client_builder()
+                .danger_accept_invalid_certs(ignore_ssl_errors),
+        )?
         .build()
         .map_err(Into::into)
 }

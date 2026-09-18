@@ -16,6 +16,16 @@ export type GameInstance = {
 	linked_version_id?: string | null
 	linked_version_json_path?: string | null
 	linked_game_dir_mode?: 'automatic' | 'isolated' | 'shared' | null
+	synced_options: Record<
+		| 'game_options'
+		| 'command_history'
+		| 'multiplayer_servers'
+		| 'creative_hotbars'
+		| 'screenshots'
+		| 'resource_packs'
+		| 'data_packs',
+		boolean
+	>
 
 	game_version: string
 	protocol_version?: number

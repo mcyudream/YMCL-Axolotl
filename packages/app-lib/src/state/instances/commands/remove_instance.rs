@@ -23,6 +23,7 @@ async fn remove_instance_with_policy(
     state: &State,
     preserve_external_files: bool,
 ) -> crate::Result<()> {
+    let _synced_options_lock = state.lock_synced_options().await;
     let _instance_lock = state.lock_instance_content(instance_id).await;
 
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
@@ -60,6 +61,8 @@ async fn remove_instance_with_policy(
     } else {
         managed_path
     };
+    crate::api::instance::remove_generated_instance_files(instance_id, state)
+        .await?;
     io::remove_dir_all(&path).await?;
 
     let jobs = crate::install::store::mark_instance_deleted(instance_id, state)

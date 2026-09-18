@@ -94,6 +94,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "either",
+ "rand 0.8.5",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+ "serde_json",
+ "thiserror 2.0.19",
+ "utoipa",
+ "uuid 1.24.0",
+]
+
+[[package]]
 name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -109,7 +125,6 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "serde",
- "tokio",
  "zbus",
 ]
 
@@ -5437,6 +5452,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
 name = "serde_cbor"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6784,8 +6809,9 @@ dependencies = [
 
 [[package]]
 name = "theseus"
-version = "1.9.6-beta.7"
+version = "1.9.7-beta.1"
 dependencies = [
+ "ariadne",
  "async-minecraft-ping",
  "async-recursion",
  "async-trait",
@@ -6883,6 +6909,65 @@ dependencies = [
  "xz2",
  "zbus",
  "zhconv",
+ "zip 6.0.0",
+]
+
+[[package]]
+name = "theseus_gui"
+version = "1.9.7-beta.1"
+dependencies = [
+ "ashpd",
+ "async_zip",
+ "block2",
+ "bytes",
+ "cc",
+ "chrono",
+ "daedalus",
+ "dashmap",
+ "either",
+ "enumset",
+ "flate2",
+ "futures",
+ "hyper",
+ "hyper-util",
+ "image",
+ "keyring",
+ "libc",
+ "native-dialog",
+ "notify",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "paste",
+ "path-util",
+ "quartz_nbt",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-http",
+ "tauri-plugin-opener",
+ "tauri-plugin-os",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "theseus",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-error",
+ "trash",
+ "url",
+ "urlencoding",
+ "uuid 1.24.0",
+ "windows 0.61.3",
  "zip 6.0.0",
 ]
 
@@ -7014,7 +7099,6 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -7582,6 +7666,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
+name = "utoipa"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bde15df68e80b16c7d16b9616e80770ad158988daa56a27dccd1e55558b0160"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7598,6 +7706,7 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "rand 0.10.2",
  "serde_core",
  "wasm-bindgen",
 ]
@@ -8707,65 +8816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ymcl_gui"
-version = "1.9.6-beta.7"
-dependencies = [
- "ashpd",
- "async_zip",
- "block2",
- "bytes",
- "cc",
- "chrono",
- "daedalus",
- "dashmap",
- "either",
- "enumset",
- "flate2",
- "futures",
- "hyper",
- "hyper-util",
- "image",
- "keyring",
- "libc",
- "native-dialog",
- "notify",
- "objc2-app-kit",
- "objc2-foundation",
- "paste",
- "path-util",
- "quartz_nbt",
- "regex",
- "serde",
- "serde_json",
- "serde_with",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-deep-link",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-http",
- "tauri-plugin-opener",
- "tauri-plugin-os",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tempfile",
- "theseus",
- "thiserror 2.0.19",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-error",
- "trash",
- "url",
- "urlencoding",
- "uuid 1.24.0",
- "windows 0.61.3",
- "zip 6.0.0",
-]
-
-[[package]]
 name = "yoke"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8813,7 +8863,6 @@ dependencies = [
  "rustix",
  "serde",
  "serde_repr",
- "tokio",
  "tracing",
  "uds_windows",
  "uuid 1.24.0",

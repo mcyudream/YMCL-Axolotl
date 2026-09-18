@@ -255,6 +255,12 @@ impl ProcessManager {
         }
     }
 
+    pub fn has_instance_process(&self, instance_id: &str) -> bool {
+        self.processes
+            .iter()
+            .any(|entry| entry.value().metadata.instance_id == instance_id)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_new_process(
         &self,
@@ -1234,6 +1240,26 @@ impl Process {
             Some(!mc_exit_status.success() && !manually_killed),
         )
         .await?;
+
+        // File changes detected while Minecraft was running are intentionally
+        // deferred by synced-option reconciliation. Run one final pass after
+        // the process has exited so changes to servers.dat (and other synced
+        // files) are captured instead of being left pending indefinitely.
+        let reconcile_instance_id = instance_id.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                crate::api::instance::synced_options::reconcile_instance(
+                    &reconcile_instance_id,
+                )
+                .await
+            {
+                tracing::warn!(
+                    instance = %reconcile_instance_id,
+                    %error,
+                    "Failed to reconcile synced options after Minecraft exited"
+                );
+            }
+        });
 
         let _ = state.discord_rpc.clear_to_default(true).await;
 

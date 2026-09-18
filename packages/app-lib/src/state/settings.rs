@@ -117,6 +117,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub bypass_curseforge_download_restrictions: bool,
     #[serde(default)]
+    pub ignore_ssl_errors: bool,
+    #[serde(default)]
     pub mojang_auth_source: DownloadSourceMode,
     #[serde(default, rename = "use_minecraft_mirror", skip_serializing)]
     legacy_use_minecraft_mirror: Option<bool>,
@@ -182,6 +184,16 @@ pub struct Settings {
 
     pub developer_mode: bool,
     pub feature_flags: HashMap<FeatureFlag, bool>,
+    #[serde(default)]
+    pub sync_features_across_devices: bool,
+    #[serde(default = "default_true")]
+    pub show_files_tab_in_instances: bool,
+    #[serde(default = "default_true")]
+    pub show_worlds_tab_in_instances: bool,
+    #[serde(default)]
+    pub show_screenshots_tab_in_instances: bool,
+    #[serde(default = "default_true")]
+    pub show_skin_selector_in_sidebar: bool,
 
     pub skipped_update: Option<String>,
     pub pending_update_toast_for_version: Option<String>,
@@ -274,6 +286,18 @@ impl Settings {
                 .fetch_one(exec)
                 .await?;
 
+        let (
+            sync_features_across_devices,
+            show_files_tab_in_instances,
+            show_worlds_tab_in_instances,
+            show_screenshots_tab_in_instances,
+            show_skin_selector_in_sidebar,
+        ): (bool, bool, bool, bool, bool) = sqlx::query_as(
+            "SELECT sync_features_across_devices, show_files_tab_in_instances, show_worlds_tab_in_instances, show_screenshots_tab_in_instances, show_skin_selector_in_sidebar FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
+
         let engine_row =
             sqlx::query("SELECT download_engine FROM settings WHERE id = 0")
                 .fetch_one(exec)
@@ -283,6 +307,11 @@ impl Settings {
         );
         let bypass_curseforge_download_restrictions: bool = sqlx::query_scalar(
             "SELECT bypass_curseforge_download_restrictions FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
+        let ignore_ssl_errors: bool = sqlx::query_scalar(
+            "SELECT ignore_ssl_errors FROM settings WHERE id = 0",
         )
         .fetch_one(exec)
         .await?;
@@ -304,6 +333,7 @@ impl Settings {
                 &res.curseforge_source,
             ),
             bypass_curseforge_download_restrictions,
+            ignore_ssl_errors,
             mojang_auth_source: DownloadSourceMode::from_string(
                 &res.mojang_auth_source,
             ),
@@ -391,6 +421,11 @@ impl Settings {
                 .as_ref()
                 .and_then(|x| serde_json::from_str(x).ok())
                 .unwrap_or_default(),
+            sync_features_across_devices,
+            show_files_tab_in_instances,
+            show_worlds_tab_in_instances,
+            show_screenshots_tab_in_instances,
+            show_skin_selector_in_sidebar,
             skipped_update: res.skipped_update,
             pending_update_toast_for_version: res
                 .pending_update_toast_for_version,
@@ -607,10 +642,24 @@ impl Settings {
         .bind(self.bypass_curseforge_download_restrictions)
         .execute(exec)
         .await?;
+        sqlx::query("UPDATE settings SET ignore_ssl_errors = ? WHERE id = 0")
+            .bind(self.ignore_ssl_errors)
+            .execute(exec)
+            .await?;
         sqlx::query("UPDATE settings SET mc_memory_optimize = ? WHERE id = 0")
             .bind(self.memory.optimize_before_launch)
             .execute(exec)
             .await?;
+        sqlx::query(
+            "UPDATE settings SET sync_features_across_devices = ?, show_files_tab_in_instances = ?, show_worlds_tab_in_instances = ?, show_screenshots_tab_in_instances = ?, show_skin_selector_in_sidebar = ? WHERE id = 0",
+        )
+        .bind(self.sync_features_across_devices)
+        .bind(self.show_files_tab_in_instances)
+        .bind(self.show_worlds_tab_in_instances)
+        .bind(self.show_screenshots_tab_in_instances)
+        .bind(self.show_skin_selector_in_sidebar)
+        .execute(exec)
+        .await?;
 
         Ok(())
     }
@@ -1107,6 +1156,25 @@ mod tests {
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(!reloaded.bypass_curseforge_download_restrictions);
+    }
+
+    #[tokio::test]
+    async fn ignore_ssl_errors_defaults_off_and_round_trips() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+
+        let mut settings = Settings::get(&pool).await.unwrap();
+        assert!(!settings.ignore_ssl_errors);
+
+        settings.ignore_ssl_errors = true;
+        settings.update(&pool).await.unwrap();
+
+        let reloaded = Settings::get(&pool).await.unwrap();
+        assert!(reloaded.ignore_ssl_errors);
     }
 
     #[tokio::test]

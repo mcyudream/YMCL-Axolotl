@@ -80,6 +80,8 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                     let manual_import_directory =
                         event_manual_import_directory.read().await.clone();
                     let mut visited_instances = Vec::new();
+                    let mut synced_option_files =
+                        HashMap::<String, HashSet<String>>::new();
                     let mut scan_manual_downloads = false;
 
                     for e in &events {
@@ -113,6 +115,25 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                                 .skip_while(|x| x.as_os_str() != instance_path)
                                 .nth(1)
                                 .map(|x| x.as_os_str());
+                            if let Some(file_name) = first_file_name
+                                .as_ref()
+                                .and_then(|name| name.to_str())
+                                .filter(|name| {
+                                    matches!(
+                                        *name,
+                                        "command_history.txt"
+                                            | "hotbar.nbt"
+                                            | "options.txt"
+                                            | "servers.dat"
+                                            | "resourcepacks"
+                                    )
+                                })
+                            {
+                                synced_option_files
+                                    .entry(instance_id.clone())
+                                    .or_default()
+                                    .insert(file_name.to_owned());
+                            }
                             let relative_path = e
                                 .path
                                 .components()
@@ -123,6 +144,18 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                                 })
                                 .collect::<Vec<_>>()
                                 .join("/");
+                            if first_file_name
+                                .as_ref()
+                                .is_some_and(|x| *x == "screenshots")
+                            {
+                                let screenshot_instance_id =
+                                    instance_id.clone();
+                                tokio::spawn(async move {
+                                    if let Err(error) = crate::api::instance::reconcile_screenshots(&screenshot_instance_id).await {
+                                        tracing::debug!(%error, "Screenshot index reconciliation failed");
+                                    }
+                                });
+                            }
                             if !relative_path.is_empty() {
                                 record_upgrade_content_change(
                                     &event_content_changes,
@@ -161,6 +194,13 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                                     .is_some_and(|x| *x == "servers.dat")
                                 {
                                     Some(InstancePayloadType::ServersUpdated)
+                                } else if first_file_name
+                                    .as_ref()
+                                    .is_some_and(|x| *x == "screenshots")
+                                {
+                                    Some(
+                                        InstancePayloadType::ScreenshotsUpdated,
+                                    )
                                 } else if first_file_name.as_ref().is_some_and(
                                     |x| {
                                         *x == "saves"
@@ -227,6 +267,23 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                         ) {
                             scan_manual_downloads = true;
                         }
+                    }
+                    for (instance_id, file_names) in synced_option_files {
+                        tokio::spawn(async move {
+                            for file_name in file_names {
+                                if let Err(error) =
+                                    crate::api::instance::reconcile_synced_option_file(
+                                        &instance_id,
+                                        &file_name,
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to reconcile {file_name} after filesystem change: {error}"
+                                    );
+                                }
+                            }
+                        });
                     }
                     if scan_manual_downloads
                         && let Some(directory) = manual_import_directory
@@ -367,6 +424,27 @@ pub(crate) async fn watch_instances_init(
             watcher,
         )
         .await;
+        let screenshot_instance_id = instance.id.clone();
+        tokio::spawn(async move {
+            if let Err(error) = crate::api::instance::reconcile_screenshots(
+                &screenshot_instance_id,
+            )
+            .await
+            {
+                tracing::debug!(%error, "Initial screenshot index reconciliation failed");
+            }
+        });
+        let synced_instance_id = instance.id.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                crate::api::instance::synced_options::reconcile_instance(
+                    &synced_instance_id,
+                )
+                .await
+            {
+                tracing::debug!(%error, "Initial synced option reconciliation failed");
+            }
+        });
     }
 }
 

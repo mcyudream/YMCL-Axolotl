@@ -651,7 +651,6 @@ pub async fn analyze_crash(instance_id: &str) -> crate::Result<CrashAnalysis> {
     let credentials = Credentials::get_all(&state.pool)
         .await?
         .into_iter()
-        .map(|credential| credential.1)
         .collect::<Vec<_>>();
     for finding in &mut findings {
         for evidence in &mut finding.evidence {

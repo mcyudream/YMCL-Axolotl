@@ -47,6 +47,16 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+pub(crate) struct GameVersionMetadata {
+    pub world_version: Option<u32>,
+}
+
+pub(crate) async fn read_game_version_metadata_from_jar(
+    _path: &Path,
+) -> crate::Result<Option<GameVersionMetadata>> {
+    Ok(None)
+}
+
 #[cfg(target_os = "windows")]
 use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
@@ -363,6 +373,86 @@ async fn processor_outputs_are_current(
     true
 }
 
+fn is_download_mojmaps_processor(processor: &d::modded::Processor) -> bool {
+    processor
+        .args
+        .windows(2)
+        .any(|args| args[0] == "--task" && args[1] == "DOWNLOAD_MOJMAPS")
+}
+
+async fn download_mojmaps_for_processor(
+    state: &State,
+    processor: &d::modded::Processor,
+    client_mappings: Option<&(String, String, u32)>,
+    libraries_dir: &Path,
+    data: &std::collections::HashMap<String, d::modded::SidedDataEntry>,
+) -> crate::Result<bool> {
+    if !is_download_mojmaps_processor(processor) {
+        return Ok(false);
+    }
+
+    let Some((download_url, download_sha1, download_size)) = client_mappings
+    else {
+        return Ok(false);
+    };
+    let arguments =
+        args::get_processor_arguments(libraries_dir, &processor.args, data)?;
+    let output = arguments
+        .windows(2)
+        .find(|args| args[0] == "--output")
+        .map(|args| PathBuf::from(&args[1]))
+        .ok_or_else(|| {
+            crate::ErrorKind::LauncherError(
+                "Forge DOWNLOAD_MOJMAPS processor did not declare an output path"
+                    .to_string(),
+            )
+        })?;
+    if !output.is_absolute() || !output.starts_with(libraries_dir) {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "Forge DOWNLOAD_MOJMAPS output is outside the libraries directory: {}",
+            output.display()
+        ))
+        .as_error());
+    }
+
+    if output.exists()
+        && let Ok((size, sha1)) =
+            crate::util::fetch::sha1_file_async(&output).await
+        && size == u64::from(*download_size)
+        && sha1.eq_ignore_ascii_case(download_sha1)
+    {
+        return Ok(true);
+    }
+
+    let bytes = crate::util::fetch::fetch_official(
+        download_url,
+        Some(download_sha1),
+        None,
+        None,
+        &state.download_semaphore,
+        &state.pool,
+    )
+    .await?;
+    if bytes.len() as u64 != u64::from(*download_size) {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "Minecraft client mappings size mismatch: expected {}, got {}",
+            download_size,
+            bytes.len()
+        ))
+        .as_error());
+    }
+    if let Some(parent) = output.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    io::write(&output, bytes).await?;
+    tracing::info!(
+        processor = %processor.jar,
+        output = %output.display(),
+        "Downloaded Mojang mappings through the launcher HTTP client"
+    );
+    Ok(true)
+}
+
 pub async fn get_java_version_from_launch_context(
     context: &InstanceLaunchContext,
     version_info: &VersionInfo,
@@ -404,6 +494,17 @@ fn version_uses_liteloader(version_info: &VersionInfo) -> bool {
         .libraries
         .iter()
         .any(|library| is_liteloader_library(&library.name))
+}
+
+fn has_client_processors(processors: Option<&[d::modded::Processor]>) -> bool {
+    processors.is_some_and(|processors| {
+        processors.iter().any(|processor| {
+            processor
+                .sides
+                .as_ref()
+                .is_none_or(|sides| sides.iter().any(|side| side == "client"))
+        })
+    })
 }
 
 fn is_liteloader_library(name: &str) -> bool {
@@ -1223,6 +1324,13 @@ async fn install_minecraft_with_local_source(
         .join(format!("{version_jar}.jar"));
 
     let Some(java_version) = java_version else {
+        if has_client_processors(version_info.processors.as_deref()) {
+            return Err(crate::ErrorKind::LauncherError(format!(
+                "Java {key} is required to finish installing {}",
+                content_set.loader.as_str()
+            ))
+            .into());
+        }
         let protocol_version =
             read_protocol_version_from_jar(client_path).await?;
         run_install_database_write(
@@ -1293,6 +1401,12 @@ async fn install_minecraft_with_local_source(
 
     if let Some(processors) = &version_info.processors {
         let libraries_dir = state.directories.libraries_dir();
+        let client_mappings = version_info
+            .downloads
+            .get(&d::minecraft::DownloadType::ClientMappings)
+            .map(|download| {
+                (download.url.clone(), download.sha1.clone(), download.size)
+            });
 
         if let Some(ref mut data) = version_info.data {
             processor_rules! {
@@ -1342,6 +1456,39 @@ async fn install_minecraft_with_local_source(
                 if let Some(sides) = &processor.sides
                     && !sides.contains(&String::from("client"))
                 {
+                    if let Some(reporter) = &reporter {
+                        reporter
+                            .update(
+                                InstallPhaseId::RunningLoaderProcessors,
+                                Some(InstallProgress {
+                                    current: (index + 1) as u64,
+                                    total: total_length as u64,
+                                    secondary: None,
+                                }),
+                                phase_details.clone(),
+                            )
+                            .await?;
+                    }
+                    continue;
+                }
+                if download_mojmaps_for_processor(
+                    &state,
+                    processor,
+                    client_mappings.as_ref(),
+                    &libraries_dir,
+                    data,
+                )
+                .await?
+                {
+                    if let Some(loading_bar) = &loading_bar {
+                        emit_loading(
+                            loading_bar,
+                            30.0 / total_length as f64,
+                            Some(&format!(
+                                "Running forge processor {index}/{total_length}"
+                            )),
+                        )?;
+                    }
                     if let Some(reporter) = &reporter {
                         reporter
                             .update(
@@ -2894,6 +3041,45 @@ mod processor_output_tests {
                 },
             ),
         ])
+    }
+
+    #[test]
+    fn client_processor_detection_respects_sides() {
+        let mut processors = vec![d::modded::Processor {
+            jar: "example:processor:1.0".to_string(),
+            classpath: Vec::new(),
+            args: Vec::new(),
+            outputs: None,
+            sides: Some(vec!["server".to_string()]),
+        }];
+        assert!(!has_client_processors(Some(&processors)));
+
+        processors[0].sides = Some(vec!["client".to_string()]);
+        assert!(has_client_processors(Some(&processors)));
+
+        processors[0].sides = None;
+        assert!(has_client_processors(Some(&processors)));
+        assert!(!has_client_processors(None));
+    }
+
+    #[test]
+    fn detects_download_mojmaps_processor_by_task_argument() {
+        let mut processor = d::modded::Processor {
+            jar: "net.minecraftforge:installertools:1.4.1".to_string(),
+            classpath: Vec::new(),
+            args: vec![
+                "--task".to_string(),
+                "DOWNLOAD_MOJMAPS".to_string(),
+                "--output".to_string(),
+                "{MOJMAPS}".to_string(),
+            ],
+            outputs: None,
+            sides: None,
+        };
+        assert!(is_download_mojmaps_processor(&processor));
+
+        processor.args[1] = "MCP_DATA".to_string();
+        assert!(!is_download_mojmaps_processor(&processor));
     }
 
     #[tokio::test]
