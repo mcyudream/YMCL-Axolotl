@@ -46,6 +46,10 @@ pub(crate) fn cleanroom_installer_url(loader_version: &str) -> String {
          {loader_version}/cleanroom-{loader_version}-installer.jar"
     )
 }
+const CLEANROOM_MAVEN_METADATA_URL: &str =
+    "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/maven-metadata.xml";
+const CLEANROOM_MAVEN_VERSION_URL: &str =
+    "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/";
 const FORGE_MAVEN_URL: &str =
     "https://maven.minecraftforge.net/net/minecraftforge/forge/";
 const FORGE_PROMOTIONS_URL: &str = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json";
@@ -738,8 +742,29 @@ async fn fetch_cleanroom_manifest(
     fetch_semaphore: &FetchSemaphore,
     pool: &SqlitePool,
 ) -> crate::Result<Manifest> {
+    // CleanroomMC's own Maven is the primary source: it is the same channel
+    // their website links for downloads and, unlike the anonymous GitHub
+    // releases API, it has no per-IP rate limit to exhaust (which otherwise
+    // leaves the loader appearing unsupported).
+    match fetch_maven_metadata(
+        CLEANROOM_MAVEN_METADATA_URL,
+        fetch_semaphore,
+        pool,
+    )
+    .await
+    {
+        Ok(metadata) => return Ok(cleanroom_maven_manifest(metadata)),
+        Err(maven_error) => {
+            tracing::warn!(
+                error = %maven_error,
+                "CleanroomMC maven metadata failed; falling back to GitHub releases"
+            );
+        }
+    }
+
     // GitHub API metadata: prefer the domain CAS mirror (published admins
-    // push it) so version resolution works without GitHub access.
+    // push it) so version resolution works without GitHub access; the
+    // mirrored fetch itself falls back to the direct API.
     let bytes = crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
         CLEANROOM_RELEASES_URL,
         fetch_semaphore,
@@ -748,6 +773,35 @@ async fn fetch_cleanroom_manifest(
     .await?;
     let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes)?;
     Ok(cleanroom_manifest(releases))
+}
+
+fn cleanroom_maven_manifest(metadata: MavenMetadata) -> Manifest {
+    let mut loaders = metadata
+        .versioning
+        .versions
+        .values
+        .into_iter()
+        .map(|version| {
+            let url = format!("{CLEANROOM_MAVEN_VERSION_URL}{version}/cleanroom-{version}-installer.jar");
+            LoaderVersion {
+                id: version.clone(),
+                url,
+                stable: is_stable_version(&version),
+                profile_source: LoaderProfileSource::Installer,
+                fallback_url: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    loaders.sort_by(|left, right| compare_versions(&right.id, &left.id));
+    Manifest {
+        game_versions: vec![Version {
+            id: "1.12.2".to_string(),
+            stable: true,
+            version_group: None,
+            loaders,
+        }],
+        version_groups: Vec::new(),
+    }
 }
 
 fn cleanroom_manifest(releases: Vec<GithubRelease>) -> Manifest {
@@ -2820,6 +2874,52 @@ mod tests {
             cleanroom.game_versions[0].loaders[0].profile_source,
             LoaderProfileSource::Installer
         );
+    }
+
+    #[test]
+    fn cleanroom_maven_metadata_builds_installer_manifest() {
+        let metadata: MavenMetadata = quick_xml::de::from_str(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>com.cleanroommc</groupId>
+  <artifactId>cleanroom</artifactId>
+  <versioning>
+    <latest>0.6.13-alpha</latest>
+    <release>0.6.13-alpha</release>
+    <versions>
+      <version>0.4.0-alpha</version>
+      <version>0.4.0</version>
+      <version>0.6.13-alpha</version>
+    </versions>
+  </versioning>
+</metadata>"#,
+        )
+        .unwrap();
+
+        let manifest = cleanroom_maven_manifest(metadata);
+        assert_eq!(manifest.game_versions.len(), 1);
+        assert_eq!(manifest.game_versions[0].id, "1.12.2");
+
+        let loaders = &manifest.game_versions[0].loaders;
+        // Newest first; the stable 0.4.0 release outranks its alpha twin.
+        assert_eq!(
+            loaders
+                .iter()
+                .map(|version| version.id.as_str())
+                .collect::<Vec<_>>(),
+            ["0.6.13-alpha", "0.4.0", "0.4.0-alpha"]
+        );
+        assert_eq!(
+            loaders[0].url,
+            "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/0.6.13-alpha/cleanroom-0.6.13-alpha-installer.jar"
+        );
+        assert_eq!(
+            loaders[0].profile_source,
+            LoaderProfileSource::Installer
+        );
+        assert!(!loaders[0].stable);
+        assert!(loaders[1].stable);
+        assert!(!loaders[2].stable);
     }
 
     #[test]
