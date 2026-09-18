@@ -41,11 +41,14 @@ const showLogin = ref(false)
 
 const route = useRoute()
 // ymcl://add-site?url={origin} lands here via /settings?add_site={origin}#ymcl-domains
+// Watching the modal ref too: on a cold start the query is already present
+// when this component's setup runs, so the immediate callback fires before
+// the template ref binds and `show` would otherwise be skipped silently.
 watch(
-	() => route.query.add_site,
-	(url) => {
-		if (typeof url === 'string' && url.trim()) {
-			addDomainModal.value?.show(url.trim())
+	[() => route.query.add_site, addDomainModal],
+	([url, modal]) => {
+		if (modal && typeof url === 'string' && url.trim()) {
+			modal.show(url.trim())
 		}
 	},
 	{ immediate: true },
