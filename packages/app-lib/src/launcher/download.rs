@@ -2671,7 +2671,9 @@ mod tests {
         Some(values.iter().map(|value| (*value).to_string()).collect())
     }
 
-    fn version_info_with_java(java: Option<d::minecraft::JavaVersion>) -> GameVersionInfo {
+    fn version_info_with_java(
+        java: Option<d::minecraft::JavaVersion>,
+    ) -> GameVersionInfo {
         let mut info: GameVersionInfo = serde_json::from_value(serde_json::json!({
             "assetIndex": {"id": "1.12", "sha1": "", "size": 0, "totalSize": 0, "url": ""},
             "assets": "1.12",
@@ -2705,10 +2707,11 @@ mod tests {
 
     #[test]
     fn cleanroom_installer_declared_java_is_preserved() {
-        let mut info = version_info_with_java(Some(d::minecraft::JavaVersion {
-            component: "java-runtime-epsilon".to_string(),
-            major_version: 25,
-        }));
+        let mut info =
+            version_info_with_java(Some(d::minecraft::JavaVersion {
+                component: "java-runtime-epsilon".to_string(),
+                major_version: 25,
+            }));
         assert!(!normalize_version_info(
             ModLoader::Cleanroom,
             "1.12.2",
