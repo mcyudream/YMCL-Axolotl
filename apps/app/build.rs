@@ -956,6 +956,7 @@ fn main() {
                         "ymcl_auth_oauth_cancel",
                         "ymcl_ygg_exchange",
                         "ymcl_ygg_profiles",
+                        "ymcl_ygg_root",
                         "ymcl_auth_external_providers",
                         "ymcl_auth_external_begin",
                         "ymcl_auth_external_poll",

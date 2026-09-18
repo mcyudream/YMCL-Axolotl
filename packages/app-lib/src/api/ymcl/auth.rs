@@ -856,9 +856,10 @@ pub struct YmclYggExchange {
 }
 
 /// Exchanges the domain login session (Sa-Token) for a Yggdrasil session at
-/// the domain's authlib-injector service, so the Minecraft account attaches
-/// without re-entering the password. `profile_name` picks among multiple
-/// owned profiles; `None` selects the first one.
+/// the domain's Yggdrasil service — whichever provider plugin the node runs —
+/// so the Minecraft account attaches without re-entering the password.
+/// `profile_name` picks among multiple owned profiles; `None` selects the
+/// first one.
 pub async fn ygg_exchange(
     domain_id: &str,
     profile_name: Option<&str>,
@@ -872,18 +873,37 @@ pub async fn ygg_exchange(
     let stored = ensure_session(domain_id)
         .await?
         .ok_or_else(|| crate::ErrorKind::OtherError("Not logged in to this domain".to_string()))?;
-    let api_root = format!("{origin}/api/plugins/authlib-injector");
-    let mut url = format!("{api_root}/launcher/exchange");
-    if let Some(name) = profile_name {
-        url.push_str(&format!("?profile={}", urlencoding::encode(name)));
-    }
-    let bytes = domain_request(&state, domain_id, Method::POST, &url, None)
-        .await
-        .map_err(|error| {
-            crate::ErrorKind::OtherError(format!(
-                "Minecraft session exchange from {url} failed: {error}"
-            ))
-        })?;
+    // The provider shape is resolved by probe; a call that fails on a cached
+    // shape re-probes once, in case the node switched providers.
+    let mut reprobed = false;
+    let (api_root, url, bytes) = loop {
+        let endpoints = super::yggroot::ygg_endpoints(&origin).await?;
+        let url = match profile_name {
+            Some(name) => format!(
+                "{}?profile={}",
+                endpoints.exchange_url,
+                urlencoding::encode(name)
+            ),
+            None => endpoints.exchange_url.clone(),
+        };
+        match domain_request(&state, domain_id, Method::POST, &url, None).await
+        {
+            Ok(bytes) => break (endpoints.yggdrasil_root, url, bytes),
+            Err(error)
+                if !reprobed
+                    && super::yggroot::is_retryable_ygg_error(&error) =>
+            {
+                super::yggroot::invalidate_ygg_endpoints(&origin);
+                reprobed = true;
+            }
+            Err(error) => {
+                return Err(crate::ErrorKind::OtherError(format!(
+                    "Minecraft session exchange from {url} failed: {error}"
+                ))
+                .into())
+            }
+        }
+    };
     let snippet = body_snippet(&String::from_utf8_lossy(&bytes));
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| {
@@ -982,20 +1002,32 @@ pub async fn ygg_exchange(
 }
 
 /// Lists the Minecraft profiles the signed-in user owns on the domain's
-/// authlib-injector service. No session is issued (list-only mode).
+/// Yggdrasil service. No session is issued (list-only mode).
 pub async fn ygg_profiles(domain_id: &str) -> crate::Result<Vec<YmclYggProfile>> {
     let state = State::get().await?;
     let origin = super::registry::domain_origin(domain_id).await?;
-    let url = format!(
-        "{origin}/api/plugins/authlib-injector/launcher/exchange?list=true"
-    );
-    let bytes = domain_request(&state, domain_id, Method::POST, &url, None)
-        .await
-        .map_err(|error| {
-            crate::ErrorKind::OtherError(format!(
-                "Profile list from {url} failed: {error}"
-            ))
-        })?;
+    let mut reprobed = false;
+    let (url, bytes) = loop {
+        let endpoints = super::yggroot::ygg_endpoints(&origin).await?;
+        let url = endpoints.list_url;
+        match domain_request(&state, domain_id, Method::POST, &url, None).await
+        {
+            Ok(bytes) => break (url, bytes),
+            Err(error)
+                if !reprobed
+                    && super::yggroot::is_retryable_ygg_error(&error) =>
+            {
+                super::yggroot::invalidate_ygg_endpoints(&origin);
+                reprobed = true;
+            }
+            Err(error) => {
+                return Err(crate::ErrorKind::OtherError(format!(
+                    "Profile list from {url} failed: {error}"
+                ))
+                .into())
+            }
+        }
+    };
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
         crate::ErrorKind::OtherError(format!(
             "Profile list from {url} is not valid JSON: {error}; body: {}",

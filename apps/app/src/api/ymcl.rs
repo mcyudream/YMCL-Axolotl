@@ -31,6 +31,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_auth_oauth_login,
             ymcl_ygg_exchange,
             ymcl_ygg_profiles,
+            ymcl_ygg_root,
             ymcl_auth_oauth_cancel,
             ymcl_auth_external_providers,
             ymcl_auth_external_begin,
@@ -150,6 +151,16 @@ pub async fn ymcl_ygg_exchange(
 #[tauri::command]
 pub async fn ymcl_ygg_profiles(domain_id: String) -> Result<auth::YmclYggProfileList> {
     Ok(auth::ygg_profiles(&domain_id).await?)
+}
+
+/// Resolved Yggdrasil root of a joined domain — whichever provider plugin the
+/// node runs — so the frontend can recognise the Minecraft accounts that
+/// belong to it without probing the network itself. `None` for the personal
+/// domain.
+// invoke('plugin:ymcl|ymcl_ygg_root', { domainId })
+#[tauri::command]
+pub async fn ymcl_ygg_root(domain_id: String) -> Result<Option<String>> {
+    Ok(theseus::ymcl::yggroot::ygg_root_for_domain(&domain_id).await?)
 }
 
 /// Cancels a pending OAuth browser login: stops the loopback listener so the
