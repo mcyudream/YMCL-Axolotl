@@ -1,5 +1,5 @@
 {
-	"source": "LobeHub 787e3d20aa8194a4d4aafe40f0e48bd21d654045 model-bank chat models",
+	"source": "LobeHub 6c7a6fb033e443bc27bf34cbd5509ab3db7f22f3 model-bank chat models",
 	"providers": {
 		"ai21": [
 			{
@@ -204,6 +204,16 @@
 		],
 		"aihubmix": [
 			{
+				"id": "gpt-6-sol",
+				"name": "GPT-6 Sol",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-luna",
+				"name": "GPT-6 Luna",
+				"enabled": true
+			},
+			{
 				"id": "gpt-5.5",
 				"name": "GPT-5.5",
 				"enabled": true
@@ -344,6 +354,11 @@
 				"enabled": false
 			},
 			{
+				"id": "grok-4.7",
+				"name": "Grok 4.7",
+				"enabled": true
+			},
+			{
 				"id": "grok-4-20-non-reasoning",
 				"name": "Grok 4.20 (Non-Reasoning)",
 				"enabled": true
@@ -367,6 +382,11 @@
 				"id": "grok-3-mini",
 				"name": "Grok 3 Mini",
 				"enabled": false
+			},
+			{
+				"id": "claude-opus-5-5",
+				"name": "Claude Opus 5.5",
+				"enabled": true
 			},
 			{
 				"id": "claude-opus-4-7",
@@ -396,6 +416,21 @@
 			{
 				"id": "claude-haiku-4-5-20251001",
 				"name": "Claude Haiku 4.5",
+				"enabled": true
+			},
+			{
+				"id": "mimo-v2.6-pro",
+				"name": "MiMo-V2.6 Pro",
+				"enabled": true
+			},
+			{
+				"id": "mimo-v2.6-pro-ultraspeed",
+				"name": "MiMo-V2.6 Pro UltraSpeed",
+				"enabled": true
+			},
+			{
+				"id": "mimo-v2.6-flash",
+				"name": "MiMo-V2.6 Flash",
 				"enabled": true
 			},
 			{
@@ -555,6 +590,11 @@
 		],
 		"anthropic": [
 			{
+				"id": "claude-opus-5-5",
+				"name": "Claude Opus 5.5",
+				"enabled": true
+			},
+			{
 				"id": "claude-fable-5-1",
 				"name": "Claude Fable 5.1",
 				"enabled": true
@@ -611,6 +651,21 @@
 			}
 		],
 		"azure": [
+			{
+				"id": "gpt-6-astra",
+				"name": "GPT-6 Astra",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-sol",
+				"name": "GPT-6 Sol",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-luna",
+				"name": "GPT-6 Luna",
+				"enabled": true
+			},
 			{
 				"id": "gpt-5.4",
 				"name": "GPT-5.4",
@@ -895,6 +950,11 @@
 		],
 		"bedrock": [
 			{
+				"id": "global.anthropic.claude-opus-5-5",
+				"name": "Claude Opus 5.5",
+				"enabled": true
+			},
+			{
 				"id": "global.anthropic.claude-opus-4-7",
 				"name": "Claude Opus 4.7",
 				"enabled": true
@@ -1014,8 +1074,23 @@
 		],
 		"chatgpt": [
 			{
+				"id": "gpt-6.1-sol",
+				"name": "GPT-6.1 Sol",
+				"enabled": true
+			},
+			{
 				"id": "gpt-6-astra",
 				"name": "GPT-6 Astra",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-sol",
+				"name": "GPT-6 Sol",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-luna",
+				"name": "GPT-6 Luna",
 				"enabled": true
 			},
 			{
@@ -4297,8 +4372,23 @@
 		],
 		"openai": [
 			{
+				"id": "gpt-6.1-sol",
+				"name": "GPT-6.1 Sol",
+				"enabled": true
+			},
+			{
 				"id": "gpt-6-astra",
 				"name": "GPT-6 Astra",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-sol",
+				"name": "GPT-6 Sol",
+				"enabled": true
+			},
+			{
+				"id": "gpt-6-luna",
+				"name": "GPT-6 Luna",
 				"enabled": true
 			},
 			{
@@ -4770,6 +4860,41 @@
 			{
 				"id": "openrouter/auto",
 				"name": "Auto (best for prompt)",
+				"enabled": true
+			},
+			{
+				"id": "anthropic/claude-opus-5.5",
+				"name": "Claude Opus 5.5",
+				"enabled": true
+			},
+			{
+				"id": "openai/gpt-6-sol",
+				"name": "GPT-6 Sol",
+				"enabled": true
+			},
+			{
+				"id": "openai/gpt-6-luna",
+				"name": "GPT-6 Luna",
+				"enabled": true
+			},
+			{
+				"id": "x-ai/grok-4.7",
+				"name": "Grok 4.7",
+				"enabled": true
+			},
+			{
+				"id": "xiaomi/mimo-v2.6-pro",
+				"name": "MiMo-V2.6 Pro",
+				"enabled": true
+			},
+			{
+				"id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+				"name": "MiMo-V2.6 Pro UltraSpeed",
+				"enabled": true
+			},
+			{
+				"id": "xiaomi/mimo-v2.6-flash",
+				"name": "MiMo-V2.6 Flash",
 				"enabled": true
 			},
 			{
@@ -6113,6 +6238,11 @@
 		],
 		"stepfun": [
 			{
+				"id": "step-5-preview",
+				"name": "Step 5 Preview",
+				"enabled": true
+			},
+			{
 				"id": "step-3.7-flash",
 				"name": "Step 3.7 Flash",
 				"enabled": true
@@ -6257,6 +6387,11 @@
 			}
 		],
 		"supergrok": [
+			{
+				"id": "grok-4.7",
+				"name": "Grok 4.7",
+				"enabled": true
+			},
 			{
 				"id": "grok-4.6",
 				"name": "Grok 4.6",
@@ -7572,6 +7707,11 @@
 		],
 		"xai": [
 			{
+				"id": "grok-4.7",
+				"name": "Grok 4.7",
+				"enabled": true
+			},
+			{
 				"id": "grok-4.6",
 				"name": "Grok 4.6",
 				"enabled": true
@@ -7603,6 +7743,21 @@
 			}
 		],
 		"xiaomimimo": [
+			{
+				"id": "mimo-v2.6-pro",
+				"name": "MiMo-V2.6 Pro",
+				"enabled": true
+			},
+			{
+				"id": "mimo-v2.6-pro-ultraspeed",
+				"name": "MiMo-V2.6 Pro UltraSpeed",
+				"enabled": true
+			},
+			{
+				"id": "mimo-v2.6-flash",
+				"name": "MiMo-V2.6 Flash",
+				"enabled": true
+			},
 			{
 				"id": "mimo-v2.5-pro",
 				"name": "MiMo-V2.5 Pro",
