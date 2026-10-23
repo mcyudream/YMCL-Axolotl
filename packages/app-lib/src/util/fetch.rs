@@ -47,6 +47,10 @@ pub const DOWNLOAD_META_HEADER: &str = "modrinth-download-meta";
 
 const BMCLAPI_BASE_URL: &str = "https://bmclapi2.bangbang93.com";
 const MCIM_BASE_URL: &str = "https://mod.mcimirror.top";
+/// MCIM answers with this non-standard status for content it does not carry:
+/// its file cache only holds Mod content up to `MCIM_MAX_CACHED_FILE_SIZE`.
+const MCIM_UNAVAILABLE_STATUS: u16 = 567;
+const MCIM_MAX_CACHED_FILE_SIZE: u64 = 20 * 1024 * 1024;
 const ALIYUN_MAVEN_BASE_URL: &str =
     "https://maven.aliyun.com/repository/public";
 pub(crate) const TIANPAO_HOST: &str = "mod.tianpao.top";
@@ -486,12 +490,6 @@ fn modrinth_request_kind(url: &str) -> Option<&'static str> {
     }
 }
 
-fn is_modrinth_api_url(url: &str) -> bool {
-    Url::parse(url).ok().is_some_and(|parsed| {
-        matches!(parsed.host_str(), Some("api.modrinth.com"))
-    })
-}
-
 /// Appends a cache-busting query parameter so a retry bypasses a corrupt
 /// edge-cache object (a truncated or checksum-mismatched body served for an
 /// otherwise valid URL). Existing query pairs are preserved.
@@ -531,6 +529,11 @@ fn is_mrpack_url(url: &str) -> bool {
     reqwest::Url::parse(url)
         .ok()
         .is_some_and(|url| url.path().to_ascii_lowercase().ends_with(".mrpack"))
+}
+
+fn is_mcim_unavailable(route: &DownloadRoute, status: StatusCode) -> bool {
+    route.source == DownloadRouteSource::Mcim
+        && status.as_u16() == MCIM_UNAVAILABLE_STATUS
 }
 
 fn route(
@@ -642,10 +645,6 @@ fn explicit_mirror_routes(
                        base: &str,
                        path: String,
                        source: DownloadRouteSource| {
-        // Disabled MCIM.
-        if source == DownloadRouteSource::Mcim {
-            return;
-        }
         if let Some(url) = url_with_base(&parsed, base, &path) {
             routes.push(route(url, source, true, supports_range));
         }
@@ -732,6 +731,14 @@ fn explicit_mirror_routes(
             path.to_string(),
             DownloadRouteSource::Bmclapi,
         ),
+        // MCIM mirrors the v2 API path-compatible; v3 (search) is not
+        // mirrored and answers 404 there, so it stays official-only.
+        "api.modrinth.com" if path.starts_with("/v2/") => push_mirror(
+            &mut routes,
+            MCIM_BASE_URL,
+            format!("/modrinth{path}"),
+            DownloadRouteSource::Mcim,
+        ),
         "cdn.modrinth.com" | "cdn-alt.modrinth.com"
             if path.starts_with("/data/") =>
         {
@@ -741,6 +748,12 @@ fn explicit_mirror_routes(
                 path.to_string(),
                 DownloadRouteSource::Tianpao,
             );
+            push_mirror(
+                &mut routes,
+                MCIM_BASE_URL,
+                path.to_string(),
+                DownloadRouteSource::Mcim,
+            );
         }
         "api.curseforge.com" => push_mirror(
             &mut routes,
@@ -748,17 +761,32 @@ fn explicit_mirror_routes(
             format!("/curseforge{path}"),
             DownloadRouteSource::Mcim,
         ),
-        "edge.forgecdn.net" if path.starts_with("/files/") => push_mirror(
-            &mut routes,
-            TIANPAO_BASE_URL,
-            path.to_string(),
-            DownloadRouteSource::Tianpao,
-        ),
+        "edge.forgecdn.net" if path.starts_with("/files/") => {
+            push_mirror(
+                &mut routes,
+                TIANPAO_BASE_URL,
+                path.to_string(),
+                DownloadRouteSource::Tianpao,
+            );
+            push_mirror(
+                &mut routes,
+                MCIM_BASE_URL,
+                path.to_string(),
+                DownloadRouteSource::Mcim,
+            );
+        }
         "media.forgecdn.net" => push_mirror(
             &mut routes,
             TIANPAO_BASE_URL,
             format!("/media{path}"),
             DownloadRouteSource::Tianpao,
+        ),
+        // Tianpao has no mirror for this host; MCIM is path-compatible.
+        "mediafilez.forgecdn.net" => push_mirror(
+            &mut routes,
+            MCIM_BASE_URL,
+            path.to_string(),
+            DownloadRouteSource::Mcim,
         ),
         _ => {}
     }
@@ -850,13 +878,10 @@ fn order_auto_routes(
     });
 }
 
-/// Loader Maven repositories that are served mirror-first: their mirrors are
-/// tried before the official repository, which stays available as a final
-/// fallback for content the mirrors have not synced yet.
-fn uses_mirror_first_loader_routes(url: &str, resource: ResourceClass) -> bool {
-    route_policy::uses_mirror_first_loader_routes(url, resource)
-}
-
+/// Routes a request URL into an ordered candidate list: mirrors first or
+/// official first according to the source mode (and, in Automatic mode, the
+/// resource's mirror-first policy), with the official URL always kept as the
+/// final fallback.
 pub fn resolve_download_routes_for(
     url: &str,
     resource: ResourceClass,
@@ -864,17 +889,11 @@ pub fn resolve_download_routes_for(
 ) -> Vec<DownloadRoute> {
     let url = url.to_string();
     let official = official_route(&url, resource);
-    let mirror_first_loader = uses_mirror_first_loader_routes(&url, resource);
     let mut routes = explicit_mirror_routes(&url, resource);
     routes.push(official);
-    // Modrinth API calls are authenticated and remain official-only. CDN
-    // downloads retain their supplied official URL and can fall back to a
-    // health-ranked mirror in Automatic mode.
-    let mode = if is_modrinth_api_url(&url) {
-        crate::state::DownloadSourceMode::OfficialOnly
-    } else {
-        mode
-    };
+    // Authenticated and non-GET Modrinth API calls drop their mirror routes
+    // inside the fetch loop; public calls follow the source mode like
+    // downloads do.
     match mode {
         crate::state::DownloadSourceMode::Auto
             if is_official_version_manifest_url(&url) =>
@@ -882,7 +901,9 @@ pub fn resolve_download_routes_for(
             routes.sort_by_key(|route| route.is_mirror)
         }
         crate::state::DownloadSourceMode::Auto => {
-            order_auto_routes(&mut routes, resource, mirror_first_loader)
+            let force_mirror_first =
+                route_policy::orders_mirrors_first(&url, resource);
+            order_auto_routes(&mut routes, resource, force_mirror_first)
         }
         crate::state::DownloadSourceMode::OfficialOnly => {
             routes.retain(|route| !route.is_mirror);
@@ -2953,16 +2974,46 @@ async fn response_status_error(
 }
 
 /// Extracts the human-readable reason from a YAP host business-error
-/// envelope (`{code, message}` / `{code, message, data}`). Requires a
-/// code-like companion field so plain `{message}` JSON bodies from other
-/// services are left to the generic status error.
+/// envelope (`{code, message}` / `{code, message, data}`) or from the
+/// adapter's authorize-error envelope (`{error, message}`, e.g.
+/// `authorize_failed`). Requires a code-like companion field so plain
+/// `{message}` JSON bodies from other services are left to the generic
+/// status error.
 fn domain_envelope_message(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let message = value.get("message")?.as_str()?;
-    if message.is_empty() || value.get("code").is_none() {
+    if message.is_empty() {
         return None;
     }
-    Some(message.to_string())
+    let has_code = value.get("code").is_some();
+    let has_error_tag = value
+        .get("error")
+        .and_then(|error| error.as_str())
+        .is_some_and(|error| !error.is_empty());
+    if !has_code && !has_error_tag {
+        return None;
+    }
+    Some(nested_envelope_message(message).unwrap_or_else(|| message.to_string()))
+}
+
+/// Adapter authorize failures embed the upstream host's own envelope in the
+/// message text (`开始第三方登录失败：HTTP 400: {"code":1000,"message":…}`);
+/// prefer that inner `message` so the user sees the actual reason instead of
+/// raw JSON. Falls back to the outer text when no inner message exists.
+fn nested_envelope_message(message: &str) -> Option<String> {
+    let start = message.find('{')?;
+    let end = message.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let inner: serde_json::Value =
+        serde_json::from_str(&message[start..=end]).ok()?;
+    let inner_message = inner.get("message")?.as_str()?;
+    if inner_message.is_empty() {
+        None
+    } else {
+        Some(inner_message.to_string())
+    }
 }
 
 pub(crate) async fn finalize_download(
@@ -3833,7 +3884,7 @@ async fn ensure_task_routes_probed(
     order_auto_routes(
         routes,
         request.resource,
-        uses_mirror_first_loader_routes(&request.url, request.resource),
+        route_policy::orders_mirrors_first(&request.url, request.resource),
     );
 }
 
@@ -3857,7 +3908,10 @@ pub(crate) async fn prepare_native_download_routes(
         order_auto_routes(
             routes,
             request.resource,
-            uses_mirror_first_loader_routes(&request.url, request.resource),
+            route_policy::orders_mirrors_first(
+                &request.url,
+                request.resource,
+            ),
         );
     }
 }
@@ -4194,6 +4248,16 @@ async fn download_segment(
             range_end = requested_end,
             "Received download range response"
         );
+        // MCIM's "not in cache" answer is final for this file, so skip the
+        // per-segment retries and let the route fail straight away.
+        if is_mcim_unavailable(route, response.status()) {
+            tracing::warn!(
+                original_url = %sanitize_url_for_log(&route.url),
+                status = response.status().as_u16(),
+                "MCIM mirror does not carry this file; switching source"
+            );
+            return Err(SegmentDownloadError::Transport);
+        }
         if response.status() == StatusCode::OK {
             return Err(SegmentDownloadError::Protocol(
                 "server ignored Range and returned 200",
@@ -5106,6 +5170,12 @@ fn build_download_routes(
     let mut urls = Vec::with_capacity(request.candidate_urls.len() + 1);
     urls.push(request.url.clone());
     urls.extend(request.candidate_urls.iter().cloned());
+    // A known file size above the MCIM cache cap can skip the mirror up
+    // front instead of paying a guaranteed "unavailable" round trip.
+    let mcim_out_of_scope = request
+        .integrity
+        .size
+        .is_some_and(|size| size > MCIM_MAX_CACHED_FILE_SIZE);
     let mut routes = Vec::new();
     for (index, url) in urls.into_iter().enumerate() {
         let mut candidates =
@@ -5119,6 +5189,11 @@ fn build_download_routes(
             }
         }
         for candidate in candidates {
+            if mcim_out_of_scope
+                && candidate.source == DownloadRouteSource::Mcim
+            {
+                continue;
+            }
             if !routes.iter().any(|existing: &DownloadRoute| {
                 existing.url == candidate.url
                     && existing.proxy == candidate.proxy
@@ -6504,6 +6579,110 @@ mod tests {
     }
 
     #[test]
+    fn modrinth_v2_api_mirrors_to_mcim_but_v3_stays_official() {
+        let v2 = resolve_download_routes_for(
+            "https://api.modrinth.com/v2/project/sodium",
+            ResourceClass::Modrinth,
+            crate::state::DownloadSourceMode::MirrorPreferred,
+        );
+        assert_eq!(v2.len(), 2);
+        assert_eq!(v2[0].source, DownloadRouteSource::Mcim);
+        assert_eq!(
+            v2[0].url,
+            "https://mod.mcimirror.top/modrinth/v2/project/sodium"
+        );
+        assert!(!v2[0].allow_sensitive_headers);
+        assert_eq!(v2[1].source, DownloadRouteSource::Official);
+        assert_eq!(v2[1].url, "https://api.modrinth.com/v2/project/sodium");
+
+        let v3 = resolve_download_routes_for(
+            "https://api.modrinth.com/v3/search?query=sodium",
+            ResourceClass::Modrinth,
+            crate::state::DownloadSourceMode::MirrorPreferred,
+        );
+        assert_eq!(v3.len(), 1);
+        assert_eq!(v3[0].source, DownloadRouteSource::Official);
+    }
+
+    #[test]
+    fn modrinth_cdn_and_forgecdn_mirrors_place_mcim_behind_tianpao() {
+        let cdn = resolve_download_routes_for(
+            "https://cdn.modrinth.com/data/AABBCC/versions/1.0/file.jar",
+            ResourceClass::Modrinth,
+            crate::state::DownloadSourceMode::MirrorPreferred,
+        );
+        let sources: Vec<_> = cdn.iter().map(|route| route.source).collect();
+        assert_eq!(
+            sources,
+            vec![
+                DownloadRouteSource::Tianpao,
+                DownloadRouteSource::Mcim,
+                DownloadRouteSource::Official,
+            ]
+        );
+        // MCIM mirrors Modrinth CDN downloads path-identically.
+        assert_eq!(
+            cdn[1].url,
+            "https://mod.mcimirror.top/data/AABBCC/versions/1.0/file.jar"
+        );
+
+        let edge = resolve_download_routes_for(
+            "https://edge.forgecdn.net/files/1234/567/file.jar",
+            ResourceClass::CurseForge,
+            crate::state::DownloadSourceMode::MirrorPreferred,
+        );
+        let sources: Vec<_> = edge.iter().map(|route| route.source).collect();
+        assert_eq!(
+            sources,
+            vec![
+                DownloadRouteSource::Tianpao,
+                DownloadRouteSource::Mcim,
+                DownloadRouteSource::Official,
+            ]
+        );
+
+        let mediafilez = resolve_download_routes_for(
+            "https://mediafilez.forgecdn.net/files/1234/567/file.jar",
+            ResourceClass::CurseForge,
+            crate::state::DownloadSourceMode::MirrorPreferred,
+        );
+        let sources: Vec<_> =
+            mediafilez.iter().map(|route| route.source).collect();
+        assert_eq!(
+            sources,
+            vec![DownloadRouteSource::Mcim, DownloadRouteSource::Official]
+        );
+    }
+
+    #[test]
+    fn mcim_file_routes_are_skipped_for_files_above_its_cache_cap() {
+        let build = |size: Option<u64>| {
+            let integrity = size
+                .map(|size| Integrity::default().with_size(size))
+                .unwrap_or_default();
+            build_download_routes(
+                &DownloadRequest::new(
+                    "https://cdn.modrinth.com/data/AABBCC/versions/1.0/file.jar",
+                    ResourceClass::Modrinth,
+                )
+                .with_integrity(integrity),
+                crate::state::DownloadSourceMode::MirrorPreferred,
+            )
+        };
+
+        assert!(build(Some(1024))
+            .iter()
+            .any(|route| route.source == DownloadRouteSource::Mcim));
+        assert!(!build(Some(21 * 1024 * 1024))
+            .iter()
+            .any(|route| route.source == DownloadRouteSource::Mcim));
+        // Unknown sizes keep the mirror; the 567 fast-fail covers it.
+        assert!(build(None)
+            .iter()
+            .any(|route| route.source == DownloadRouteSource::Mcim));
+    }
+
+    #[test]
     fn cache_busted_urls_preserve_existing_query() {
         assert_eq!(
             cache_busted_download_url(
@@ -6996,7 +7175,18 @@ mod tests {
             ResourceClass::Modrinth,
             crate::state::DownloadSourceMode::Auto,
         );
-        assert_eq!(modrinth_routes[0].source, DownloadRouteSource::Official);
+        // Modrinth content defaults to mirror-first in Automatic mode, and
+        // the recorded Mojang failure must not reorder it.
+        assert_eq!(modrinth_routes[0].source, DownloadRouteSource::Mcim);
+
+        let cdn_routes = resolve_download_routes_for(
+            "https://cdn.modrinth.com/data/AABBCC/versions/1.0/file.jar",
+            ResourceClass::Modrinth,
+            crate::state::DownloadSourceMode::Auto,
+        );
+        assert_eq!(cdn_routes[0].source, DownloadRouteSource::Tianpao);
+        assert_eq!(cdn_routes[1].source, DownloadRouteSource::Mcim);
+        assert_eq!(cdn_routes[2].source, DownloadRouteSource::Official);
 
         *ROUTE_HEALTH.lock() = previous_health;
     }
@@ -8561,6 +8751,44 @@ mod tests {
         assert!(!authority_uses_http1_fallback("other.com:443"));
         H2_FALLBACK_AUTHORITIES.lock().clear();
     }
+
+    #[test]
+    fn domain_envelope_parses_host_code_envelope() {
+        assert_eq!(
+            domain_envelope_message(
+                r#"{"code":1000,"message":"第三方登录提供方不存在","data":null}"#
+            )
+            .as_deref(),
+            Some("第三方登录提供方不存在")
+        );
+    }
+
+    #[test]
+    fn domain_envelope_parses_adapter_error_envelope_and_inner_message() {
+        let body = r#"{"error":"authorize_failed","message":"开始第三方登录失败：HTTP 400: {\"code\":1000,\"message\":\"该提供方未开放此登录方式\",\"data\":null,\"timestamp\":\"1789811692984\"}"}"#;
+        assert_eq!(
+            domain_envelope_message(body).as_deref(),
+            Some("该提供方未开放此登录方式")
+        );
+    }
+
+    #[test]
+    fn domain_envelope_keeps_outer_message_without_inner_json() {
+        assert_eq!(
+            domain_envelope_message(
+                r#"{"error":"authorize_failed","message":"开始第三方登录失败"}"#
+            )
+            .as_deref(),
+            Some("开始第三方登录失败")
+        );
+    }
+
+    #[test]
+    fn plain_message_bodies_stay_generic() {
+        assert_eq!(domain_envelope_message(r#"{"message":"hello"}"#), None);
+        assert_eq!(domain_envelope_message(r#"{"code":1000}"#), None);
+        assert_eq!(domain_envelope_message("not json"), None);
+    }
 }
 enum NativeRouteAttempt {
     Continue,
@@ -8826,7 +9054,7 @@ async fn run_native_route_attempts(
                     | StatusCode::FORBIDDEN
                     | StatusCode::NOT_FOUND
                     | StatusCode::GONE
-            );
+            ) || is_mcim_unavailable(route, status);
             let cooldown_and_switch =
                 status == StatusCode::TOO_MANY_REQUESTS && routes.len() > 1;
             if terminal_status || cooldown_and_switch {

@@ -1035,6 +1035,73 @@ mod tests {
         .unwrap();
         assert_eq!(status, "queued");
     }
+
+    #[tokio::test]
+    async fn stale_failures_are_dismissed_but_recoveries_and_waiting_survive() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE install_jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                modified INTEGER NOT NULL,
+                finished INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let insert = |id: &'static str, status: &'static str, finished: Option<i64>| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query(
+                    "INSERT INTO install_jobs (id, status, dismissed, modified, finished)
+                     VALUES (?, ?, 0, 0, ?)",
+                )
+                .bind(id)
+                .bind(status)
+                .bind(finished)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+        };
+        // Stale: terminal before the cutoff — must be dismissed.
+        insert("old_failed", "failed", Some(100)).await;
+        insert("old_interrupted", "interrupted", Some(100)).await;
+        insert("no_finished_failed", "failed", None).await;
+        // Fresh: finished at the cutoff (this boot's recovery) — must survive.
+        insert("recovered_interrupted", "interrupted", Some(200)).await;
+        // Terminal but not a failure — untouched.
+        insert("old_succeeded", "succeeded", Some(100)).await;
+        // Still awaiting user action — never dismissed, however old.
+        insert("old_waiting", "waiting_for_user", Some(100)).await;
+
+        let dismissed = dismiss_stale_failures_on_pool(200, &pool).await.unwrap();
+        assert_eq!(dismissed, 3);
+
+        let survivors: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM install_jobs WHERE dismissed = 0 ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row: String| row)
+        .collect();
+        assert_eq!(
+            survivors,
+            vec![
+                "old_succeeded".to_string(),
+                "old_waiting".to_string(),
+                "recovered_interrupted".to_string(),
+            ]
+        );
+    }
 }
 
 pub async fn dismiss(id: Uuid, app_state: &State) -> crate::Result<()> {
@@ -1065,6 +1132,38 @@ pub async fn clear_finished(app_state: &State) -> crate::Result<u64> {
     )
     .bind(modified)
     .execute(&app_state.pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Dismisses failures that were already terminal before `before` so startup
+/// notifications only surface the current session's activity: a failure was
+/// already shown when it happened, and `recover_interrupted_jobs` re-stamps
+/// recovered interruptions with a fresh `finished` (this boot), so they
+/// survive this pass and nag exactly once — the boot that recovered them.
+/// `waiting_for_user` jobs are never touched: they still await an action.
+pub async fn dismiss_stale_failures(
+    before: DateTime<Utc>,
+    app_state: &State,
+) -> crate::Result<u64> {
+    dismiss_stale_failures_on_pool(before.timestamp(), &app_state.pool).await
+}
+
+async fn dismiss_stale_failures_on_pool(
+    before: i64,
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<u64> {
+    let modified = Utc::now().timestamp();
+    let result = sqlx::query(
+        "UPDATE install_jobs
+         SET dismissed = 1, modified = ?
+         WHERE dismissed = 0
+           AND status IN ('failed', 'interrupted')
+           AND (finished IS NULL OR finished < ?)",
+    )
+    .bind(modified)
+    .bind(before)
+    .execute(pool)
     .await?;
     Ok(result.rows_affected())
 }

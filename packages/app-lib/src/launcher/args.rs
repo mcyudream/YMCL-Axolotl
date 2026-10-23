@@ -379,7 +379,10 @@ pub async fn get_minecraft_arguments(
     quick_play_version: QuickPlayVersion,
 ) -> crate::Result<Vec<String>> {
     let access_token = credentials.access_token.clone();
-    let user_type = if credentials.is_microsoft() {
+    // MC 1.21.6+ 只为 MSA 类型账户创建档案密钥管理器（UserType 门控），
+    // legacy 账户在 enforce-secure-profile 服务器上聊天会被禁用；
+    // Yggdrasil 账户同样需要聊天签名密钥，与 HMCL/PCL 一致传 msa。
+    let user_type = if credentials.is_microsoft() || credentials.is_yggdrasil() {
         "msa"
     } else {
         "legacy"

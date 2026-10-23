@@ -152,7 +152,9 @@ async function openChangelog() {
 		</div>
 		<Admonition v-else type="info" :body="formatMessage(messages.unknownBody)" />
 
-		<div v-if="announcement?.notes" class="announcement-notes">
+		<!-- 平台 notes 是 changes 的 markdown 序列化：有结构化分类时再渲染
+			 只会重复一遍且 markdown 源码直出，留作无分类公告的兜底正文。 -->
+		<div v-if="announcement?.notes && !categoryRows.length" class="announcement-notes">
 			<h3 class="m-0 mb-2 text-sm font-semibold text-secondary">
 				{{ formatMessage(messages.notes) }}
 			</h3>

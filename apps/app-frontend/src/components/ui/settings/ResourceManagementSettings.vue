@@ -190,27 +190,31 @@ const messages = defineMessages({
 	downloadMirrorsDescription: {
 		id: 'app.settings.resources.download-mirrors-description',
 		defaultMessage:
-			'Automatic mode chooses between official and mirror sources based on your local environment and recent connection quality.',
+			'自动模式：Modrinth 与 CurseForge 优先尝试内置镜像并按列表回退官方源；Minecraft 资源根据连接质量在官方与镜像间选择。',
 	},
 	automaticSource: {
 		id: 'app.settings.resources.source.automatic',
-		defaultMessage: 'Automatic (recommended)',
+		defaultMessage: '自动（推荐）',
+	},
+	automaticMirrorFirstSource: {
+		id: 'app.settings.resources.source.automatic-mirror-first',
+		defaultMessage: '自动（镜像优先，推荐）',
 	},
 	officialPreferredSource: {
 		id: 'app.settings.resources.source.official-preferred',
-		defaultMessage: 'Prefer official sources',
+		defaultMessage: '优先官方源',
 	},
 	officialOnlySource: {
 		id: 'app.settings.resources.source.official-only',
-		defaultMessage: 'Original sources only (no mirrors)',
+		defaultMessage: '仅原始源（不使用镜像）',
 	},
 	openBmclApiSource: {
 		id: 'app.settings.resources.source.open-bmcl-api',
-		defaultMessage: 'Prefer OpenBMCLAPI',
+		defaultMessage: '优先 OpenBMCLAPI',
 	},
-	tianpaoSource: {
-		id: 'app.settings.resources.source.tianpao',
-		defaultMessage: 'Prefer Tianpao',
+	mirrorChainSource: {
+		id: 'app.settings.resources.source.mirror-chain',
+		defaultMessage: '优先镜像（天派 → MCIM）',
 	},
 	minecraftMetadataSource: {
 		id: 'app.settings.resources.minecraft-metadata-source',
@@ -234,7 +238,7 @@ const messages = defineMessages({
 	},
 	modrinthMirrorDescription: {
 		id: 'app.settings.resources.modrinth-mirror-description',
-		defaultMessage: 'Modrinth file downloads.',
+		defaultMessage: 'Modrinth API 请求与文件下载。',
 	},
 	curseforgeMirror: {
 		id: 'app.settings.resources.curseforge-mirror',
@@ -524,6 +528,14 @@ const officialOnlySourceOption = computed(() => ({
 	value: 'official_only',
 	label: formatMessage(messages.officialOnlySource),
 }))
+const automaticMirrorFirstSourceOption = computed(() => ({
+	value: 'auto',
+	label: formatMessage(messages.automaticMirrorFirstSource),
+}))
+const mirrorChainSourceOption = computed(() => ({
+	value: 'mirror_preferred',
+	label: formatMessage(messages.mirrorChainSource),
+}))
 const minecraftSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
@@ -535,15 +547,15 @@ const minecraftDirectoryModeOptions = computed(() => [
 	{ value: 'shared', label: formatMessage(messages.minecraftDirectoryModeShared) },
 ])
 const modrinthSourceOptions = computed(() => [
-	automaticSourceOption.value,
+	automaticMirrorFirstSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
+	mirrorChainSourceOption.value,
 	officialOnlySourceOption.value,
 ])
 const curseforgeSourceOptions = computed(() => [
-	automaticSourceOption.value,
+	automaticMirrorFirstSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
+	mirrorChainSourceOption.value,
 	officialOnlySourceOption.value,
 ])
 const mojangAuthSource = downloadSourceModel('mojang_auth_source')

@@ -47,5 +47,5 @@ pub use util::proxy::{ProxyConfig, ProxyMode, ProxyTestResult};
 pub use util::symlink::SymlinkCapability;
 
 pub fn launcher_user_agent() -> String {
-    brand::user_agent(env!("CARGO_PKG_VERSION"), std::env::consts::OS)
+    brand::user_agent(env!("CARGO_PKG_VERSION"))
 }

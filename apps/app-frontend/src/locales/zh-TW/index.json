@@ -6956,9 +6956,6 @@
   "app.settings.resources.source.open-bmcl-api": {
     "message": "OpenBMCLAPI 鏡像"
   },
-  "app.settings.resources.source.tianpao": {
-    "message": "Tianpao 鏡像"
-  },
   "app.settings.resources.system-downloads-directory": {
     "message": "系統 Downloads 資料夾"
   },

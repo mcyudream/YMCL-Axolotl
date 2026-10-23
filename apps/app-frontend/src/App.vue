@@ -447,7 +447,7 @@ void appVersion
 		console.warn('Failed to read the app version for the Beta label', error)
 	})
 const tauriApiClient = new TauriModrinthClient({
-	userAgent: async () => AxolotlBrandConfig.userAgent(await appVersion, await getOsType()),
+	userAgent: async () => AxolotlBrandConfig.userAgent(await appVersion),
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	features: [
 		...(AxolotlBrandConfig.capabilities.privateModrinthServices
@@ -2301,6 +2301,10 @@ async function handleCommand(e) {
 	}
 	if (e.event === 'OpenDiscovery') {
 		await router.push('/browse/mod')
+		return
+	}
+	if (e.event === 'Nothing') {
+		// 深链回跳（第三方登录 landing）：只需聚焦窗口，无路由动作
 		return
 	}
 	if (offline.value && e.event !== 'LaunchInstance') {

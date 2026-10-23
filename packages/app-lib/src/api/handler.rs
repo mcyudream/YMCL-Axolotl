@@ -93,6 +93,14 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
             }
         };
     }
+    // /auth/external/landing?status=  -   Browser bounce-back from a completed
+    // third-party login: no payload to act on; the deep link just refocuses
+    // the running launcher while the session lands via the poll loop.
+    if let Some(rest) = sublink.strip_prefix("auth/external/landing")
+        && (rest.is_empty() || rest.starts_with('?'))
+    {
+        return Ok(CommandPayload::Nothing);
+    }
     Ok(match sublink.split_once('/') {
         // /mod/{id}   -    Installs a mod of mod id
         Some(("mod", id)) => CommandPayload::InstallMod { id: id.to_string() },

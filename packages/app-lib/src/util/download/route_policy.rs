@@ -25,6 +25,26 @@ pub(crate) fn is_official_version_manifest_url(url: &str) -> bool {
     })
 }
 
+/// Modrinth and CurseForge content defaults to mirror-first in Automatic
+/// mode: the built-in mirrors lead and the official source stays available
+/// as the fallback for files they have not synced.
+pub(crate) fn prefers_mirror_routes(resource: ResourceClass) -> bool {
+    matches!(
+        resource,
+        ResourceClass::Modrinth | ResourceClass::Modpack | ResourceClass::CurseForge
+    )
+}
+
+/// Whether Automatic ordering ranks mirrors ahead of the official source
+/// for this URL and resource class.
+pub(crate) fn orders_mirrors_first(
+    url: &str,
+    resource: ResourceClass,
+) -> bool {
+    uses_mirror_first_loader_routes(url, resource)
+        || prefers_mirror_routes(resource)
+}
+
 /// Loader Maven repositories served mirror-first while retaining an official
 /// fallback for content the mirrors have not synced yet.
 pub(crate) fn uses_mirror_first_loader_routes(

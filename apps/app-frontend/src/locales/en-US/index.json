@@ -7722,7 +7722,7 @@
 		"message": "Download sources"
 	},
 	"app.settings.resources.download-mirrors-description": {
-		"message": "Automatic mode chooses between official and mirror sources based on your local environment and recent connection quality."
+		"message": "In automatic mode, Modrinth and CurseForge try the built-in mirrors first and fall back to the official source; Minecraft resources pick between official and mirror sources based on connection quality."
 	},
 	"app.settings.resources.maximum-downloads": {
 		"message": "Maximum concurrent downloads"
@@ -7782,7 +7782,7 @@
 		"message": "Modrinth"
 	},
 	"app.settings.resources.modrinth-mirror-description": {
-		"message": "Modrinth file downloads."
+		"message": "Modrinth API requests and file downloads."
 	},
 	"app.settings.resources.mojang-auth-service": {
 		"message": "Mojang authentication service"
@@ -7874,6 +7874,12 @@
 	"app.settings.resources.source.automatic": {
 		"message": "Automatic (recommended)"
 	},
+	"app.settings.resources.source.automatic-mirror-first": {
+		"message": "Automatic (mirror-first, recommended)"
+	},
+	"app.settings.resources.source.mirror-chain": {
+		"message": "Prefer mirrors (Tianpao → MCIM)"
+	},
 	"app.settings.resources.source.mojang-mirror-preferred": {
 		"message": "Prefer Fallen-Proxy"
 	},
@@ -7891,9 +7897,6 @@
 	},
 	"app.settings.resources.source.open-bmcl-api": {
 		"message": "Prefer OpenBMCLAPI"
-	},
-	"app.settings.resources.source.tianpao": {
-		"message": "Prefer Tianpao"
 	},
 	"app.settings.resources.system-downloads-directory": {
 		"message": "System Downloads folder"
@@ -9637,6 +9640,15 @@
 	},
 	"app.ymcl.publish.notes-placeholder": {
 		"message": "Players see this when updating, e.g. Added Twilight Forest; fixed crafting table conflicts."
+	},
+	"app.ymcl.publish.min-java-label": {
+		"message": "Minimum Java version"
+	},
+	"app.ymcl.publish.min-java-hint": {
+		"message": "Minimum recommended Java major for players; leave empty to follow the default mapping for the game version."
+	},
+	"app.ymcl.publish.min-java-none": {
+		"message": "Not set"
 	},
 	"app.ymcl.publish.recover-hint": {
 		"message": "These files were excluded earlier and don't appear in the changes above. Checking one re-manages it: it ships with this update and its exclusion rule is removed."

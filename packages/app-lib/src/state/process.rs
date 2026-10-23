@@ -1216,6 +1216,11 @@ impl Process {
             tracing::warn!("Failed to write exit status to log file: {}", e);
         }
 
+        // The direct-connect entry (YAP §6.12) exists only for as long as
+        // the game session: stop the instance's sidecar so the domain
+        // closes the rendezvous session and the node entry with it.
+        crate::api::ymcl::p2p::release_for_instance(&instance_id).await;
+
         if mc_exit_status.success()
             && !manually_killed
             && let Err(error) =

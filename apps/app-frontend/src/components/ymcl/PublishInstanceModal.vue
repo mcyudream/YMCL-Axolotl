@@ -12,6 +12,7 @@ import {
 	Checkbox,
 	Combobox,
 	defineMessages,
+	DropdownSelect,
 	FileTreeSelect,
 	injectNotificationManager,
 	NewModal,
@@ -57,6 +58,18 @@ const messages = defineMessages({
 	recheck: { id: 'app.ymcl.publish.recheck', defaultMessage: '重新检查' },
 	versionLabel: { id: 'app.ymcl.publish.version', defaultMessage: '新版本号' },
 	channelLabel: { id: 'app.ymcl.publish.channel', defaultMessage: '渠道' },
+	minJavaLabel: {
+		id: 'app.ymcl.publish.min-java-label',
+		defaultMessage: '最低 Java 版本',
+	},
+	minJavaHint: {
+		id: 'app.ymcl.publish.min-java-hint',
+		defaultMessage: '推荐玩家使用的最低 Java 大版本；留空则按游戏版本默认映射。',
+	},
+	minJavaNone: {
+		id: 'app.ymcl.publish.min-java-none',
+		defaultMessage: '不设置',
+	},
 	push: { id: 'app.ymcl.publish.push', defaultMessage: '发布更新' },
 	initialMode: {
 		id: 'app.ymcl.publish.initial-mode',
@@ -336,6 +349,16 @@ const checking = ref(false)
 const pushing = ref(false)
 const version = ref('')
 const channel = ref('stable')
+/** 最低 Java 大版本（MIP §3.6 game.java）：空串=不设置（增量时沿用基线）。 */
+const minJava = ref('')
+const minJavaOptions = ['', '8', '11', '16', '17', '21', '25']
+
+// DropdownSelect 把未设置的 modelValue 视为 null，两侧都要兜底成「不设置」。
+function minJavaLabel(value: string | null): string {
+	return value === null || value === ''
+		? formatMessage(messages.minJavaNone)
+		: `Java ${value}+`
+}
 /** 本次发布的更新说明：随 notes 字段上传，玩家更新前可见。 */
 const updateNotes = ref('')
 const servers = ref<MipServerOption[]>([])
@@ -766,12 +789,26 @@ async function loadServers() {
 // filters 为准（与 is_excluded_from_publish 单一来源同步）。
 const FALLBACK_FILTERS: PublishFilters = {
 	top_level: [
+		// 启动器安装的游戏运行时（整份 .minecraft 作为游戏目录时会有数 GB）。
+		'assets',
+		'libraries',
+		'versions',
 		'saves',
 		'logs',
 		'crash-reports',
 		'screenshots',
 		'.pack-staging',
 		'.pack-backup',
+		'.cache',
+		'.mixin.out',
+		'.fabric',
+		'.quilt',
+		'journeymap',
+		'XaeroWorldMap',
+		'XaeroWaypoints',
+		'essential',
+		'recordings',
+		'replay_videos',
 	],
 	file_names: ['.pack-state.json', '.pack-hashes.json'],
 	suffixes: ['log', 'replay'],
@@ -1000,6 +1037,7 @@ async function push() {
 			.filter((rule) => rule.glob.trim())
 			.map((rule) => ({ glob: rule.glob.trim(), policy: rule.policy }))
 		let report: unknown
+		const minJavaValue = minJava.value ? Number(minJava.value) : null
 		if (diff.value?.managed) {
 			report = await invoke('plugin:ymcl|ymcl_publish_push', {
 				instanceId: props.instanceId,
@@ -1013,6 +1051,7 @@ async function push() {
 				// 找回树勾选的路径：随本次下发，并从排除策略移除规则。
 				include: selectedRecoverPaths.value,
 				notes: updateNotes.value.trim() || null,
+				minJava: minJavaValue,
 			})
 		} else {
 			// packId 不传：由启动器生成 `slug-<uuid>`，避免重名冲突。
@@ -1025,6 +1064,7 @@ async function push() {
 				policies: policyPayload,
 				exclude: excludedContentPaths.value,
 				notes: updateNotes.value.trim() || null,
+				minJava: minJavaValue,
 			})
 		}
 		const publishedPackId =
@@ -1506,7 +1546,7 @@ defineExpose({
 							@navigate="onContentNavigate"
 						/>
 					</div>
-						<div class="grid grid-cols-2 gap-4">
+						<div class="grid grid-cols-3 gap-4">
 							<div class="labeled_input w-full">
 								<p class="text-contrast font-semibold">
 									{{ formatMessage(messages.versionLabel) }}
@@ -1518,6 +1558,21 @@ defineExpose({
 									{{ formatMessage(messages.channelLabel) }}
 								</p>
 								<StyledInput v-model="channel" :disabled="pushing" wrapper-class="w-full" />
+							</div>
+							<div class="labeled_input w-full">
+								<p class="text-contrast font-semibold">
+									{{ formatMessage(messages.minJavaLabel) }}
+								</p>
+								<DropdownSelect
+									v-model="minJava"
+									name="publish-min-java"
+									:options="minJavaOptions"
+									:display-name="minJavaLabel"
+									default-value=""
+									:disabled="pushing"
+									auto-placement
+									:title="formatMessage(messages.minJavaHint)"
+								/>
 							</div>
 						</div>
 						<div class="labeled_input w-full">

@@ -216,6 +216,11 @@ interface JoinPreview {
 	optional_target_version?: string | null
 	optional_features?: JoinFeature[]
 	installed?: InstalledPack | null
+	/**
+	 * 直连入口（P2P）就绪时的实际连接地址（sidecar 本地回环口）。
+	 * 域未提供或不可用时为 null，此时仍连公网 mc_address；玩家侧无感。
+	 */
+	launch_address?: string | null
 }
 
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
@@ -446,7 +451,7 @@ async function join() {
 				})
 			})
 		}
-		await run(instanceId, preview.value?.mc_address ?? null)
+		await run(instanceId, preview.value?.launch_address ?? preview.value?.mc_address ?? null)
 		addNotification({
 			title: formatMessage(messages.joined),
 			text: `${preview.value?.server_name || serverId.value}`,

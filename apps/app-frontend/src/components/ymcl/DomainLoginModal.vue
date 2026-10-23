@@ -377,14 +377,14 @@ async function signInWithOauth() {
 	}
 }
 
-async function signInWithExternal(provider: string) {
+async function signInWithExternal(provider: string, loginType?: string) {
 	if (busy.value) return
 	error.value = null
 	notice.value = formatMessage(messages.externalPending)
 	busy.value = true
 	const id = ++attemptId
 	try {
-		const poll = await ymclStore.externalLogin(provider)
+		const poll = await ymclStore.externalLogin(provider, loginType)
 		if (id !== attemptId) return
 		if (poll?.status === 'completed') {
 			await linkYggProfile(id)
@@ -404,6 +404,35 @@ async function signInWithExternal(provider: string) {
 		}
 	}
 }
+
+/** 平台 type code → 展示名；未识别的 code 原样大写展示。 */
+function externalTypeLabel(type: string): string {
+	const labels: Record<string, string> = { qq: 'QQ', wx: '微信', wechat: '微信' }
+	return labels[type.toLowerCase()] ?? type.toUpperCase()
+}
+
+/** 每个 provider 展开成「provider × 平台」按钮列表；types 缺失时退回单按钮。 */
+const externalButtons = computed(() =>
+	externalProviders.value.flatMap((provider) =>
+		provider.types?.length
+			? provider.types.map((type) => ({
+					key: `${provider.code}:${type}`,
+					code: provider.code,
+					type,
+					label: externalTypeLabel(type),
+					icon: provider.icon ?? null,
+				}))
+			: [
+					{
+						key: provider.code,
+						code: provider.code,
+						type: undefined,
+						label: provider.name ?? provider.code,
+						icon: provider.icon ?? null,
+					},
+				],
+	),
+)
 
 defineExpose({ show })
 </script>
@@ -504,17 +533,23 @@ defineExpose({ show })
 					</ButtonStyled>
 				</div>
 
-				<div v-if="mode === 'login' && externalProviders.length" class="flex flex-col gap-2">
+				<div v-if="mode === 'login' && externalButtons.length" class="flex flex-col gap-2">
 					<ButtonStyled
-						v-for="provider in externalProviders"
-						:key="provider.code"
+						v-for="button in externalButtons"
+						:key="button.key"
 						type="standard"
 					>
 						<button
 							:disabled="busy"
-							@click="signInWithExternal(provider.code)"
+							@click="signInWithExternal(button.code, button.type)"
 						>
-							使用 {{ provider.name ?? provider.code }} 登录
+							<img
+								v-if="button.icon"
+								:src="button.icon"
+								alt=""
+								class="h-4 w-4 object-contain"
+							/>
+							使用 {{ button.label }} 登录
 						</button>
 					</ButtonStyled>
 				</div>

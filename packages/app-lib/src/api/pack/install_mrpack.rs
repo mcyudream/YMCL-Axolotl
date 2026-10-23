@@ -968,7 +968,9 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     manifest.push_str(&zip_reader.read_entry_to_string(manifest_idx).await?);
 
     let pack: PackFormat = serde_json::from_str(&manifest)?;
-    if &*pack.game != "minecraft" {
+    // 域适配器合成的 mrpack 曾把 game 写成大写 MINECRAFT，已发布的包无法
+    // 重传，这里只认语义不认大小写。
+    if !pack.game.eq_ignore_ascii_case("minecraft") {
         return Err(crate::ErrorKind::InputError(
             "Pack does not support Minecraft".to_string(),
         )
@@ -2301,7 +2303,7 @@ pub async fn remove_all_related_files(
 
     let pack: PackFormat = serde_json::from_str(&manifest)?;
 
-    if &*pack.game != "minecraft" {
+    if !pack.game.eq_ignore_ascii_case("minecraft") {
         return Err(crate::ErrorKind::InputError(
             "Pack does not support Minecraft".to_string(),
         )

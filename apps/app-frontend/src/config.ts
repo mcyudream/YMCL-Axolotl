@@ -8,7 +8,7 @@ export const AxolotlBrandConfig = Object.freeze({
 	supportUrl: 'https://github.com/mcyudream/YMCL-Axolotl/issues',
 	bundleIdentifier: 'red.ghs.axolotl',
 	deepLinkScheme: 'axolotl',
-	userAgent: (version: string, os: string) => `garbage-human-studio/axolotl/${version} (${os})`,
+	userAgent: (version: string) => `YMCL/${version}`,
 	capabilities: Object.freeze({
 		publicModrinthApi: true,
 		privateModrinthServices: false,

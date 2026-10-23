@@ -1,5 +1,6 @@
 //! Theseus state management system
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
+use chrono::Utc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
@@ -500,6 +501,15 @@ impl State {
             .get_or_try_init(move || Self::initialize_state(app_identifier))
             .await?;
 
+        // Failures from earlier sessions were already surfaced when they
+        // happened; dismissing them first keeps recovery-produced
+        // interruptions (fresh `finished`) as the only startup notifications.
+        if let Err(e) =
+            crate::install::store::dismiss_stale_failures(Utc::now(), state)
+                .await
+        {
+            tracing::error!("Error dismissing stale install failures: {e}");
+        }
         if let Err(e) =
             crate::install::recovery::recover_interrupted_jobs(state).await
         {

@@ -28,6 +28,57 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.5',
+		version: '1.9.7-beta.5',
+		publishedAt: '2026-10-04',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.5',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.5',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'The update announcement page no longer repeats the release notes as raw Markdown text when structured categories are shown.',
+					'zh-CN': '更新公告页在展示结构化分类时不再把发布说明的 Markdown 原文重复罗列一遍。',
+				},
+			],
+		},
+	},
+	{
+		id: 'launcher-1.9.7-beta.4',
+		version: '1.9.7-beta.4',
+		publishedAt: '2026-09-30',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.4',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.4',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed third-party login failing at the final step with a serialization error when the domain host reports token lifetimes as strings.',
+					'zh-CN': '修复第三方登录在最后一步因域主机以字符串下发令牌有效期而报序列化错误的问题。',
+				},
+				{
+					'en-US':
+						'Launcher startup no longer replays every historical download failure as notifications; old failures are cleared and recovered interruptions are shown once.',
+					'zh-CN': '启动器启动不再把历史下载失败全部重弹为通知：旧失败自动清理，强关恢复的中断只提示一次。',
+				},
+				{
+					'en-US':
+						'The minimum Java version selector in the publish dialog now uses the shared dropdown component.',
+					'zh-CN': '发布弹窗的最低 Java 版本选择器改用统一样式的下拉组件。',
+				},
+				{
+					'en-US':
+						'Joining a server no longer fails entirely when the optional vanilla-enhanced pack cannot be resolved; it now falls back to the two-option flow.',
+					'zh-CN': '原版增强包解析失败时进服预览不再整体失败，自动降级为两选一流程。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.1',
 		version: '1.9.7-beta.1',
 		publishedAt: '2026-09-15',

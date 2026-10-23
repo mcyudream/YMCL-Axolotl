@@ -66,7 +66,12 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_publish_initial,
             ymcl_publish_list_versions,
             ymcl_publish_withdraw,
-            ymcl_mip_servers
+            ymcl_mip_servers,
+            ymcl_p2p_status,
+            ymcl_p2p_prepare,
+            ymcl_p2p_session_get,
+            ymcl_p2p_close,
+            ymcl_p2p_release
         ])
         .build()
 }
@@ -149,7 +154,9 @@ pub async fn ymcl_ygg_exchange(
 /// authlib-injector service.
 // invoke('plugin:ymcl|ymcl_ygg_profiles', { domainId })
 #[tauri::command]
-pub async fn ymcl_ygg_profiles(domain_id: String) -> Result<auth::YmclYggProfileList> {
+pub async fn ymcl_ygg_profiles(
+    domain_id: String,
+) -> Result<auth::YmclYggProfileList> {
     Ok(auth::ygg_profiles(&domain_id).await?)
 }
 
@@ -313,14 +320,16 @@ pub async fn ymcl_auth_external_providers(
 }
 
 // Begin a third-party login flow; the frontend opens authorize_url in the browser
-// invoke('plugin:ymcl|ymcl_auth_external_begin', { domainId, provider })
+// invoke('plugin:ymcl|ymcl_auth_external_begin', { domainId, provider, loginType? })
 #[tauri::command]
 pub async fn ymcl_auth_external_begin<R: Runtime>(
     app: tauri::AppHandle<R>,
     domain_id: String,
     provider: String,
+    login_type: Option<String>,
 ) -> Result<YmclExternalFlow> {
-    let flow = auth::external_begin(&domain_id, &provider).await?;
+    let flow =
+        auth::external_begin(&domain_id, &provider, login_type.as_deref()).await?;
     app.opener()
         .open_url(&flow.authorize_url, None::<&str>)
         .map_err(|e| {
@@ -411,10 +420,12 @@ pub async fn ymcl_action_execute(
     action_code: String,
     params: serde_json::Value,
 ) -> Result<serde_json::Value> {
-    Ok(
-        theseus::ymcl::data::execute_action(&provider_code, &action_code, params)
-            .await?,
+    Ok(theseus::ymcl::data::execute_action(
+        &provider_code,
+        &action_code,
+        params,
     )
+    .await?)
 }
 
 // Fetch the domain's current home layout config (home designer)
@@ -434,7 +445,9 @@ pub async fn ymcl_chrome_home_put(config: serde_json::Value) -> Result<()> {
 // Ensure a page's extension bundle is downloaded+verified; return entry path
 // invoke('plugin:ymcl|ymcl_bundle_get', { pageId })
 #[tauri::command]
-pub async fn ymcl_bundle_get(page_id: String) -> Result<theseus::ymcl::bundle::YmclBundleReady> {
+pub async fn ymcl_bundle_get(
+    page_id: String,
+) -> Result<theseus::ymcl::bundle::YmclBundleReady> {
     Ok(theseus::ymcl::bundle::ensure_page_bundle(&page_id).await?)
 }
 
@@ -466,15 +479,13 @@ pub async fn ymcl_skin_equip(
     skin_id: Option<String>,
     cape_id: Option<String>,
 ) -> Result<theseus::ymcl::skins::YmclEquippedState> {
-    Ok(
-        theseus::ymcl::skins::equip(
-            &domain_id,
-            &profile_id,
-            skin_id.as_deref(),
-            cape_id.as_deref(),
-        )
-        .await?,
+    Ok(theseus::ymcl::skins::equip(
+        &domain_id,
+        &profile_id,
+        skin_id.as_deref(),
+        cape_id.as_deref(),
     )
+    .await?)
 }
 
 // Upload a skin PNG (base64 data) into a domain profile's wardrobe
@@ -488,17 +499,15 @@ pub async fn ymcl_skin_upload(
     filename: String,
     data: String,
 ) -> Result<theseus::ymcl::skins::YmclSkinUploadResult> {
-    Ok(
-        theseus::ymcl::skins::upload_skin(
-            &domain_id,
-            &profile_id,
-            name.as_deref(),
-            &model,
-            &filename,
-            &data,
-        )
-        .await?,
+    Ok(theseus::ymcl::skins::upload_skin(
+        &domain_id,
+        &profile_id,
+        name.as_deref(),
+        &model,
+        &filename,
+        &data,
     )
+    .await?)
 }
 
 // Upload a cape PNG (base64 data) into a domain profile's wardrobe
@@ -559,7 +568,10 @@ pub async fn ymcl_skin_delete(
     profile_id: String,
     skin_id: String,
 ) -> Result<()> {
-    Ok(theseus::ymcl::skins::delete_skin(&domain_id, &profile_id, &skin_id).await?)
+    Ok(
+        theseus::ymcl::skins::delete_skin(&domain_id, &profile_id, &skin_id)
+            .await?,
+    )
 }
 
 // Fetch a page of the domain's public skin library
@@ -582,15 +594,13 @@ pub async fn ymcl_skin_collect(
     hash: String,
     name: Option<String>,
 ) -> Result<theseus::ymcl::skins::YmclSkinUploadResult> {
-    Ok(
-        theseus::ymcl::skins::collect(
-            &domain_id,
-            &profile_id,
-            &hash,
-            name.as_deref(),
-        )
-        .await?,
+    Ok(theseus::ymcl::skins::collect(
+        &domain_id,
+        &profile_id,
+        &hash,
+        name.as_deref(),
     )
+    .await?)
 }
 
 // Download a texture URL (cape PNGs) as a data URL, with no skin-format
@@ -626,7 +636,8 @@ pub async fn ymcl_pre_launch_check(
 pub async fn ymcl_pack_apply_update(
     instance_id: String,
 ) -> Result<theseus::ymcl::mip::update::YmclUpdateResult> {
-    let check = theseus::ymcl::mip::update::check_instance(&instance_id, true).await?;
+    let check =
+        theseus::ymcl::mip::update::check_instance(&instance_id, true).await?;
     Ok(theseus::ymcl::mip::update::YmclUpdateResult {
         applied: check
             .pending_changes
@@ -670,24 +681,24 @@ pub async fn ymcl_publish_push(
     exclude: Option<Vec<String>>,
     include: Option<Vec<String>>,
     notes: Option<String>,
+    min_java: Option<u32>,
 ) -> Result<serde_json::Value> {
-    Ok(
-        theseus::ymcl::mip::publish::push_delta(
-            &instance_id,
-            &version,
-            channel.as_deref(),
-            bind,
-            features.unwrap_or_default(),
-            policies.unwrap_or_default(),
-            exclude.unwrap_or_default(),
-            include.unwrap_or_default(),
-            notes.as_deref(),
-        )
-        .await?,
+    Ok(theseus::ymcl::mip::publish::push_delta(
+        &instance_id,
+        &version,
+        channel.as_deref(),
+        bind,
+        features.unwrap_or_default(),
+        policies.unwrap_or_default(),
+        exclude.unwrap_or_default(),
+        include.unwrap_or_default(),
+        notes.as_deref(),
+        min_java,
     )
+    .await?)
 }
 
-// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude?, notes? })
+// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude?, notes?, minJava? })
 // packId omitted → the launcher generates a unique `slug-<uuid>` id.
 #[tauri::command]
 pub async fn ymcl_publish_initial(
@@ -700,21 +711,21 @@ pub async fn ymcl_publish_initial(
     policies: Option<Vec<theseus::ymcl::mip::publish::PublishPolicyInput>>,
     exclude: Option<Vec<String>>,
     notes: Option<String>,
+    min_java: Option<u32>,
 ) -> Result<serde_json::Value> {
-    Ok(
-        theseus::ymcl::mip::publish::push_initial(
-            &instance_id,
-            pack_id.as_deref(),
-            &version,
-            channel.as_deref(),
-            bind,
-            features.unwrap_or_default(),
-            policies.unwrap_or_default(),
-            exclude.unwrap_or_default(),
-            notes.as_deref(),
-        )
-        .await?,
+    Ok(theseus::ymcl::mip::publish::push_initial(
+        &instance_id,
+        pack_id.as_deref(),
+        &version,
+        channel.as_deref(),
+        bind,
+        features.unwrap_or_default(),
+        policies.unwrap_or_default(),
+        exclude.unwrap_or_default(),
+        notes.as_deref(),
+        min_java,
     )
+    .await?)
 }
 
 // invoke('plugin:ymcl|ymcl_publish_list_versions', { instanceId })
@@ -722,7 +733,10 @@ pub async fn ymcl_publish_initial(
 pub async fn ymcl_publish_list_versions(
     instance_id: String,
 ) -> Result<Vec<theseus::ymcl::mip::publish::PackVersionInfo>> {
-    Ok(theseus::ymcl::mip::publish::list_instance_versions(&instance_id).await?)
+    Ok(
+        theseus::ymcl::mip::publish::list_instance_versions(&instance_id)
+            .await?,
+    )
 }
 
 // invoke('plugin:ymcl|ymcl_publish_withdraw', { instanceId, version })
@@ -760,14 +774,10 @@ pub async fn ymcl_pack_mrpack_download(
     pack_id: Option<String>,
     selected: Vec<String>,
 ) -> Result<theseus::ymcl::mip::first_install::YmclMrpackDownload> {
-    Ok(
-        theseus::ymcl::mip::first_install::download_pack_mrpack(
-            &server_id,
-            pack_id,
-            selected,
-        )
-        .await?,
+    Ok(theseus::ymcl::mip::first_install::download_pack_mrpack(
+        &server_id, pack_id, selected,
     )
+    .await?)
 }
 
 // WF-4 first install step 2: adopt MIP state after the mrpack import settles
@@ -783,18 +793,16 @@ pub async fn ymcl_pack_adopt_state(
     selected: Vec<String>,
     force: Option<bool>,
 ) -> Result<()> {
-    Ok(
-        theseus::ymcl::mip::first_install::adopt_pack_state(
-            &instance_id,
-            &server_id,
-            &pack_id,
-            &version,
-            channel,
-            selected,
-            force.unwrap_or(false),
-        )
-        .await?,
+    Ok(theseus::ymcl::mip::first_install::adopt_pack_state(
+        &instance_id,
+        &server_id,
+        &pack_id,
+        &version,
+        channel,
+        selected,
+        force.unwrap_or(false),
     )
+    .await?)
 }
 
 // Feature catalog + current selection for a MIP-managed instance
@@ -813,11 +821,66 @@ pub async fn ymcl_pack_set_features(
     instance_id: String,
     selected: Vec<String>,
 ) -> Result<theseus::ymcl::mip::update::YmclUpdateResult> {
-    Ok(theseus::ymcl::mip::update::set_features(&instance_id, selected).await?)
+    Ok(
+        theseus::ymcl::mip::update::set_features(&instance_id, selected)
+            .await?,
+    )
 }
 
 // invoke('plugin:ymcl|ymcl_mip_servers')
 #[tauri::command]
-pub async fn ymcl_mip_servers() -> Result<Vec<theseus::ymcl::mip::update::MipServerBinding>> {
+pub async fn ymcl_mip_servers()
+-> Result<Vec<theseus::ymcl::mip::update::MipServerBinding>> {
     Ok(theseus::ymcl::mip::publish::list_servers().await?)
+}
+
+// Player-invisible status of the direct-connect entry (YAP §6.12): capability
+// gate + the loopback endpoint a running sidecar holds for the instance
+// invoke('plugin:ymcl|ymcl_p2p_status', { instanceId })
+#[tauri::command]
+pub async fn ymcl_p2p_status(
+    instance_id: String,
+) -> Result<theseus::ymcl::p2p::P2pStatus> {
+    Ok(theseus::ymcl::p2p::status_for_instance(&instance_id).await)
+}
+
+// Loopback endpoint for joining this instance's server through the sidecar,
+// starting one when needed; None keeps the server's public address
+// invoke('plugin:ymcl|ymcl_p2p_prepare', { instanceId })
+#[tauri::command]
+pub async fn ymcl_p2p_prepare(
+    instance_id: String,
+) -> Result<Option<theseus::ymcl::p2p::LocalEndpoint>> {
+    Ok(theseus::ymcl::p2p::launch_endpoint(&instance_id).await)
+}
+
+// Rendezvous session state (diagnostics)
+// invoke('plugin:ymcl|ymcl_p2p_session_get', { sessionId })
+#[tauri::command]
+pub async fn ymcl_p2p_session_get(
+    session_id: String,
+) -> Result<theseus::ymcl::p2p::P2pSession> {
+    Ok(theseus::ymcl::p2p::session_status(&session_id).await?)
+}
+
+// Close a rendezvous session (backstop for a sidecar that died uncleanly)
+// invoke('plugin:ymcl|ymcl_p2p_close', { sessionId, reason? })
+#[tauri::command]
+pub async fn ymcl_p2p_close(
+    session_id: String,
+    reason: Option<String>,
+) -> Result<()> {
+    Ok(theseus::ymcl::p2p::close_session(
+        &session_id,
+        reason.as_deref().unwrap_or("launcher request"),
+    )
+    .await?)
+}
+
+// Stop the sidecar of an instance; the game itself releases it on exit
+// invoke('plugin:ymcl|ymcl_p2p_release', { instanceId })
+#[tauri::command]
+pub async fn ymcl_p2p_release(instance_id: String) -> Result<()> {
+    theseus::ymcl::p2p::release_for_instance(&instance_id).await;
+    Ok(())
 }

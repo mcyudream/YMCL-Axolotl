@@ -75,6 +75,11 @@ pub struct YmclCapabilities {
     /// contains `skins`; `base_url` defaults to `{YAP_API_BASE}/skins`.
     #[serde(default)]
     pub skins: Option<SkinsEndpointConfig>,
+    /// Direct-connect rendezvous face (YAP §6.12). Present when
+    /// `capabilities` contains `p2p`; the launcher then joins a domain
+    /// server through a loopback sidecar instead of its public address.
+    #[serde(default)]
+    pub p2p: Option<P2pEndpointConfig>,
 }
 
 /// MIP distribution face advertised by the adapter (YAP §7).
@@ -89,6 +94,16 @@ pub struct MipEndpointConfig {
 pub struct SkinsEndpointConfig {
     #[serde(default)]
     pub base_url: Option<String>,
+}
+
+/// Direct-connect face advertised by the adapter (YAP §6.12). `session_url`
+/// points at the rendezvous endpoints; the sibling paths (`/session/signal`)
+/// are derived from it. Absent `session_url` falls back to
+/// `{YAP_API_BASE}/p2p/session`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct P2pEndpointConfig {
+    #[serde(default)]
+    pub session_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -168,6 +183,18 @@ pub fn capabilities_url(origin: &str) -> String {
 
 pub fn manifest_url(origin: &str) -> String {
     format!("{origin}{YAP_API_BASE}/manifest")
+}
+
+/// Rendezvous session endpoint (YAP §6.12). Derived from the advertised
+/// `session_url` when present so an adapter may host the face elsewhere.
+pub fn p2p_session_url(origin: &str, configured: Option<&str>) -> String {
+    match configured.map(str::trim).filter(|url| !url.is_empty()) {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => format!(
+            "{}{YAP_API_BASE}/p2p/session",
+            origin.trim_end_matches('/')
+        ),
+    }
 }
 
 /// Adapters must serve the major version the launcher understands; minor

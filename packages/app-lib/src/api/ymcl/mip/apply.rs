@@ -24,7 +24,7 @@ use crate::event::emit::{emit_loading, init_loading};
 
 use super::diff::{ChangeAction, UpdatePlan};
 use super::manifest::{MipFileEntry, MipManifest};
-use super::state::MipPackState;
+use super::state::{MipJavaConstraint, MipPackState};
 
 pub const STAGING_DIR_NAME: &str = ".pack-staging";
 pub const BACKUP_DIR_NAME: &str = ".pack-backup";
@@ -619,6 +619,13 @@ fn build_new_state(
         // The admin's publish selection survives updates applied from the
         // domain, so excluded files don't resurface in the next delta.
         publish_profile: base.publish_profile.clone(),
+        // MIP §3.6：java 约束随版本更新重新评估；适配器读路径已把包级绑定
+        // 注入 manifest，这里取到的即有效约束。
+        java: target
+            .game
+            .as_ref()
+            .and_then(|game| game.java.as_ref())
+            .and_then(MipJavaConstraint::from_manifest_value),
     }
 }
 

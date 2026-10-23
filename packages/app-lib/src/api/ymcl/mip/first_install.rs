@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use super::manifest::MipManifest;
-use super::state::{self, MipInstanceBinding, MipPackState, StateFile};
+use super::state::{self, MipInstanceBinding, MipJavaConstraint, MipPackState, StateFile};
 use super::update::{
     MipServerBinding, MipServerEndpoint, MipVersionEntry, fetch_json,
     manifest_url, resolve_mip_base, resolve_target_version, servers_url,
@@ -84,7 +84,10 @@ fn is_not_found(error: &crate::Error) -> bool {
 /// Manifests of one pack by version. Production reads them from the domain
 /// (authenticated MIP face); tests use an in-memory map.
 trait ManifestSource {
-    fn fetch(&self, version: &str) -> impl std::future::Future<Output = crate::Result<MipManifest>> + Send;
+    fn fetch(
+        &self,
+        version: &str,
+    ) -> impl std::future::Future<Output = crate::Result<MipManifest>> + Send;
 }
 
 /// mrpack archives of one pack by version. A 404 surfaces as `Err` and
@@ -105,9 +108,11 @@ struct DomainManifestSource<'a> {
 
 impl ManifestSource for DomainManifestSource<'_> {
     async fn fetch(&self, version: &str) -> crate::Result<MipManifest> {
-        let value =
-            fetch_json(self.state, &manifest_url(self.mip_base, self.pack_id, version))
-                .await?;
+        let value = fetch_json(
+            self.state,
+            &manifest_url(self.mip_base, self.pack_id, version),
+        )
+        .await?;
         let manifest: MipManifest = serde_json::from_value(value)?;
         manifest.validate()?;
         Ok(manifest)
@@ -130,7 +135,8 @@ fn mrpack_url(
     version: &str,
     features: &[String],
 ) -> String {
-    let mut url = format!("{mip_base}/api/packs/{pack_id}/versions/{version}/mrpack");
+    let mut url =
+        format!("{mip_base}/api/packs/{pack_id}/versions/{version}/mrpack");
     if !features.is_empty() {
         let features = features
             .iter()
@@ -215,8 +221,11 @@ async fn baseline_mrpack<S: MrpackSource>(
     selected: &[String],
 ) -> crate::Result<Option<(String, Vec<u8>)>> {
     for manifest in chain {
-        let declared: HashSet<&str> =
-            manifest.features.iter().map(|feature| feature.id.as_str()).collect();
+        let declared: HashSet<&str> = manifest
+            .features
+            .iter()
+            .map(|feature| feature.id.as_str())
+            .collect();
         let features: Vec<String> = selected
             .iter()
             .filter(|id| declared.contains(id.as_str()))
@@ -240,10 +249,10 @@ async fn resolve_mrpack_target(
     pack_id: Option<&str>,
 ) -> crate::Result<MrpackTarget> {
     let Some(mip_base) = resolve_mip_base(state).await? else {
-        return Err(
-            crate::ErrorKind::OtherError("请先在顶栏选择一个域".to_string())
-                .into(),
-        );
+        return Err(crate::ErrorKind::OtherError(
+            "请先在顶栏选择一个域".to_string(),
+        )
+        .into());
     };
     let servers_value = fetch_json(state, &servers_url(&mip_base)).await?;
     let servers: Vec<MipServerBinding> = serde_json::from_value(
@@ -252,9 +261,8 @@ async fn resolve_mrpack_target(
             .cloned()
             .unwrap_or(serde_json::Value::Array(vec![])),
     )?;
-    let Some(server) = servers
-        .iter()
-        .find(|server| server.server_id == server_id)
+    let Some(server) =
+        servers.iter().find(|server| server.server_id == server_id)
     else {
         return Err(
             crate::ErrorKind::OtherError("未找到该服务器".to_string()).into()
@@ -361,7 +369,10 @@ pub async fn download_pack_mrpack(
         bar: bar.as_ref(),
     };
 
-    let (installed_version, bytes) = match mrpack.fetch(&target.version, &selected).await {
+    let (installed_version, bytes) = match mrpack
+        .fetch(&target.version, &selected)
+        .await
+    {
         Ok(bytes) => (target.version.clone(), bytes),
         Err(error) if is_not_found(&error) => {
             // Delta-only target: walk the parent chain to the nearest full
@@ -451,10 +462,10 @@ pub async fn adopt_pack_state(
         .into());
     }
     let Some(mip_base) = resolve_mip_base(&state).await? else {
-        return Err(
-            crate::ErrorKind::OtherError("请先在顶栏选择一个域".to_string())
-                .into(),
-        );
+        return Err(crate::ErrorKind::OtherError(
+            "请先在顶栏选择一个域".to_string(),
+        )
+        .into());
     };
     let manifest_value =
         fetch_json(&state, &manifest_url(&mip_base, pack_id, version)).await?;
@@ -463,8 +474,11 @@ pub async fn adopt_pack_state(
     // 勾选面向的是目标版本的特性目录；装基线 mrpack 时里面可能有本版本
     // 尚未声明的特性。过滤到本版本已声明的集合——多出来的那份等增量追平
     // 时由 default 合并补齐。
-    let declared: HashSet<&str> =
-        manifest.features.iter().map(|feature| feature.id.as_str()).collect();
+    let declared: HashSet<&str> = manifest
+        .features
+        .iter()
+        .map(|feature| feature.id.as_str())
+        .collect();
     let selected: Vec<String> = selected
         .into_iter()
         .filter(|id| declared.contains(id.as_str()))
@@ -514,6 +528,12 @@ pub async fn adopt_pack_state(
                 .collect(),
         ),
         files,
+        // MIP §3.6：采纳 manifest 的有效 java 约束（含适配器注入的包级绑定）。
+        java: manifest
+            .game
+            .as_ref()
+            .and_then(|game| game.java.as_ref())
+            .and_then(MipJavaConstraint::from_manifest_value),
         ..MipPackState::default()
     };
     // 记录来源服务器/赛季（YAP §7 绑定语义）。服务器查询失败不阻断安装收尾：
@@ -534,7 +554,9 @@ pub async fn adopt_pack_state(
     }
     .await
     .unwrap_or_else(|error| {
-        tracing::warn!("MIP adopt: server lookup failed for {server_id}: {error}");
+        tracing::warn!(
+            "MIP adopt: server lookup failed for {server_id}: {error}"
+        );
         None
     });
     pack_state.binding = Some(MipInstanceBinding {
@@ -551,7 +573,8 @@ pub async fn adopt_pack_state(
     if let Some(server) = &bound_server {
         let server_name = server.name.clone().filter(|name| !name.is_empty());
         for address in server_join_addresses(server) {
-            let entry_name = server_name.clone().unwrap_or_else(|| address.clone());
+            let entry_name =
+                server_name.clone().unwrap_or_else(|| address.clone());
             match crate::api::worlds::ensure_server_in_instance(
                 instance_id,
                 entry_name,
@@ -703,19 +726,27 @@ mod tests {
     async fn baseline_walk_picks_nearest_ancestor_with_mrpack() {
         let mut chain_manifests = HashMap::new();
         chain_manifests.insert("1.0.0".to_string(), manifest("1.0.0", None));
-        chain_manifests.insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
+        chain_manifests
+            .insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
         let target = manifest("1.2.0", Some("1.1.0"));
 
-        let chain = parent_chain(&target, &MemoryManifests { manifests: chain_manifests })
-            .await
-            .unwrap();
+        let chain = parent_chain(
+            &target,
+            &MemoryManifests {
+                manifests: chain_manifests,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(
             chain.iter().map(|m| m.version.as_str()).collect::<Vec<_>>(),
             vec!["1.1.0", "1.0.0"]
         );
 
         // 1.1.0 (nearest) has no mrpack either; the root 1.0.0 does.
-        let source = MemoryMrpack { full_versions: vec!["1.0.0"] };
+        let source = MemoryMrpack {
+            full_versions: vec!["1.0.0"],
+        };
         let (baseline, bytes) = baseline_mrpack(&chain, &source, &[])
             .await
             .unwrap()
@@ -729,24 +760,42 @@ mod tests {
         let mut chain_manifests = HashMap::new();
         chain_manifests.insert("1.0.0".to_string(), manifest("1.0.0", None));
         let target = manifest("1.1.0", Some("1.0.0"));
-        let chain = parent_chain(&target, &MemoryManifests { manifests: chain_manifests })
-            .await
-            .unwrap();
+        let chain = parent_chain(
+            &target,
+            &MemoryManifests {
+                manifests: chain_manifests,
+            },
+        )
+        .await
+        .unwrap();
 
-        let source = MemoryMrpack { full_versions: vec![] };
-        assert!(baseline_mrpack(&chain, &source, &[]).await.unwrap().is_none());
+        let source = MemoryMrpack {
+            full_versions: vec![],
+        };
+        assert!(
+            baseline_mrpack(&chain, &source, &[])
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn broken_parent_link_ends_the_walk_without_failing() {
         // 1.1.0 declares parent 1.0.0 whose manifest is gone (withdrawn).
         let mut chain_manifests = HashMap::new();
-        chain_manifests.insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
+        chain_manifests
+            .insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
         let target = manifest("1.2.0", Some("1.1.0"));
 
-        let chain = parent_chain(&target, &MemoryManifests { manifests: chain_manifests })
-            .await
-            .unwrap();
+        let chain = parent_chain(
+            &target,
+            &MemoryManifests {
+                manifests: chain_manifests,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].version, "1.1.0");
     }
@@ -755,7 +804,10 @@ mod tests {
     async fn transport_errors_fail_the_walk_loudly() {
         struct FailingSource;
         impl ManifestSource for FailingSource {
-            async fn fetch(&self, _version: &str) -> crate::Result<MipManifest> {
+            async fn fetch(
+                &self,
+                _version: &str,
+            ) -> crate::Result<MipManifest> {
                 Err(other_error())
             }
         }
@@ -768,13 +820,20 @@ mod tests {
     async fn parent_cycles_are_cut_off() {
         // 1.0.0 → 1.1.0 → 1.0.0 → …: the walk must terminate.
         let mut chain_manifests = HashMap::new();
-        chain_manifests.insert("1.0.0".to_string(), manifest("1.0.0", Some("1.1.0")));
-        chain_manifests.insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
+        chain_manifests
+            .insert("1.0.0".to_string(), manifest("1.0.0", Some("1.1.0")));
+        chain_manifests
+            .insert("1.1.0".to_string(), manifest("1.1.0", Some("1.0.0")));
         let target = manifest("1.2.0", Some("1.1.0"));
 
-        let chain = parent_chain(&target, &MemoryManifests { manifests: chain_manifests })
-            .await
-            .unwrap();
+        let chain = parent_chain(
+            &target,
+            &MemoryManifests {
+                manifests: chain_manifests,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(chain.len(), 2);
     }
 
@@ -803,7 +862,9 @@ mod tests {
             }
         }
 
-        let source = RecordingSource { seen: std::sync::Mutex::new(Vec::new()) };
+        let source = RecordingSource {
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
         baseline_mrpack(
             &chain,
             &source,
@@ -824,15 +885,20 @@ mod tests {
     fn only_404_counts_as_missing_mrpack() {
         assert!(is_not_found(&not_found_error()));
         assert!(!is_not_found(&other_error()));
-        assert!(!is_not_found(&crate::ErrorKind::HttpError {
-            status: 400,
-            method: "GET".to_string(),
-            url: "test://mip".to_string(),
-        }
-        .into()));
+        assert!(!is_not_found(
+            &crate::ErrorKind::HttpError {
+                status: 400,
+                method: "GET".to_string(),
+                url: "test://mip".to_string(),
+            }
+            .into()
+        ));
     }
 
-    fn join_server(mc_address: Option<&str>, endpoints: Vec<MipServerEndpoint>) -> MipServerBinding {
+    fn join_server(
+        mc_address: Option<&str>,
+        endpoints: Vec<MipServerEndpoint>,
+    ) -> MipServerBinding {
         MipServerBinding {
             server_id: "srv".to_string(),
             name: None,
@@ -841,10 +907,15 @@ mod tests {
             mc_address: mc_address.map(str::to_string),
             endpoints: (!endpoints.is_empty()).then_some(endpoints),
             current_season: None,
+            p2p_instance_id: None,
         }
     }
 
-    fn endpoint(address: &str, primary: bool, edition: Option<&str>) -> MipServerEndpoint {
+    fn endpoint(
+        address: &str,
+        primary: bool,
+        edition: Option<&str>,
+    ) -> MipServerEndpoint {
         MipServerEndpoint {
             address: Some(address.to_string()),
             primary: Some(primary),
@@ -896,10 +967,7 @@ mod tests {
             Some("main.example.org"),
             vec![endpoint("   ", true, None)],
         );
-        assert_eq!(
-            server_join_addresses(&empty),
-            vec!["main.example.org"]
-        );
+        assert_eq!(server_join_addresses(&empty), vec!["main.example.org"]);
     }
 
     #[test]

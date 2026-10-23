@@ -345,6 +345,10 @@ export interface YmclStoredSession {
 export interface YmclExternalProvider {
 	code: string
 	name?: string | null
+	/** 登录平台列表（如 ["qq","wx"]）；旧版适配器无此字段时为空 */
+	types?: string[]
+	/** 提供方图标 URL（插件 SPI 提供方可能带） */
+	icon?: string | null
 }
 
 export interface YmclExternalFlow {
@@ -548,8 +552,12 @@ export const ymcl = {
 		invoke<string | null>('plugin:ymcl|ymcl_ygg_root', { domainId }),
 	externalProviders: (domainId: string) =>
 		invoke<YmclExternalProvider[]>('plugin:ymcl|ymcl_auth_external_providers', { domainId }),
-	externalBegin: (domainId: string, provider: string) =>
-		invoke<YmclExternalFlow>('plugin:ymcl|ymcl_auth_external_begin', { domainId, provider }),
+	externalBegin: (domainId: string, provider: string, loginType?: string) =>
+		invoke<YmclExternalFlow>('plugin:ymcl|ymcl_auth_external_begin', {
+			domainId,
+			provider,
+			...(loginType ? { loginType } : {}),
+		}),
 	externalPoll: (domainId: string, provider: string, flowId: string) =>
 		invoke<YmclExternalPoll>('plugin:ymcl|ymcl_auth_external_poll', {
 			domainId,

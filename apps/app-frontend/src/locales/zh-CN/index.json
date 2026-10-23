@@ -7724,7 +7724,7 @@
 		"message": "下载源"
 	},
 	"app.settings.resources.download-mirrors-description": {
-		"message": "自动模式会根据本地环境和近期连接质量，在官方源与镜像源之间选择。"
+		"message": "自动模式：Modrinth 与 CurseForge 优先尝试内置镜像并按列表回退官方源；Minecraft 资源根据连接质量在官方与镜像间选择。"
 	},
 	"app.settings.resources.maximum-downloads": {
 		"message": "最大并发下载数"
@@ -7784,7 +7784,7 @@
 		"message": "Modrinth"
 	},
 	"app.settings.resources.modrinth-mirror-description": {
-		"message": "Modrinth 文件下载。"
+		"message": "Modrinth API 请求与文件下载。"
 	},
 	"app.settings.resources.mojang-auth-service": {
 		"message": "Mojang 认证服务"
@@ -7876,6 +7876,12 @@
 	"app.settings.resources.source.automatic": {
 		"message": "自动（推荐）"
 	},
+	"app.settings.resources.source.automatic-mirror-first": {
+		"message": "自动（镜像优先，推荐）"
+	},
+	"app.settings.resources.source.mirror-chain": {
+		"message": "优先镜像（天派 → MCIM）"
+	},
 	"app.settings.resources.source.mojang-mirror-preferred": {
 		"message": "优先 Fallen Proxy"
 	},
@@ -7893,9 +7899,6 @@
 	},
 	"app.settings.resources.source.open-bmcl-api": {
 		"message": "优先 OpenBMCLAPI"
-	},
-	"app.settings.resources.source.tianpao": {
-		"message": "优先 Tianpao"
 	},
 	"app.settings.resources.system-downloads-directory": {
 		"message": "系统 Downloads 文件夹"
@@ -9654,6 +9657,15 @@
 	},
 	"app.ymcl.publish.notes-placeholder": {
 		"message": "玩家更新时会看到这段说明，例如：新增暮色森林模组；修复合成表冲突。"
+	},
+	"app.ymcl.publish.min-java-label": {
+		"message": "最低 Java 版本"
+	},
+	"app.ymcl.publish.min-java-hint": {
+		"message": "推荐玩家使用的最低 Java 大版本；留空则按游戏版本默认映射。"
+	},
+	"app.ymcl.publish.min-java-none": {
+		"message": "不设置"
 	},
 	"app.ymcl.publish.recover-hint": {
 		"message": "这些文件此前被排除，不会出现在上方变更里。勾选即重新纳管：随本次更新下发，对应排除规则移除。"

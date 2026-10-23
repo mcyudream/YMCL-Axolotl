@@ -44,8 +44,24 @@ pub fn external_providers_url(origin: &str) -> String {
     format!("{origin}{YAP_API_BASE}/auth/external/providers")
 }
 
-pub fn external_begin_url(origin: &str, provider: &str) -> String {
-    format!("{origin}{YAP_API_BASE}/auth/external/{provider}/begin")
+pub fn external_begin_url(
+    origin: &str,
+    provider: &str,
+    login_type: Option<&str>,
+) -> String {
+    let base = format!("{origin}{YAP_API_BASE}/auth/external/{provider}/begin");
+    match login_type.map(str::trim) {
+        // Type values come from the provider's own list (qq/wx); only simple
+        // tokens are forwarded so no percent-encoding is needed.
+        Some(t)
+            if !t.is_empty()
+                && t.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') =>
+        {
+            format!("{base}?type={t}")
+        }
+        _ => base,
+    }
 }
 
 pub fn external_poll_url(
@@ -627,6 +643,13 @@ pub struct YmclExternalProvider {
     pub code: String,
     #[serde(default)]
     pub name: Option<String>,
+    /// Login platforms the provider supports (e.g. `["qq","wx"]`); empty when
+    /// the adapter predates the field — then the provider is one entry.
+    #[serde(default)]
+    pub types: Vec<String>,
+    /// Provider icon URL (plugin SPI providers may contribute one).
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 pub async fn external_providers(
@@ -664,12 +687,13 @@ pub struct YmclExternalFlow {
 pub async fn external_begin(
     domain_id: &str,
     provider: &str,
+    login_type: Option<&str>,
 ) -> crate::Result<YmclExternalFlow> {
     let state = State::get().await?;
     let origin = super::registry::domain_origin(domain_id).await?;
     let bytes = fetch_advanced(
         Method::GET,
-        &external_begin_url(&origin, provider),
+        &external_begin_url(&origin, provider, login_type),
         None,
         None,
         None,
@@ -690,7 +714,9 @@ pub struct YmclExternalPoll {
     pub access_token: Option<String>,
     #[serde(default)]
     pub refresh_token: Option<String>,
-    #[serde(default)]
+    // The host's Jackson config serializes every Long as a JSON string, so
+    // the adapter's `expires_in` lands quoted ("7200"); accept both shapes.
+    #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
     pub expires_in: Option<i64>,
 }
 
@@ -1639,5 +1665,52 @@ mod session_renewal_tests {
         let local: crate::Error =
             crate::ErrorKind::OtherError("disk full".to_string()).into();
         assert!(!is_host_auth_rejection(&local));
+    }
+}
+
+#[cfg(test)]
+mod external_poll_parse_tests {
+    use super::*;
+
+    /// Production shape: the host's Jackson config serializes Longs as JSON
+    /// strings, so the completed poll's `expires_in` arrives quoted. This is
+    /// the exact body that broke third-party login right after the browser
+    /// authorization had already succeeded.
+    #[test]
+    fn string_expires_in_parses() {
+        let poll: YmclExternalPoll = serde_json::from_str(
+            r#"{"status":"completed","access_token":"tok","refresh_token":"ref","expires_in":"7200"}"#,
+        )
+        .unwrap();
+        assert_eq!(poll.status, "completed");
+        assert_eq!(poll.access_token.as_deref(), Some("tok"));
+        assert_eq!(poll.expires_in, Some(7200));
+    }
+
+    /// Numeric lifetimes (a host without the Long-as-string config) keep
+    /// parsing, and the camelCase alias is accepted alongside both.
+    #[test]
+    fn numeric_and_camel_case_expires_in_parse() {
+        let poll: YmclExternalPoll = serde_json::from_str(
+            r#"{"status":"completed","access_token":"t","refresh_token":"r","expires_in":7200}"#,
+        )
+        .unwrap();
+        assert_eq!(poll.expires_in, Some(7200));
+
+        let aliased: YmclExternalPoll = serde_json::from_str(
+            r#"{"status":"pending","expiresIn":"86400"}"#,
+        )
+        .unwrap();
+        assert_eq!(aliased.expires_in, Some(86400));
+    }
+
+    /// Pending/expired polls carry no tokens or lifetime at all.
+    #[test]
+    fn pending_poll_parses_without_optional_fields() {
+        let poll: YmclExternalPoll =
+            serde_json::from_str(r#"{"status":"pending"}"#).unwrap();
+        assert_eq!(poll.status, "pending");
+        assert_eq!(poll.expires_in, None);
+        assert_eq!(poll.access_token, None);
     }
 }

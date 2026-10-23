@@ -39,6 +39,7 @@ use daedalus::minecraft::{LoggingSide, RuleAction, VersionInfo};
 use daedalus::modded::{LoaderVersion, Manifest};
 use regex::Regex;
 use serde::Deserialize;
+use serde_json::Value;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
@@ -75,6 +76,89 @@ pub mod optifine;
 pub mod quick_play_version;
 
 const UTF8_GAME_ARGUMENT_PREFIX: &str = "__THESEUS_UTF8__:";
+const LWJGL3IFY_RFB_MAIN_CLASS: &str =
+    "com.gtnewhorizons.retrofuturabootstrap.Main";
+const LWJGL3IFY_RELAUNCHER_CONFIG: &str = "config/lwjgl3ify-relauncher.json";
+
+fn uses_lwjgl3ify_relauncher(main_class: &str) -> bool {
+    main_class == LWJGL3IFY_RFB_MAIN_CLASS
+}
+
+fn is_authlib_injector_agent(argument: &str) -> bool {
+    let argument = argument.trim();
+    if !argument.starts_with("-javaagent:") {
+        return false;
+    }
+    argument.to_ascii_lowercase().contains("authlib-injector.jar")
+}
+
+fn patch_lwjgl3ify_relauncher_config_value(
+    mut config: Value,
+    agent_argument: &str,
+) -> crate::Result<Value> {
+    let object = config.as_object_mut().ok_or_else(|| {
+        crate::ErrorKind::LauncherError(
+            "lwjgl3ify-relauncher.json must contain a JSON object".to_string(),
+        )
+    })?;
+
+    let custom_options = object
+        .entry("customOptions")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let options = custom_options.as_array_mut().ok_or_else(|| {
+        crate::ErrorKind::LauncherError(
+            "lwjgl3ify-relauncher.json customOptions must be an array"
+                .to_string(),
+        )
+    })?;
+
+    options.retain(|option| {
+        option
+            .as_str()
+            .is_none_or(|option| !is_authlib_injector_agent(option))
+    });
+    if !options.iter().any(|option| option.as_str() == Some(agent_argument)) {
+        options.push(Value::String(agent_argument.to_string()));
+    }
+
+    Ok(config)
+}
+
+async fn configure_lwjgl3ify_relauncher(
+    instance_path: &Path,
+    main_class: &str,
+    agent_path: &Path,
+    api_root: &str,
+) -> crate::Result<()> {
+    if !uses_lwjgl3ify_relauncher(main_class) {
+        return Ok(());
+    }
+
+    let config_path = instance_path.join(LWJGL3IFY_RELAUNCHER_CONFIG);
+    let config = match io::read(&config_path).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+            crate::ErrorKind::LauncherError(format!(
+                "Cannot parse {}: {error}",
+                config_path.display()
+            ))
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Value::Object(serde_json::Map::new())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let agent_argument = format!(
+        "-javaagent:{}={api_root}",
+        agent_path.to_string_lossy()
+    );
+    let patched = patch_lwjgl3ify_relauncher_config_value(config, &agent_argument)?;
+    if let Some(parent) = config_path.parent() {
+        io::create_dir_all(parent).await?;
+    }
+    io::write(&config_path, serde_json::to_vec_pretty(&patched)?).await?;
+    tracing::info!(path = %config_path.display(), "Configured authlib-injector for lwjgl3ify relaunch");
+    Ok(())
+}
 
 fn encode_game_argument(argument: String) -> String {
     if argument.is_ascii() && !argument.starts_with(UTF8_GAME_ARGUMENT_PREFIX) {
@@ -487,6 +571,48 @@ fn required_java_major(version_info: &VersionInfo) -> u32 {
             .as_ref()
             .map_or(8, |java| java.major_version)
     }
+}
+
+/// MIP §3.6：整合包声明的 Java 运行时约束（安装时随 `.pack-state.json`
+/// 采纳，含适配器注入的包级绑定）。`None` = 非 MIP 实例或未声明约束。
+async fn mip_java_floor(
+    instance_path: &std::path::Path,
+) -> Option<crate::api::ymcl::mip::state::MipJavaConstraint> {
+    let pack_state = crate::api::ymcl::mip::state::load(instance_path)
+        .await
+        .ok()??;
+    pack_state.java
+}
+
+/// 已解析 JVM 低于包约束时的处理：`enforce` 拒绝（MIP §3.6 强制语义，
+/// 不提供跳过入口），建议性约束记日志放行——自动选择路径已经用约束
+/// 抬高了目标版本，走到这里通常是用户显式指定了过旧的 Java。
+fn validate_mip_java_version(
+    constraint: &crate::api::ymcl::mip::state::MipJavaConstraint,
+    java_version: &JavaVersion,
+) -> crate::Result<()> {
+    if java_version.parsed_version >= constraint.min_major {
+        return Ok(());
+    }
+    let note = constraint
+        .note
+        .as_deref()
+        .map(|note| format!("（{note}）"))
+        .unwrap_or_default();
+    if constraint.enforce {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "整合包要求 Java {}+{note}，但选择的运行时是 Java {}",
+            constraint.min_major, java_version.parsed_version
+        ))
+        .into());
+    }
+    tracing::warn!(
+        "MIP pack recommends Java {}+{} but a lower runtime (Java {}) was selected",
+        constraint.min_major,
+        note,
+        java_version.parsed_version
+    );
+    Ok(())
 }
 
 fn version_uses_liteloader(version_info: &VersionInfo) -> bool {
@@ -1189,7 +1315,11 @@ async fn install_minecraft_with_local_source(
     )
     .await?;
 
-    let key = required_java_major(&version_info);
+    let mut key = required_java_major(&version_info);
+    let mip_java = mip_java_floor(&instance_path).await;
+    if let Some(constraint) = &mip_java {
+        key = key.max(constraint.min_major);
+    }
     if let Some(reporter) = &reporter {
         reporter
             .update(
@@ -1252,6 +1382,9 @@ async fn install_minecraft_with_local_source(
         }
         let java_version = crate::api::jre::check_jre(java_path).await?;
         validate_loader_java_version(&version_info, &java_version)?;
+        if let Some(constraint) = &mip_java {
+            validate_mip_java_version(constraint, &java_version)?;
+        }
 
         if set_java {
             run_install_database_write(
@@ -2177,6 +2310,9 @@ pub async fn launch_minecraft(
         }
     }
 
+    // MIP §3.6 包约束：在所有选择路径（HMCL/PCL/自动）之后统一校验；
+    // 自动路径先用它抬高目标版本。
+    let mip_java = mip_java_floor(&instance_path).await;
     let java_version = if let Some(java) =
         context.launch_overrides.java_path.as_ref()
     {
@@ -2205,7 +2341,10 @@ pub async fn launch_minecraft(
         // prefer it over YMCL's discovery.
         java
     } else {
-        let key = required_java_major(&version_info);
+        let mut key = required_java_major(&version_info);
+        if let Some(constraint) = &mip_java {
+            key = key.max(constraint.min_major);
+        }
 
         if let Some(java) = crate::api::jre::find_java_for_version(key).await? {
             java
@@ -2230,6 +2369,9 @@ pub async fn launch_minecraft(
     let java_version =
         crate::api::jre::check_jre(java_version.path.clone().into()).await?;
     validate_loader_java_version(&version_info, &java_version)?;
+    if let Some(constraint) = &mip_java {
+        validate_mip_java_version(constraint, &java_version)?;
+    }
 
     // Runtime-verify and fall back for GC arguments against the *actual* JVM
     // that will run Minecraft. The frontend supplies an ordered candidate
@@ -2536,8 +2678,16 @@ pub async fn launch_minecraft(
             )),
         )
         .await?;
+        let agent_path = io::canonicalize(agent_path)?;
+        configure_lwjgl3ify_relauncher(
+            &instance_path,
+            &version_info.main_class,
+            &agent_path,
+            &metadata.api_root,
+        )
+        .await?;
         Some((
-            io::canonicalize(agent_path)?,
+            agent_path,
             metadata.api_root,
             BASE64_STANDARD.encode(metadata.raw),
         ))
@@ -3000,6 +3150,79 @@ mod loader_resolution_tests {
         assert!(
             installed_offline_loader_version(ModLoader::Forge, None).is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod lwjgl3ify_relauncher_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn identifies_only_the_rfb_main_class() {
+        assert!(uses_lwjgl3ify_relauncher(
+            LWJGL3IFY_RFB_MAIN_CLASS
+        ));
+        assert!(!uses_lwjgl3ify_relauncher(
+            "net.minecraft.client.main.Main"
+        ));
+    }
+
+    #[test]
+    fn patches_agent_while_preserving_other_relauncher_options() {
+        let config = json!({
+            "javaInstallation": 1,
+            "customOptions": [
+                "-XX:+UseZGC",
+                "-javaagent:C:\\\\old\\\\authlib-injector.jar=https://old.invalid",
+                "-javaagent:C:\\\\old\\\\other-agent.jar"
+            ]
+        });
+        let patched = patch_lwjgl3ify_relauncher_config_value(
+            config,
+            "-javaagent:C:\\\\new\\\\authlib-injector.jar=https://www.swustmc.cn/api/plugins/authlib-injector",
+        )
+        .unwrap();
+        assert_eq!(patched["javaInstallation"], 1);
+        assert_eq!(
+            patched["customOptions"],
+            json!([
+                "-XX:+UseZGC",
+                "-javaagent:C:\\\\old\\\\other-agent.jar",
+                "-javaagent:C:\\\\new\\\\authlib-injector.jar=https://www.swustmc.cn/api/plugins/authlib-injector"
+            ])
+        );
+    }
+
+    #[test]
+    fn patching_twice_does_not_duplicate_current_agent() {
+        let agent = "-javaagent:C:\\\\new\\\\authlib-injector.jar=https://example.invalid";
+        let once = patch_lwjgl3ify_relauncher_config_value(
+            json!({"customOptions": [agent]}),
+            agent,
+        )
+        .unwrap();
+        let twice = patch_lwjgl3ify_relauncher_config_value(once, agent).unwrap();
+        assert_eq!(twice["customOptions"], json!([agent]));
+    }
+
+    #[test]
+    fn rejects_invalid_relauncher_config_shapes() {
+        let error = patch_lwjgl3ify_relauncher_config_value(
+            json!([]),
+            "-javaagent:authlib-injector.jar=https://example.invalid",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("must contain a JSON object"));
+
+        let error = patch_lwjgl3ify_relauncher_config_value(
+            json!({"customOptions": {}}),
+            "-javaagent:authlib-injector.jar=https://example.invalid",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("customOptions must be an array"));
     }
 }
 

@@ -39,6 +39,56 @@ pub struct MipPackState {
     /// globs. `None` for states written before this field existed.
     #[serde(default)]
     pub publish_profile: Option<PublishProfile>,
+    /// Java runtime constraint of the installed version (MIP §3.6
+    /// `game.java`), re-evaluated on every update adopt. `None` when the
+    /// manifest (and the pack-level admin binding) declares no constraint.
+    #[serde(default)]
+    pub java: Option<MipJavaConstraint>,
+}
+
+/// Java runtime constraint (MIP §3.6): `minMajor` is required, everything
+/// else is optional. `enforce` defaults to false (advisory).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MipJavaConstraint {
+    #[serde(default)]
+    pub min_major: u32,
+    #[serde(default)]
+    pub enforce: bool,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+impl MipJavaConstraint {
+    /// Parses a manifest `game.java` value (MIP §3.6); tolerates numeric
+    /// strings and ignores shapes without a usable `minMajor`.
+    pub fn from_manifest_value(value: &serde_json::Value) -> Option<Self> {
+        let object = value.as_object()?;
+        let min_major = object
+            .get("minMajor")
+            .and_then(parse_json_number_u32)
+            .filter(|major| *major > 0)?;
+        let enforce = object
+            .get("enforce")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let note = object
+            .get("note")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        Some(Self {
+            min_major,
+            enforce,
+            note,
+        })
+    }
+}
+
+fn parse_json_number_u32(value: &serde_json::Value) -> Option<u32> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().map(|value| value as u32),
+        serde_json::Value::String(text) => text.trim().parse::<u32>().ok(),
+        _ => None,
+    }
 }
 
 /// Which domain server/season an installed pack came from.
@@ -134,4 +184,44 @@ pub async fn save(
     tokio::fs::write(&temp, contents).await?;
     tokio::fs::rename(&temp, &path).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn java_constraint_parses_manifest_value() {
+        let value = serde_json::json!({
+            "minMajor": 21,
+            "enforce": true,
+            "note": "Cleanroom 需要 Java 21+"
+        });
+        let constraint = MipJavaConstraint::from_manifest_value(&value).expect("parses");
+        assert_eq!(constraint.min_major, 21);
+        assert!(constraint.enforce);
+        assert_eq!(constraint.note.as_deref(), Some("Cleanroom 需要 Java 21+"));
+    }
+
+    #[test]
+    fn java_constraint_defaults_advisory_and_tolerates_strings() {
+        let constraint =
+            MipJavaConstraint::from_manifest_value(&serde_json::json!({ "minMajor": "17" }))
+                .expect("parses string major");
+        assert_eq!(constraint.min_major, 17);
+        assert!(!constraint.enforce);
+        assert_eq!(constraint.note, None);
+    }
+
+    #[test]
+    fn java_constraint_rejects_unusable_shapes() {
+        assert!(
+            MipJavaConstraint::from_manifest_value(&serde_json::json!({ "minMajor": 0 }))
+                .is_none()
+        );
+        assert!(MipJavaConstraint::from_manifest_value(&serde_json::json!({})).is_none());
+        assert!(
+            MipJavaConstraint::from_manifest_value(&serde_json::json!("21")).is_none()
+        );
+    }
 }

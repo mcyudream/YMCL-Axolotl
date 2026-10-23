@@ -264,10 +264,17 @@ export const useYmclStore = defineStore('ymclStore', {
 		 * browser on the Rust side), then polls until completed/expired or
 		 * the overall deadline passes. Returns the final poll status.
 		 */
-		async externalLogin(provider: string): Promise<YmclExternalPoll | null> {
+		async externalLogin(
+			provider: string,
+			loginType?: string,
+		): Promise<YmclExternalPoll | null> {
 			this.loggingIn = true
 			try {
-				const flow = await ymcl.externalBegin(this.activeDomainId, provider)
+				const flow = await ymcl.externalBegin(
+					this.activeDomainId,
+					provider,
+					loginType,
+				)
 				const deadline = Date.now() + EXTERNAL_POLL_MAX_MS
 				while (Date.now() < deadline) {
 					await new Promise((resolve) => setTimeout(resolve, EXTERNAL_POLL_INTERVAL_MS))

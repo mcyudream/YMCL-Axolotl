@@ -368,6 +368,7 @@ async fn run_credentials(
     }
 
     let mut gc_report: Option<GcLaunchReport> = None;
+    let quick_play_for_stats = quick_play_type.clone();
     let process = crate::launcher::launch_minecraft(
         &java_args,
         &env_args,
@@ -386,6 +387,12 @@ async fn run_credentials(
         offline_mode,
     )
     .await?;
+    // 域启动统计（YAP 扩展）：启动成功后 best-effort 后台上报，失败只记日志，
+    // 绝不影响启动结果。
+    tokio::spawn(crate::api::ymcl::stats::report_launch(
+        instance_id.to_string(),
+        quick_play_for_stats,
+    ));
     Ok((process, gc_report))
 }
 

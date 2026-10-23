@@ -3660,3 +3660,74 @@ mod tests {
         assert_eq!(std::fs::read_dir(&natives_dir).unwrap().count(), 0);
     }
 }
+
+#[cfg(all(test, not(feature = "tauri")))]
+mod fabric_network_merge_tests {
+    use super::*;
+
+    /// 端到端实证：网络路径安装 Fabric 1.21.8（真实 Mojang/Fabric meta）后，
+    /// merged 版本档案里 vanilla 与 Fabric 各自声明的 ASM 不得同时在
+    /// classpath 上——1.21.6+ 的 vanilla 自带 ASM，而 Fabric Loader 的
+    /// `LoaderUtil.verifyClasspath`（Knot 静态块，Knot.java:330）发现重复
+    /// ASM 会当场拒绝启动（ExceptionInInitializerError → exit 1）。
+    #[tokio::test]
+    async fn fabric_1218_install_keeps_single_asm_on_classpath() {
+        crate::event::EventState::init().await.unwrap();
+        let root = tempfile::tempdir().unwrap().keep();
+        let state =
+            crate::state::State::init_for_test(root.to_string_lossy().to_string())
+                .await
+                .unwrap();
+
+        let manifest: d::minecraft::VersionManifest = fetch_json(
+            Method::GET,
+            d::minecraft::VERSION_MANIFEST_URL,
+            None,
+            None,
+            None,
+            &state.api_semaphore,
+            &state.pool,
+        )
+        .await
+        .expect("fetch version manifest");
+        let version = manifest
+            .versions
+            .iter()
+            .find(|candidate| candidate.id == "1.21.8")
+            .expect("1.21.8 in version manifest")
+            .clone();
+        let loader =
+            crate::launcher::get_loader_version_from_profile("1.21.8", ModLoader::Fabric, None)
+                .await
+                .expect("loader profile fetch")
+                .expect("fabric loader for 1.21.8");
+
+        let info = download_version_info(
+            &state,
+            &version,
+            ModLoader::Fabric,
+            Some(&loader),
+            Some(true),
+            None,
+            None,
+        )
+        .await
+        .expect("download merged fabric version info");
+
+        let asm_on_classpath: Vec<&str> = info
+            .libraries
+            .iter()
+            .filter(|library| {
+                library.name.starts_with("org.ow2.asm:asm:")
+                    && library.include_in_classpath
+            })
+            .map(|library| library.name.as_str())
+            .collect();
+        println!("ASM on classpath: {asm_on_classpath:?}");
+        assert_eq!(
+            asm_on_classpath.len(),
+            1,
+            "duplicate ASM would fail Knot's verifyClasspath at launch"
+        );
+    }
+}

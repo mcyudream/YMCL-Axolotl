@@ -173,6 +173,13 @@ pub fn compute_publish_diff(
 
     // Changed and deleted: base paths compared against local content.
     for (path, base_file) in &base.files {
+        // The local index never holds these (the scan prunes them), so they
+        // would all read as "deleted" and the next delta would ship deletions
+        // for content the pack does not own — launcher-installed runtime or
+        // player-side files. The pack simply stops managing them.
+        if is_excluded_from_publish(path) {
+            continue;
+        }
         if is_player_side(base, path) || publish_excluded.matches(path) {
             diff.excluded.push(path.clone());
             continue;
@@ -236,7 +243,8 @@ pub fn compute_publish_diff(
 /// degrades to the initial-publish offer instead of a stale "no changes".
 pub async fn diff_instance(instance_id: &str) -> crate::Result<PublishDiff> {
     let (instance_dir, _mip_base) = publish_target(instance_id).await?;
-    let local_hashes = super::update::scan_local_hashes_cached(&instance_dir)?;
+    let local_hashes =
+        super::update::scan_local_hashes_cached_async(&instance_dir).await?;
     let Some(pack_state) = state::load(&instance_dir).await? else {
         return Ok(unmanaged_diff(&instance_dir, &local_hashes, None).await);
     };
@@ -375,7 +383,18 @@ async fn fill_entry_sizes(instance_dir: &std::path::Path, diff: &mut PublishDiff
 /// content, caches/maps/recording directories a game run generates, and
 /// protocol bookkeeping — YAP §7 rule 4). Mirrored to the publish dialog
 /// via [`PublishFilters`].
+///
+/// The game-runtime entries come first: `assets`/`libraries`/`versions` are
+/// installed and owned by the launcher, never by a pack. An instance whose
+/// game directory is a whole `.minecraft` (a launcher-shared direct link)
+/// holds gigabytes of them — tens of thousands of files that would otherwise
+/// be hashed on every uncached scan and packed into the initial mrpack. Only
+/// the top level is matched: the same names nested deeper stay pack content
+/// (a resource pack's own `assets/`, a mod's bundled `libraries/`).
 const PUBLISH_EXCLUDED_TOP_LEVEL: &[&str] = &[
+    "assets",
+    "libraries",
+    "versions",
     "saves",
     "logs",
     "crash-reports",
@@ -638,6 +657,7 @@ pub async fn push_initial(
     policies: Vec<PublishPolicyInput>,
     exclude: Vec<String>,
     notes: Option<&str>,
+    min_java: Option<u32>,
 ) -> crate::Result<serde_json::Value> {
     let (instance_dir, mip_base) = publish_target(instance_id).await?;
     let pack_id = match pack_id.map(str::trim).filter(|id| !id.is_empty()) {
@@ -670,8 +690,9 @@ pub async fn push_initial(
     }
 
     // mip.json（MIP §3.5）：features 用 glob 声明可选内容，policies 声明
-    // seed/merge 等文件策略。
-    let mip_json = serde_json::json!({
+    // seed/merge 等文件策略；java 是运行时约束（MIP §3.6，enforce 缺省
+    // false=建议性）。
+    let mut mip_json = serde_json::json!({
         "formatVersion": 1,
         "features": features
             .iter()
@@ -695,6 +716,9 @@ pub async fn push_initial(
             })
             .collect::<Vec<_>>(),
     });
+    if let Some(min_major) = min_java {
+        mip_json["java"] = serde_json::json!({ "minMajor": min_major });
+    }
     let archive_path =
         crate::api::instance::build_publish_archive(
             instance_id,
@@ -758,6 +782,39 @@ pub async fn push_initial(
     Ok(report)
 }
 
+/// Read size for streamed upload parts: big enough that a multi-gigabyte pack
+/// does not travel in 8 KiB pieces, small enough that the buffer never
+/// registers as memory use.
+const UPLOAD_STREAM_CHUNK_BYTES: usize = 256 * 1024;
+
+/// Multipart part that streams `path` straight from disk, declaring its exact
+/// length so the request keeps a `Content-Length` header instead of falling
+/// back to chunked transfer encoding. The archive of a full pack is gigabytes;
+/// reading it into a `Vec` ahead of the upload is what makes a large initial
+/// publish an out-of-memory candidate.
+async fn streamed_file_part(
+    path: &Path,
+    mime: &str,
+    file_name: Option<&str>,
+) -> crate::Result<reqwest::multipart::Part> {
+    let length = tokio::fs::metadata(path).await?.len();
+    let file = tokio::fs::File::open(path).await?;
+    let mut part = reqwest::multipart::Part::stream_with_length(
+        reqwest::Body::wrap_stream(
+            tokio_util::io::ReaderStream::with_capacity(
+                file,
+                UPLOAD_STREAM_CHUNK_BYTES,
+            ),
+        ),
+        length,
+    )
+    .mime_str(mime)?;
+    if let Some(file_name) = file_name {
+        part = part.file_name(file_name.to_string());
+    }
+    Ok(part)
+}
+
 /// Builds the multipart ingest form: `file` = mrpack zip + metadata fields.
 async fn build_initial_upload(
     archive_path: &std::path::Path,
@@ -766,13 +823,13 @@ async fn build_initial_upload(
     bind: Option<&serde_json::Value>,
     notes: Option<&str>,
 ) -> crate::Result<reqwest::multipart::Form> {
-    let bytes = tokio::fs::read(archive_path).await?;
-    let mut form = reqwest::multipart::Form::new().part(
-        "file",
-        reqwest::multipart::Part::bytes(bytes)
-            .mime_str("application/zip")?
-            .file_name("pack.mrpack"),
-    );
+    let archive = streamed_file_part(
+        archive_path,
+        "application/zip",
+        Some("pack.mrpack"),
+    )
+    .await?;
+    let mut form = reqwest::multipart::Form::new().part("file", archive);
     form = form.text("version", version.to_string());
     if let Some(channel) = channel {
         form = form.text("channel", channel.to_string());
@@ -945,6 +1002,7 @@ pub async fn push_delta(
     exclude: Vec<String>,
     include: Vec<String>,
     notes: Option<&str>,
+    min_java: Option<u32>,
 ) -> crate::Result<serde_json::Value> {
     let (instance_dir, mut pack_state, mip_base) =
         instance_context(instance_id).await?;
@@ -973,7 +1031,8 @@ pub async fn push_delta(
                 .collect()
         });
     let profile_exclusions = PublishExclusions::new(&effective_rules);
-    let local_hashes = super::update::scan_local_hashes_cached(&instance_dir)?;
+    let local_hashes =
+        super::update::scan_local_hashes_cached_async(&instance_dir).await?;
     let mut diff =
         compute_publish_diff(&server_base, &local_hashes, &profile_exclusions);
 
@@ -1007,7 +1066,8 @@ pub async fn push_delta(
     //
     // 自愈存量 manifest：旧包入库时没有 game，delta 带上本实例的游戏版本与
     // 加载器，适配器优先用它回填（无则继承 base）；loader 键名与 mrpack
-    // dependencies 对齐，让 delta 版本合成出的 mrpack 也带加载器。
+    // dependencies 对齐，让 delta 版本合成出的 mrpack 也带加载器。java 约束
+    // 只在本次发布显式选择时携带（MIP §3.6），留空则由适配器继承 base。
     let metadata = crate::api::instance::get(instance_id).await?;
     let game = metadata
         .as_ref()
@@ -1029,10 +1089,14 @@ pub async fn push_delta(
                         "version": loader_version,
                     })
                 });
-            serde_json::json!({
+            let mut game = serde_json::json!({
                 "minecraft": content_set.game_version.clone(),
                 "loader": loader,
-            })
+            });
+            if let Some(min_major) = min_java {
+                game["java"] = serde_json::json!({ "minMajor": min_major });
+            }
+            game
         });
     let mut delta = serde_json::json!({
         "baseVersion": diff.base_version,
@@ -1519,5 +1583,150 @@ mod tests {
                 "{path} should be publishable"
             );
         }
+    }
+
+    #[test]
+    fn game_runtime_directories_are_excluded_from_publish() {
+        for path in [
+            "assets/objects/ab/cdef",
+            "assets/indexes/1.21.json",
+            "libraries/net/foo/1.0/foo.jar",
+            "versions/1.21/client.jar",
+        ] {
+            assert!(
+                is_excluded_from_publish(path),
+                "{path} is launcher-installed runtime, not pack content"
+            );
+        }
+        // Only the top level is pruned: the same names nested deeper are pack
+        // content (a resource pack's own assets, a mod bundling libraries).
+        for path in [
+            "resourcepacks/MyPack/assets/minecraft/x.png",
+            "kubejs/libraries/helper.js",
+            "shaderpacks/x/versions/1.0/program.vsh",
+        ] {
+            assert!(
+                !is_excluded_from_publish(path),
+                "{path} should stay publishable"
+            );
+        }
+    }
+
+    #[test]
+    fn base_paths_that_never_enter_packs_are_not_reported_as_deleted() {
+        let base = state_with(&[
+            ("mods/a.jar", "hash-a"),
+            ("assets/objects/ab/cdef", "hash-asset"),
+            ("libraries/net/foo/1.0/foo.jar", "hash-lib"),
+            ("versions/1.21/client.jar", "hash-client"),
+        ]);
+
+        // Nothing is on disk: only genuine pack content reads as deleted. The
+        // runtime paths must not, or the next delta would ship deletions for
+        // files the pack does not own (a player's real libraries, no less).
+        let diff = compute_publish_diff(
+            &base,
+            &HashMap::new(),
+            &PublishExclusions::default(),
+        );
+
+        assert_eq!(diff.deleted, vec!["mods/a.jar".to_string()]);
+        assert!(diff.changed.is_empty());
+        assert!(diff.added.is_empty());
+    }
+
+    /// Serves exactly one POST: returns the request head (lowercased) and the
+    /// body read per its `Content-Length`, so the upload path is exercised
+    /// against a real socket.
+    async fn serve_one_upload(
+        listener: tokio::net::TcpListener,
+    ) -> (String, Option<usize>, Vec<u8>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            let read = socket.read(&mut byte).await.unwrap();
+            assert_eq!(read, 1, "connection closed before the headers ended");
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8(head).unwrap().to_ascii_lowercase();
+        let content_length = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .map(|value| value.trim().parse::<usize>().unwrap());
+        let mut body = vec![0u8; content_length.unwrap_or_default()];
+        if content_length.is_some() {
+            socket.read_exact(&mut body).await.unwrap();
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+            .await
+            .unwrap();
+        socket.flush().await.unwrap();
+        (head, content_length, body)
+    }
+
+    #[tokio::test]
+    async fn streamed_upload_part_keeps_content_length_and_all_bytes() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let path = directory.path().join("pack.mrpack");
+        // Larger than one stream chunk, so the part is genuinely streamed in
+        // pieces rather than produced in a single write.
+        let payload: Vec<u8> = (0..(UPLOAD_STREAM_CHUNK_BYTES * 2 + 1234))
+            .map(|index| (index % 251) as u8)
+            .collect();
+        std::fs::write(&path, &payload).unwrap();
+
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_one_upload(listener));
+
+        let part =
+            streamed_file_part(&path, "application/zip", Some("pack.mrpack"))
+                .await
+                .unwrap();
+        let form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("version", "1.0.0");
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .post(format!("http://{address}/api/packs/demo/ingest"))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+
+        let (head, content_length, body) = server.await.unwrap();
+        // A known part length must reach the wire as Content-Length: chunked
+        // transfer encoding is what breaks unassuming multipart receivers.
+        let content_length =
+            content_length.expect("no Content-Length was sent");
+        assert_eq!(body.len(), content_length);
+        assert!(head.starts_with("post "));
+
+        // The file content sits right after the part headers, complete and
+        // byte-identical, with the closing boundary behind it.
+        let body_start = body
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("no part headers in the body")
+            + 4;
+        let part_headers =
+            String::from_utf8_lossy(&body[..body_start]).to_ascii_lowercase();
+        assert!(part_headers.contains("name=\"file\""));
+        assert!(part_headers.contains("filename=\"pack.mrpack\""));
+        assert!(part_headers.contains("content-type: application/zip"));
+        assert_eq!(
+            &body[body_start..body_start + payload.len()],
+            payload.as_slice(),
+            "the streamed payload must arrive intact"
+        );
+        assert!(body[body_start + payload.len()..].starts_with(b"\r\n--"));
     }
 }

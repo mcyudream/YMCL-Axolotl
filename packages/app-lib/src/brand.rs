@@ -19,8 +19,8 @@ pub const DATA_NAMESPACE: &str = "red.ghs.ymcl";
 /// Longest accepted data directory suffix; enough to name a branch or a build.
 const MAX_DATA_DIR_SUFFIX_LEN: usize = 32;
 
-pub fn user_agent(version: &str, os: &str) -> String {
-    format!("garbage-human-studio/axolotl/{version} ({os})")
+pub fn user_agent(version: &str) -> String {
+    format!("{SHORT_PRODUCT_NAME}/{version}")
 }
 
 /// Name of the directory the launcher keeps its settings, databases and logs in.
@@ -74,9 +74,9 @@ mod tests {
 
     #[test]
     fn user_agent_is_unique_and_contains_no_contact_information() {
-        let user_agent = user_agent("1.2.3", "windows");
+        let user_agent = user_agent("1.2.3");
 
-        assert_eq!(user_agent, "garbage-human-studio/axolotl/1.2.3 (windows)");
+        assert_eq!(user_agent, "YMCL/1.2.3");
         assert!(!user_agent.contains("ghs.red"));
         assert!(!user_agent.contains("http"));
         assert!(!user_agent.contains('@'));

@@ -7,6 +7,7 @@
 //! step so the UI can confirm (updatePolicy `prompt`).
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::Path;
 
 use async_trait::async_trait;
@@ -72,6 +73,12 @@ pub struct MipServerBinding {
     /// Season currently running on the server (MIP appendix B.2).
     #[serde(rename = "currentSeason", default)]
     pub current_season: Option<MipSeason>,
+    /// Domain-side instance behind this server, when the server can also be
+    /// reached through the direct-connect face (YAP §6.12). Absent for
+    /// servers with a plain public address; the join flow then connects
+    /// directly.
+    #[serde(rename = "p2pInstanceId", alias = "p2p_instance_id", default)]
+    pub p2p_instance_id: Option<String>,
 }
 
 /// One connect line on a domain server (primary + backup addresses).
@@ -138,7 +145,11 @@ pub(crate) fn servers_url(mip_base: &str) -> String {
     format!("{mip_base}/api/servers")
 }
 
-pub(crate) fn manifest_url(mip_base: &str, pack_id: &str, version: &str) -> String {
+pub(crate) fn manifest_url(
+    mip_base: &str,
+    pack_id: &str,
+    version: &str,
+) -> String {
     format!("{mip_base}/api/packs/{pack_id}/manifest/{version}")
 }
 
@@ -173,11 +184,7 @@ pub struct HttpFetcher<'a> {
 /// hosts answer unknown `/mip/objects/...` paths with the site shell (HTTP
 /// 200 + `text/html`), which then fails checksum and masks the real cause.
 fn looks_like_error_page(bytes: &[u8]) -> bool {
-    let head = bytes
-        .iter()
-        .take(256)
-        .copied()
-        .collect::<Vec<u8>>();
+    let head = bytes.iter().take(256).copied().collect::<Vec<u8>>();
     let head = String::from_utf8_lossy(&head);
     let head = head.trim_start().to_ascii_lowercase();
     head.starts_with("<!doctype") || head.starts_with("<html")
@@ -198,9 +205,7 @@ pub(crate) fn candidate_object_urls(
             .url
             .as_deref()
             .is_some_and(|url| url.contains("/mip/objects/"));
-    if looks_like_mip_object
-        && let Some(base) = mip_base
-    {
+    if looks_like_mip_object && let Some(base) = mip_base {
         urls.push(format!(
             "{}/objects/{}",
             base.trim_end_matches('/'),
@@ -288,8 +293,10 @@ impl ObjectFetcher for HttpFetcher<'_> {
 
 /// Scans the instance directory into a local hash index (MIP WF-5 step 3).
 /// Paths that can never enter a pack (`is_excluded_from_publish`) are
-/// pruned before hashing — saves/logs alone can be gigabytes and none of
-/// them is ever a manifest entry. The cached variant
+/// pruned before hashing: saves/logs alone can be gigabytes, and a game
+/// directory that is a whole `.minecraft` carries the launcher's own
+/// `assets`/`libraries`/`versions` (tens of thousands of files) on top. None
+/// of them is ever a manifest entry. The cached variant
 /// ([`scan_local_hashes_cached`]) is what callers should usually prefer.
 pub fn scan_local_hashes(
     instance_dir: &Path,
@@ -311,6 +318,23 @@ pub fn scan_local_hashes_cached(
     Ok(hashes)
 }
 
+/// [`scan_local_hashes_cached`] for async callers: walking a large instance
+/// and reading every uncached file is blocking disk work (seconds to minutes
+/// on a first publish), so it runs on the blocking pool instead of stalling
+/// an async worker.
+pub async fn scan_local_hashes_cached_async(
+    instance_dir: &Path,
+) -> crate::Result<HashMap<String, String>> {
+    let instance_dir = instance_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || scan_local_hashes_cached(&instance_dir))
+        .await
+        .map_err(|error| {
+            crate::Error::from(crate::ErrorKind::OtherError(format!(
+                "Local scan task failed: {error}"
+            )))
+        })?
+}
+
 /// One cache entry: the stat fingerprint that makes a stored sha512 reusable.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct HashCacheEntry {
@@ -320,10 +344,36 @@ struct HashCacheEntry {
     sha512: String,
 }
 
+/// A walked file the cache could not answer for, still awaiting its read.
+struct PendingHash {
+    path: std::path::PathBuf,
+    relative: String,
+    size: u64,
+    mtime_secs: u64,
+    mtime_nanos: u32,
+}
+
+/// Hashing workers per scan. The pass is disk-bound: a handful of readers
+/// already saturates an SSD, while more on an HDD mostly collects seeks. Four
+/// matches the launcher's other bulk-read budget (`FILE_VALIDATION_SEMAPHORE`).
+const SCAN_HASH_WORKERS: usize = 4;
+
+/// Per-worker read buffer. Contents stream through it, so a multi-gigabyte
+/// mod never lands in memory.
+const SCAN_HASH_BUFFER_BYTES: usize = 1 << 20;
+
+fn scan_hash_workers() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |threads| threads.get())
+        .clamp(1, SCAN_HASH_WORKERS)
+}
+
 /// Walks the instance, pruning excluded paths, hashing what remains. When a
 /// cache is supplied, entries whose size+mtime fingerprint still match skip
 /// the file read entirely; the returned second map holds fresh entries for
-/// exactly the files seen this walk (stale cache entries drop out).
+/// exactly the files seen this walk (stale cache entries drop out). The walk
+/// is single-threaded (directory listings are cheap); the sha512 pass over
+/// the cache misses is spread over a small worker pool.
 fn scan_instance_files(
     instance_dir: &Path,
     cache: Option<std::collections::BTreeMap<String, HashCacheEntry>>,
@@ -334,6 +384,7 @@ fn scan_instance_files(
     let mut hashes = HashMap::new();
     let mut fresh: std::collections::BTreeMap<String, HashCacheEntry> =
         std::collections::BTreeMap::new();
+    let mut pending: Vec<PendingHash> = Vec::new();
     let mut stack = vec![(instance_dir.to_path_buf(), String::new())];
     while let Some((dir, dir_relative)) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
@@ -355,7 +406,17 @@ fn scan_instance_files(
             } else {
                 format!("{dir_relative}/{name}")
             };
-            if path.is_dir() {
+            // The directory listing already carries the entry type and (on
+            // Windows) its attributes. Only a symlink needs the extra lookup
+            // that keeps the follow-the-link behavior of a plain stat.
+            let file_type = entry.file_type()?;
+            let is_symlink = file_type.is_symlink();
+            let is_dir = if is_symlink {
+                path.is_dir()
+            } else {
+                file_type.is_dir()
+            };
+            if is_dir {
                 if name == STAGING_DIR_NAME
                     || name == BACKUP_DIR_NAME
                     || super::publish::is_excluded_from_publish(&relative)
@@ -366,7 +427,11 @@ fn scan_instance_files(
             } else if super::publish::is_excluded_from_publish(&relative) {
                 continue;
             } else {
-                let metadata = std::fs::metadata(&path)?;
+                let metadata = if is_symlink {
+                    std::fs::metadata(&path)?
+                } else {
+                    entry.metadata()?
+                };
                 let size = metadata.len();
                 let (mtime_secs, mtime_nanos) = mtime_key(&metadata);
                 if let Some(hit) = cache
@@ -382,24 +447,98 @@ fn scan_instance_files(
                     fresh.insert(relative, hit.clone());
                     continue;
                 }
-                let bytes = std::fs::read(&path)?;
-                let digest = Sha512::digest(&bytes);
-                let sha512: String =
-                    digest.iter().map(|byte| format!("{byte:02x}")).collect();
-                hashes.insert(relative.clone(), sha512.clone());
-                fresh.insert(
+                pending.push(PendingHash {
+                    path,
                     relative,
-                    HashCacheEntry {
-                        size,
-                        mtime_secs,
-                        mtime_nanos,
-                        sha512,
-                    },
-                );
+                    size,
+                    mtime_secs,
+                    mtime_nanos,
+                });
             }
         }
     }
+
+    let digests = hash_pending_files(&pending)?;
+    for (file, sha512) in pending.into_iter().zip(digests) {
+        hashes.insert(file.relative.clone(), sha512.clone());
+        fresh.insert(
+            file.relative,
+            HashCacheEntry {
+                size: file.size,
+                mtime_secs: file.mtime_secs,
+                mtime_nanos: file.mtime_nanos,
+                sha512,
+            },
+        );
+    }
     Ok((hashes, fresh))
+}
+
+/// Hashes the cache-missing files across [`SCAN_HASH_WORKERS`] threads at
+/// most, returning digests aligned with `pending`. A read failure fails the
+/// whole scan, as it did when the scan hashed in place.
+fn hash_pending_files(pending: &[PendingHash]) -> crate::Result<Vec<String>> {
+    let worker_count = scan_hash_workers().min(pending.len());
+    if worker_count <= 1 {
+        return pending.iter().map(|file| hash_file(&file.path)).collect();
+    }
+    let chunk_size = pending.len().div_ceil(worker_count);
+    let collected: std::sync::Mutex<Vec<(usize, String)>> =
+        std::sync::Mutex::new(Vec::with_capacity(pending.len()));
+    std::thread::scope(|scope| -> crate::Result<()> {
+        let mut workers = Vec::with_capacity(worker_count);
+        for (chunk_index, chunk) in pending.chunks(chunk_size).enumerate() {
+            let collected = &collected;
+            workers.push(scope.spawn(move || -> crate::Result<()> {
+                let base = chunk_index * chunk_size;
+                let mut digests = Vec::with_capacity(chunk.len());
+                for (offset, file) in chunk.iter().enumerate() {
+                    digests.push((base + offset, hash_file(&file.path)?));
+                }
+                collected
+                    .lock()
+                    .expect("scan hash sink is never poisoned")
+                    .extend(digests);
+                Ok(())
+            }));
+        }
+        for worker in workers {
+            match worker.join() {
+                Ok(result) => result?,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+        Ok(())
+    })?;
+    let mut digests = vec![String::new(); pending.len()];
+    for (index, digest) in collected
+        .into_inner()
+        .expect("scan hash sink is never poisoned")
+    {
+        digests[index] = digest;
+    }
+    Ok(digests)
+}
+
+/// Streams one file through sha512 in [`SCAN_HASH_BUFFER_BYTES`] chunks,
+/// returning lowercase hex.
+fn hash_file(path: &Path) -> crate::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha512::new();
+    let mut buffer = vec![0u8; SCAN_HASH_BUFFER_BYTES];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let sha512: String = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(sha512)
 }
 
 fn mtime_key(metadata: &std::fs::Metadata) -> (u64, u32) {
@@ -415,7 +554,8 @@ fn read_hash_cache(
     instance_dir: &Path,
 ) -> Option<std::collections::BTreeMap<String, HashCacheEntry>> {
     let bytes =
-        std::fs::read(instance_dir.join(super::state::HASH_CACHE_FILE_NAME)).ok()?;
+        std::fs::read(instance_dir.join(super::state::HASH_CACHE_FILE_NAME))
+            .ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -427,7 +567,8 @@ fn write_hash_cache(
         return;
     };
     let path = instance_dir.join(super::state::HASH_CACHE_FILE_NAME);
-    let temp = instance_dir.join(format!("{}.tmp", super::state::HASH_CACHE_FILE_NAME));
+    let temp = instance_dir
+        .join(format!("{}.tmp", super::state::HASH_CACHE_FILE_NAME));
     if std::fs::write(&temp, bytes).is_ok() {
         std::fs::rename(&temp, &path).ok();
     }
@@ -578,7 +719,7 @@ pub async fn check_instance(
             .await?;
     let manifest: MipManifest = serde_json::from_value(manifest_value)?;
     manifest.validate()?;
-    let local_hashes = scan_local_hashes_cached(&instance_dir)?;
+    let local_hashes = scan_local_hashes_cached_async(&instance_dir).await?;
     let plan = compute_update_plan(&pack_state, &manifest, &local_hashes)?;
 
     let check = YmclUpdateCheck {
@@ -706,15 +847,16 @@ pub async fn pre_launch_update(instance_id: &str) -> crate::Result<()> {
     {
         Ok(result) => result?,
         Err(_) => {
-            tracing::warn!("MIP pre-launch check timed out; launching local state as-is");
+            tracing::warn!(
+                "MIP pre-launch check timed out; launching local state as-is"
+            );
             return Ok(());
         }
     };
     let up_to_date = !probe.managed
-        || probe
-            .target_version
-            .as_ref()
-            .is_some_and(|target| Some(target) == probe.current_version.as_ref());
+        || probe.target_version.as_ref().is_some_and(|target| {
+            Some(target) == probe.current_version.as_ref()
+        });
     if up_to_date {
         return Ok(());
     }
@@ -752,8 +894,10 @@ pub(crate) async fn resolve_target_manifest(
         return Ok(None);
     }
     let capabilities = registry::domain_capabilities(&active).await?;
-    let Some(mip_base) =
-        capabilities.mip.as_ref().and_then(|mip| mip.base_url.clone())
+    let Some(mip_base) = capabilities
+        .mip
+        .as_ref()
+        .and_then(|mip| mip.base_url.clone())
     else {
         return Ok(None);
     };
@@ -779,7 +923,8 @@ pub(crate) async fn resolve_target_manifest(
         return Ok(None);
     };
     let versions_value =
-        fetch_json(state, &versions_url(&mip_base, &pack_state.pack_id)).await?;
+        fetch_json(state, &versions_url(&mip_base, &pack_state.pack_id))
+            .await?;
     let versions: Vec<MipVersionEntry> = serde_json::from_value(
         versions_value
             .get("versions")
@@ -800,12 +945,18 @@ pub(crate) async fn resolve_target_manifest(
     .await?;
     let manifest: MipManifest = serde_json::from_value(manifest_value)?;
     manifest.validate()?;
-    Ok(Some((binding.clone(), target_version.to_string(), manifest)))
+    Ok(Some((
+        binding.clone(),
+        target_version.to_string(),
+        manifest,
+    )))
 }
 
 /// Lists the declared features and the current selection for a managed
 /// instance so the player can toggle optional content.
-pub async fn pack_features(instance_id: &str) -> crate::Result<YmclPackFeatures> {
+pub async fn pack_features(
+    instance_id: &str,
+) -> crate::Result<YmclPackFeatures> {
     let state = State::get().await?;
     let instance_dir = crate::api::instance::get_full_path(instance_id).await?;
     let Some(pack_state) = state::load(&instance_dir).await? else {
@@ -882,7 +1033,7 @@ pub async fn set_features(
     let new: HashSet<&str> = selected.iter().map(|id| id.as_str()).collect();
     let newly_selected: HashSet<&str> = new.difference(&old).copied().collect();
     let deselected: HashSet<&str> = old.difference(&new).copied().collect();
-    let local_hashes = scan_local_hashes_cached(&instance_dir)?;
+    let local_hashes = scan_local_hashes_cached_async(&instance_dir).await?;
 
     let mut plan = super::diff::UpdatePlan::default();
     let mut entries: HashMap<String, MipFileEntry> = HashMap::new();
@@ -974,9 +1125,10 @@ pub(crate) fn validate_feature_selection(
         .collect();
     for id in selected {
         if !declared.contains_key(id.as_str()) {
-            return Err(
-                crate::ErrorKind::OtherError(format!("Unknown feature {id}")).into()
-            );
+            return Err(crate::ErrorKind::OtherError(format!(
+                "Unknown feature {id}"
+            ))
+            .into());
         }
     }
     for id in selected {
@@ -994,7 +1146,9 @@ pub(crate) fn validate_feature_selection(
 
 /// Resolves the active domain's MIP base URL; `Ok(None)` when no domain is
 /// active or the domain has no MIP distribution face.
-pub(crate) async fn resolve_mip_base(state: &State) -> crate::Result<Option<String>> {
+pub(crate) async fn resolve_mip_base(
+    state: &State,
+) -> crate::Result<Option<String>> {
     let active = registry::active_domain_id(&state.pool).await?;
     if active == registry::PERSONAL_DOMAIN_ID {
         return Ok(None);
@@ -1069,14 +1223,13 @@ async fn resolve_install_target(
         binding.channel.as_deref(),
         binding.pinned_version.as_deref(),
     ) else {
-        return Ok(Err(format!(
-            "整合包 {} 没有已发布的版本",
-            binding.pack_id
-        )));
+        return Ok(Err(format!("整合包 {} 没有已发布的版本", binding.pack_id)));
     };
-    let manifest_value =
-        fetch_json(state, &manifest_url(&mip_base, &binding.pack_id, target_version))
-            .await?;
+    let manifest_value = fetch_json(
+        state,
+        &manifest_url(&mip_base, &binding.pack_id, target_version),
+    )
+    .await?;
     let manifest: MipManifest = serde_json::from_value(manifest_value)?;
     manifest.validate()?;
     Ok(Ok(InstallTarget {
@@ -1213,6 +1366,10 @@ pub struct YmclJoinPreview {
     /// Local instance already holding this server's bound pack. `None` when
     /// the server has no required pack or no local instance carries it.
     pub installed: Option<YmclInstalledPack>,
+    /// Loopback address to launch against when the domain offers the
+    /// direct-connect face for this server (YAP §6.12). `None` keeps the
+    /// plain `mc_address`: the face is optional and never blocks a join.
+    pub launch_address: Option<String>,
 }
 
 fn join_unavailable(reason: String) -> YmclJoinPreview {
@@ -1235,6 +1392,7 @@ fn join_unavailable(reason: String) -> YmclJoinPreview {
         optional_target_version: None,
         optional_features: Vec::new(),
         installed: None,
+        launch_address: None,
     }
 }
 
@@ -1258,13 +1416,20 @@ async fn find_installed_instance(
             return None;
         }
     };
-    let mut candidates: Vec<(bool, chrono::DateTime<chrono::Utc>, String, String)> =
-        Vec::new();
+    let mut candidates: Vec<(
+        bool,
+        chrono::DateTime<chrono::Utc>,
+        String,
+        String,
+    )> = Vec::new();
     for metadata in instances {
-        let dir = match crate::api::instance::get_full_path(&metadata.instance.id).await {
-            Ok(dir) => dir,
-            Err(_) => continue,
-        };
+        let dir =
+            match crate::api::instance::get_full_path(&metadata.instance.id)
+                .await
+            {
+                Ok(dir) => dir,
+                Err(_) => continue,
+            };
         let pack_state = match state::load(&dir).await {
             Ok(Some(pack_state)) => pack_state,
             _ => continue,
@@ -1299,7 +1464,41 @@ async fn find_installed_instance(
 }
 
 /// Previews the join requirements of a domain server.
-pub async fn join_preview(server_id: Option<&str>) -> crate::Result<YmclJoinPreview> {
+/// Resolves the vanilla-enhanced (optional) pack binding to its target
+/// version and feature catalog. Errors here degrade the join modal to the
+/// two-option flow — the caller logs and continues.
+async fn load_optional_pack(
+    state: &State,
+    mip_base: &str,
+    optional_pack_id: &str,
+    binding: &MipPackBinding,
+) -> crate::Result<(String, Vec<super::manifest::MipFeature>)> {
+    let versions_value = fetch_json(state, &versions_url(mip_base, optional_pack_id)).await?;
+    let versions: Vec<MipVersionEntry> = serde_json::from_value(
+        versions_value
+            .get("versions")
+            .cloned()
+            .unwrap_or(serde_json::Value::Array(vec![])),
+    )?;
+    let target = resolve_target_version(
+        &versions,
+        binding.optional_channel.as_deref(),
+        binding.optional_pinned_version.as_deref(),
+    )
+    .ok_or_else(|| {
+        crate::ErrorKind::OtherError(format!(
+            "optional pack {optional_pack_id} has no version for its channel"
+        ))
+    })?;
+    let manifest_value = fetch_json(state, &manifest_url(mip_base, optional_pack_id, target)).await?;
+    let manifest: MipManifest = serde_json::from_value(manifest_value)?;
+    manifest.validate()?;
+    Ok((target.to_string(), manifest.features))
+}
+
+pub async fn join_preview(
+    server_id: Option<&str>,
+) -> crate::Result<YmclJoinPreview> {
     let state = State::get().await?;
     let Some(mip_base) = resolve_mip_base(&state).await? else {
         return Ok(join_unavailable("请先在顶栏选择一个域".to_string()));
@@ -1356,10 +1555,24 @@ pub async fn join_preview(server_id: Option<&str>) -> crate::Result<YmclJoinPrev
         optional_target_version: None,
         optional_features: Vec::new(),
         installed: None,
+        launch_address: None,
     };
+    // 直连入口（YAP §6.12）：域为这台服务器提供了 P2P 实例时，玩家侧的
+    // 实际连接地址换成 sidecar 的本地回环口；失败/不可用一律回退公网地址。
+    if let Some(p2p_instance_id) = server
+        .p2p_instance_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        && let Some(endpoint) =
+            crate::api::ymcl::p2p::launch_endpoint(p2p_instance_id).await
+    {
+        preview.launch_address = Some(endpoint.address);
+    }
     if has_pack {
         let versions_value =
-            fetch_json(&state, &versions_url(&mip_base, &binding.pack_id)).await?;
+            fetch_json(&state, &versions_url(&mip_base, &binding.pack_id))
+                .await?;
         let versions: Vec<MipVersionEntry> = serde_json::from_value(
             versions_value
                 .get("versions")
@@ -1400,38 +1613,36 @@ pub async fn join_preview(server_id: Option<&str>) -> crate::Result<YmclJoinPrev
             .filter(|id| !id.is_empty())
     {
         // 原版增强包：纯原版服给玩家的第三个下载选择（YAP §7 进服分流）。
-        let versions_value =
-            fetch_json(&state, &versions_url(&mip_base, optional_pack_id))
-                .await?;
-        let versions: Vec<MipVersionEntry> = serde_json::from_value(
-            versions_value
-                .get("versions")
-                .cloned()
-                .unwrap_or(serde_json::Value::Array(vec![])),
-        )?;
-        if let Some(target) = resolve_target_version(
-            &versions,
-            binding.optional_channel.as_deref(),
-            binding.optional_pinned_version.as_deref(),
-        ) {
-            let manifest_value = fetch_json(
-                &state,
-                &manifest_url(&mip_base, optional_pack_id, target),
-            )
-            .await?;
-            let manifest: MipManifest = serde_json::from_value(manifest_value)?;
-            manifest.validate()?;
-            preview.optional_pack_id = Some(optional_pack_id.clone());
-            preview.optional_target_version = Some(target.to_string());
-            preview.optional_features = manifest.features;
+        // 它只是可选项：解析/校验失败（接口瞬断、版本被清空）一律降级为
+        // 两选一并留日志——不能让增强包的问题挡住进服本身。
+        match load_optional_pack(&state, &mip_base, optional_pack_id, &binding).await {
+            Ok((target, features)) => {
+                preview.optional_pack_id = Some(optional_pack_id.clone());
+                preview.optional_target_version = Some(target.to_string());
+                preview.optional_features = features;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    server_id = %server.server_id,
+                    optional_pack_id = %optional_pack_id,
+                    error = %error,
+                    "Optional (vanilla-enhanced) pack binding is not resolvable; hiding the third join option"
+                );
+            }
         }
     }
-    if preview.has_pack && let Some(pack_id) = preview.pack_id.clone() {
+    if preview.has_pack
+        && let Some(pack_id) = preview.pack_id.clone()
+    {
         // 本地已装识别（YAP §7 选定即启动）：绑定包的持有者可直接进服，
         // 版本落后由 run.rs 的 pre_launch_update 在启动前权威补齐。
-        preview.installed =
-            find_installed_instance(&state, &server.server_id, &pack_id, preview.target_version.as_deref())
-                .await;
+        preview.installed = find_installed_instance(
+            &state,
+            &server.server_id,
+            &pack_id,
+            preview.target_version.as_deref(),
+        )
+        .await;
     }
     Ok(preview)
 }
@@ -1499,5 +1710,127 @@ mod tests {
         assert!(looks_like_error_page(b"  <html lang=\"en\">"));
         assert!(!looks_like_error_page(b"PK\x03\x04jar-bytes"));
         assert!(!looks_like_error_page(b"{\"code\":404}"));
+    }
+
+    fn write_file(root: &std::path::Path, relative: &str, bytes: &[u8]) {
+        let path =
+            root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn scan_hashes_pack_content_and_prunes_game_runtime_paths() {
+        let instance = tempfile::TempDir::new().unwrap();
+        let root = instance.path();
+        // Publishable content, including a file larger than one read buffer
+        // (the hash pass streams instead of loading whole files) and one
+        // nested under a name that is only pruned at the top level.
+        let big: Vec<u8> =
+            (0..(3 << 20)).map(|index| (index % 251) as u8).collect();
+        write_file(root, "mods/a.jar", b"mod-a");
+        write_file(root, "mods/b.jar", b"mod-b");
+        write_file(root, "mods/big.jar", &big);
+        write_file(root, "config/deep/nested/c.toml", b"deep = true");
+        write_file(
+            root,
+            "resourcepacks/MyPack/assets/minecraft/x.png",
+            b"nested-assets-stay",
+        );
+        // Launcher-owned game runtime, player-side and bookkeeping paths.
+        write_file(root, "assets/objects/ab/cdef", b"vanilla-asset");
+        write_file(root, "libraries/net/foo/1.0/foo.jar", b"vanilla-lib");
+        write_file(root, "versions/1.21/client.jar", b"vanilla-client");
+        write_file(root, "logs/latest.log", b"log-line");
+        write_file(root, "saves/world/level.dat", b"save-data");
+        write_file(root, super::super::state::STATE_FILE_NAME, b"{}");
+        write_file(root, super::super::state::HASH_CACHE_FILE_NAME, b"{}");
+
+        let hashes = scan_local_hashes(root).unwrap();
+
+        let mut paths: Vec<&str> = hashes.keys().map(String::as_str).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "config/deep/nested/c.toml",
+                "mods/a.jar",
+                "mods/b.jar",
+                "mods/big.jar",
+                "resourcepacks/MyPack/assets/minecraft/x.png",
+            ]
+        );
+        assert_eq!(
+            hashes["mods/a.jar"],
+            super::super::apply::sha512_hex(b"mod-a")
+        );
+        assert_eq!(
+            hashes["mods/big.jar"],
+            super::super::apply::sha512_hex(&big)
+        );
+    }
+
+    #[test]
+    fn cached_scan_reuses_matches_and_refreshes_what_changed() {
+        let instance = tempfile::TempDir::new().unwrap();
+        let root = instance.path();
+        write_file(root, "mods/a.jar", b"first");
+        write_file(root, "mods/b.jar", b"second");
+
+        let first = scan_local_hashes_cached(root).unwrap();
+        assert_eq!(
+            first["mods/a.jar"],
+            super::super::apply::sha512_hex(b"first")
+        );
+        assert!(
+            root.join(super::super::state::HASH_CACHE_FILE_NAME)
+                .is_file()
+        );
+
+        // Unchanged files keep their cached digests on the next scan.
+        let second = scan_local_hashes_cached(root).unwrap();
+        assert_eq!(second, first);
+
+        // Changed content is re-hashed…
+        write_file(root, "mods/a.jar", b"third-and-longer");
+        let third = scan_local_hashes_cached(root).unwrap();
+        assert_eq!(
+            third["mods/a.jar"],
+            super::super::apply::sha512_hex(b"third-and-longer")
+        );
+        assert_eq!(third["mods/b.jar"], second["mods/b.jar"]);
+
+        // …and deleted files drop out of the index and the cache.
+        std::fs::remove_file(root.join("mods").join("b.jar")).unwrap();
+        let fourth = scan_local_hashes_cached(root).unwrap();
+        assert!(!fourth.contains_key("mods/b.jar"));
+        let cache: std::collections::BTreeMap<String, super::HashCacheEntry> =
+            serde_json::from_slice(
+                &std::fs::read(
+                    root.join(super::super::state::HASH_CACHE_FILE_NAME),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!cache.contains_key("mods/b.jar"));
+        assert!(cache.contains_key("mods/a.jar"));
+    }
+
+    #[test]
+    fn scan_stays_correct_across_more_files_than_workers() {
+        let instance = tempfile::TempDir::new().unwrap();
+        let root = instance.path();
+        let mut expected = HashMap::new();
+        for index in 0..(SCAN_HASH_WORKERS * 5) {
+            let relative = format!("mods/pack-{index}.jar");
+            let bytes = format!("payload-{index}").into_bytes();
+            write_file(root, &relative, &bytes);
+            expected.insert(relative, super::super::apply::sha512_hex(&bytes));
+        }
+        let hashes = scan_local_hashes(root).unwrap();
+        assert_eq!(hashes, expected);
+
+        // The same walk through the cache must reproduce the digests exactly.
+        assert_eq!(scan_local_hashes_cached(root).unwrap(), expected);
     }
 }

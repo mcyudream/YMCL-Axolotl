@@ -274,6 +274,9 @@ pub enum CommandPayload {
         url: String,
     },
     OpenDiscovery,
+    /// Deep-link bounce-back with no actionable payload (third-party login
+    /// landing): the arrival itself only refocuses the launcher window.
+    Nothing,
 }
 
 #[derive(Serialize, Clone)]
