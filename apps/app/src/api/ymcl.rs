@@ -19,6 +19,10 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             ymcl_domains_state,
             ymcl_domain_add,
+            ymcl_interop_site,
+            ymcl_interop_active_site,
+            ymcl_union_status,
+            ymcl_interop_pack_download,
             ymcl_domain_remove,
             ymcl_domain_activate,
             ymcl_manifest_get,
@@ -88,6 +92,45 @@ pub async fn ymcl_domains_state() -> Result<YmclDomainsState> {
 #[tauri::command]
 pub async fn ymcl_domain_add(origin: String) -> Result<YmclDomainsState> {
     Ok(registry::add_domain(&origin).await?)
+}
+
+// mc-interop v1 exit document of a domain; None for YAP/personal domains.
+// refresh=true forces a re-fetch of the well-known document.
+// invoke('plugin:ymcl|ymcl_interop_site', { domainId, refresh? })
+#[tauri::command]
+pub async fn ymcl_interop_site(
+    domain_id: String,
+    refresh: Option<bool>,
+) -> Result<Option<theseus::ymcl::interop::InteropSiteDocument>> {
+    Ok(registry::site_document(&domain_id, refresh.unwrap_or(false)).await?)
+}
+
+// Active domain's mc-interop catalog; None unless an interop domain is active
+// invoke('plugin:ymcl|ymcl_interop_active_site')
+#[tauri::command]
+pub async fn ymcl_interop_active_site(
+) -> Result<Option<theseus::ymcl::interop::InteropSiteDocument>> {
+    Ok(registry::active_site_document().await?)
+}
+
+// Union federated-auth status of a domain (yudream-union one-click access)
+// invoke('plugin:ymcl|ymcl_union_status', { domainId })
+#[tauri::command]
+pub async fn ymcl_union_status(
+    domain_id: String,
+) -> Result<registry::YmclUnionStatus> {
+    Ok(registry::union_status(&domain_id).await?)
+}
+
+// Download an interop catalog entry's pack artifact (hash-verified) so the
+// built-in mrpack importer can create the instance from it.
+// invoke('plugin:ymcl|ymcl_interop_pack_download', { domainId, entryId })
+#[tauri::command]
+pub async fn ymcl_interop_pack_download(
+    domain_id: String,
+    entry_id: String,
+) -> Result<theseus::ymcl::interop::InteropArtifactDownload> {
+    Ok(theseus::ymcl::interop::download_entry_artifact(&domain_id, &entry_id).await?)
 }
 
 // Remove a joined domain

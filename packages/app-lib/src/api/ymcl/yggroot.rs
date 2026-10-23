@@ -71,9 +71,10 @@ fn origin_key(origin: &str) -> String {
 }
 
 /// Yggdrasil metadata document (`GET {root}`): the one answer both providers
-/// share, identified by its public signature key.
+/// share, identified by its public signature key. Public so the interop
+/// union probe can confirm a candidate root before claiming readiness.
 #[derive(Deserialize)]
-struct YmclYggMetadata {
+pub struct YmclYggMetadata {
     #[serde(
         default,
         rename = "signaturePublickey",
@@ -85,7 +86,7 @@ struct YmclYggMetadata {
 impl YmclYggMetadata {
     /// Whether this is a working Yggdrasil metadata document rather than some
     /// other 2xx JSON response served at the same path.
-    fn is_yggdrasil(&self) -> bool {
+    pub fn is_yggdrasil(&self) -> bool {
         self.signature_public_key
             .as_deref()
             .is_some_and(|key| !key.trim().is_empty())

@@ -5,9 +5,11 @@ pub mod auth;
 pub mod bundle;
 pub mod chrome;
 pub mod client;
+pub mod download_sources;
 pub mod data;
 #[cfg(feature = "tauri")]
 pub mod events;
+pub mod interop;
 pub mod manifest;
 pub mod mip;
 pub mod p2p;

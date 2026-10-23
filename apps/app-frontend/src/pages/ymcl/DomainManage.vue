@@ -24,12 +24,21 @@ import AddDomainModal from '@/components/ymcl/AddDomainModal.vue'
 import DomainImg from '@/components/ymcl/DomainImg.vue'
 import {
 	PERSONAL_DOMAIN_ID,
+	ymcl,
+	type InteropArtifactDownload,
+	type InteropPackEntry,
+	type InteropSiteDocument,
 	type YmclDomainSummary,
 	type YmclExternalProvider,
+	type YmclUnionStatus,
 } from '@/helpers/ymcl'
+import {
+	install_create_modpack_instance,
+	wait_for_install_job,
+} from '@/helpers/install'
 import { useYmclStore } from '@/store/ymcl'
 
-const { handleError } = injectNotificationManager()
+const { handleError, addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 const ymclStore = useYmclStore()
 
@@ -38,6 +47,99 @@ const username = ref('')
 const password = ref('')
 const externalProviders = ref<YmclExternalProvider[] | null>(null)
 const showLogin = ref(false)
+
+// ----- mc-interop catalog & union one-click access -----
+const catalog = ref<InteropSiteDocument | null>(null)
+const union = ref<YmclUnionStatus | null>(null)
+const unionProbing = ref(false)
+const catalogRefreshing = ref(false)
+const copiedId = ref('')
+
+const activeInterop = computed(() =>
+	ymclStore.activeDomain?.kind === 'interop' ? ymclStore.activeDomain : null,
+)
+
+async function probeUnion() {
+	const domain = activeInterop.value
+	if (!domain) return
+	unionProbing.value = true
+	try {
+		union.value = await ymcl.unionStatus(domain.id)
+	} catch (error) {
+		handleError(error)
+	} finally {
+		unionProbing.value = false
+	}
+}
+
+async function refreshCatalog() {
+	const domain = activeInterop.value
+	if (!domain) return
+	catalogRefreshing.value = true
+	try {
+		catalog.value = await ymcl.interopSite(domain.id, true)
+	} catch (error) {
+		handleError(error)
+	} finally {
+		catalogRefreshing.value = false
+	}
+}
+
+function serverAddress(pack: InteropPackEntry): string {
+	const server = pack.server
+	if (!server) return ''
+	return server.port ? `${server.address}:${server.port}` : server.address
+}
+
+async function copyServer(pack: InteropPackEntry) {
+	const address = serverAddress(pack)
+	if (!address) return
+	try {
+		await navigator.clipboard.writeText(address)
+		copiedId.value = pack.id
+		setTimeout(() => {
+			if (copiedId.value === pack.id) copiedId.value = ''
+		}, 1500)
+	} catch {
+		handleError(new Error('clipboard unavailable'))
+	}
+}
+
+watch(
+	activeInterop,
+	(domain) => {
+		catalog.value = domain?.site ?? null
+		union.value = null
+		if (domain) void probeUnion()
+	},
+	{ immediate: true },
+)
+
+const installingId = ref('')
+const installedId = ref('')
+
+/** 一键安装：下载（哈希校验）→ 内置 mrpack 导入器新建实例。 */
+async function installPack(pack: InteropPackEntry) {
+	const domain = activeInterop.value
+	if (!domain || !pack.artifact || installingId.value) return
+	installingId.value = pack.id
+	try {
+		const archive: InteropArtifactDownload = await ymcl.interopPackDownload(domain.id, pack.id)
+		const job = await install_create_modpack_instance({ type: 'fromFile', path: archive.path }, null)
+		// 等导入落定再报成功：失败走 handleError 保留现场
+		await wait_for_install_job(job.job_id)
+		installedId.value = pack.id
+		addNotification({
+			title: pack.name || pack.id,
+			text: '整合包已下载并开始导入为实例',
+			type: 'success',
+		})
+	} catch (error) {
+		handleError(error)
+	} finally {
+		installingId.value = ''
+	}
+}
 
 const route = useRoute()
 // ymcl://add-site?url={origin} lands here via /settings?add_site={origin}#ymcl-domains
@@ -135,6 +237,66 @@ const messages = defineMessages({
 	role: {
 		id: 'app.settings.ymcl-domains.role',
 		defaultMessage: '角色',
+	},
+	interoptBadge: {
+		id: 'app.settings.ymcl-domains.interop-badge',
+		defaultMessage: '跨站站点',
+	},
+	catalogTitle: {
+		id: 'app.settings.ymcl-domains.catalog-title',
+		defaultMessage: '服务器目录',
+	},
+	catalogEmpty: {
+		id: 'app.settings.ymcl-domains.catalog-empty',
+		defaultMessage: '该站点暂未发布任何实例',
+	},
+	refreshCatalog: {
+		id: 'app.settings.ymcl-domains.catalog-refresh',
+		defaultMessage: '刷新目录',
+	},
+	unionTitle: {
+		id: 'app.settings.ymcl-domains.union-title',
+		defaultMessage: '联合认证（union）',
+	},
+	unionReady: {
+		id: 'app.settings.ymcl-domains.union-ready',
+		defaultMessage: '联合认证已就绪',
+	},
+	unionMissing: {
+		id: 'app.settings.ymcl-domains.union-missing',
+		defaultMessage: '未接入联合认证',
+	},
+	unionProbe: {
+		id: 'app.settings.ymcl-domains.union-probe',
+		defaultMessage: '一键检测',
+	},
+	copyAddress: {
+		id: 'app.settings.ymcl-domains.copy-address',
+		defaultMessage: '复制服务器地址',
+	},
+	copiedLabel: {
+		id: 'app.settings.ymcl-domains.copied',
+		defaultMessage: '已复制',
+	},
+	withPack: {
+		id: 'app.settings.ymcl-domains.with-pack',
+		defaultMessage: '整合包',
+	},
+	serverOnly: {
+		id: 'app.settings.ymcl-domains.server-only',
+		defaultMessage: '纯服务器',
+	},
+	installPack: {
+		id: 'app.settings.ymcl-domains.install-pack',
+		defaultMessage: '一键安装',
+	},
+	installing: {
+		id: 'app.settings.ymcl-domains.installing',
+		defaultMessage: '下载中…',
+	},
+	installedLabel: {
+		id: 'app.settings.ymcl-domains.installed',
+		defaultMessage: '已开始导入',
 	},
 	noLoginMethods: {
 		id: 'app.settings.ymcl-domains.no-login-methods',
@@ -310,7 +472,15 @@ async function switchRole(roleId: string) {
 					</template>
 				</DomainImg>
 				<div class="min-w-0 flex-1">
-					<div class="truncate font-semibold text-contrast">{{ domain.display_name }}</div>
+					<div class="flex items-center gap-2">
+						<span class="truncate font-semibold text-contrast">{{ domain.display_name }}</span>
+						<span
+							v-if="domain.kind === 'interop'"
+							class="shrink-0 rounded-full bg-surface-5 px-2 py-0.5 text-xs font-medium text-secondary"
+						>
+							{{ formatMessage(messages.interoptBadge) }}
+						</span>
+					</div>
 					<div class="truncate text-xs text-secondary">{{ domain.origin }}</div>
 				</div>
 				<div class="flex shrink-0 items-center gap-2">
@@ -369,6 +539,99 @@ async function switchRole(roleId: string) {
 				{{ ymclStore.activeDomain.capabilities.protocol_version }}
 			</span>
 		</div>
+
+		<template v-if="activeInterop">
+			<h3 class="m-0 mt-2 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.catalogTitle) }}
+			</h3>
+			<div class="flex flex-col gap-2">
+				<div
+					v-for="pack in catalog?.packs ?? []"
+					:key="pack.id"
+					class="flex flex-col gap-1 rounded-xl border border-solid border-surface-5 bg-bg-raised p-3"
+				>
+					<div class="flex flex-wrap items-center gap-2">
+						<span class="font-semibold text-contrast">{{ pack.name || pack.id }}</span>
+						<span v-if="pack.name && pack.name !== pack.id" class="text-xs text-muted-foreground">{{ pack.id }}</span>
+						<span
+							v-if="pack.artifact"
+							class="rounded-full bg-brand px-2 py-0.5 text-xs font-semibold text-brand-inverted-on/bg-brand"
+						>
+							{{ formatMessage(messages.withPack) }} · r{{ pack.revision ?? '?' }}
+						</span>
+						<span
+							v-else
+							class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-medium text-secondary"
+						>
+							{{ formatMessage(messages.serverOnly) }}
+						</span>
+						<span v-if="pack.game_version" class="text-xs text-secondary">MC {{ pack.game_version }}</span>
+						<span v-if="pack.loader" class="text-xs text-secondary">{{ pack.loader }}{{ pack.loader_version ? ` ${pack.loader_version}` : '' }}</span>
+					</div>
+					<p v-if="pack.summary" class="m-0 text-sm text-secondary">{{ pack.summary }}</p>
+					<div class="flex flex-wrap items-center gap-2">
+						<div v-if="pack.server" class="flex items-center gap-2">
+							<code class="truncate text-xs text-secondary">{{ serverAddress(pack) }}</code>
+							<ButtonStyled type="standard">
+								<button @click="copyServer(pack)">
+									{{ copiedId === pack.id ? formatMessage(messages.copiedLabel) : formatMessage(messages.copyAddress) }}
+								</button>
+							</ButtonStyled>
+						</div>
+						<ButtonStyled v-if="pack.artifact" type="standard">
+							<button :disabled="installingId === pack.id" @click="installPack(pack)">
+								{{ installingId === pack.id
+									? formatMessage(messages.installing)
+									: installedId === pack.id
+										? formatMessage(messages.installedLabel)
+										: formatMessage(messages.installPack) }}
+							</button>
+						</ButtonStyled>
+					</div>
+				</div>
+				<p
+					v-if="!catalog?.packs?.length"
+					class="m-0 text-sm text-secondary"
+				>
+					{{ formatMessage(messages.catalogEmpty) }}
+				</p>
+			</div>
+			<div class="flex items-center gap-2">
+				<ButtonStyled type="standard" circular>
+					<button
+						v-tooltip="formatMessage(messages.refreshCatalog)"
+						:disabled="catalogRefreshing"
+						@click="refreshCatalog"
+					>
+						<RefreshCwIcon :class="{ 'animate-spin': catalogRefreshing }" />
+					</button>
+				</ButtonStyled>
+			</div>
+
+			<h3 class="m-0 mt-2 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.unionTitle) }}
+			</h3>
+			<div class="flex flex-wrap items-center gap-2 text-sm">
+				<span v-if="unionProbing" class="text-secondary">…</span>
+				<template v-else-if="union?.available">
+					<span class="rounded-full bg-brand px-2 py-0.5 text-xs font-semibold text-brand-inverted-on/bg-brand">
+						{{ formatMessage(messages.unionReady) }}
+					</span>
+					<span class="text-secondary">{{ union.site_name || union.site_code }}</span>
+					<code class="truncate text-xs text-secondary">{{ union.yggdrasil_root }}</code>
+				</template>
+				<template v-else>
+					<span class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-medium text-secondary">
+						{{ formatMessage(messages.unionMissing) }}
+					</span>
+					<ButtonStyled type="standard">
+						<button @click="probeUnion">
+							{{ formatMessage(messages.unionProbe) }}
+						</button>
+					</ButtonStyled>
+				</template>
+			</div>
+		</template>
 
 		<template v-if="showAccountSection">
 			<h3 class="m-0 mt-2 text-lg font-semibold text-contrast">

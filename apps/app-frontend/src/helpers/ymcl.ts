@@ -304,6 +304,74 @@ export interface YmclDomainSummary {
 	is_personal: boolean
 	is_active: boolean
 	capabilities?: YmclCapabilities | null
+	/** 'yap' = YDA adapter site, 'interop' = mc-interop v1 exit site */
+	kind?: string | null
+	site?: InteropSiteDocument | null
+}
+
+// ----- mc-interop v1 (cross-site unified exit) -----
+
+export interface InteropSiteInfo {
+	id: string
+	name?: string | null
+	description?: string | null
+	domain?: string | null
+}
+
+export interface InteropServer {
+	address: string
+	port?: number | null
+}
+
+export interface InteropArtifact {
+	format?: string | null
+	url: string
+	size?: number | null
+	sha1?: string | null
+	sha512?: string | null
+}
+
+export interface InteropPackEntry {
+	id: string
+	name?: string | null
+	summary?: string | null
+	revision?: number | null
+	game_version?: string | null
+	loader?: string | null
+	loader_version?: string | null
+	artifact?: InteropArtifact | null
+	server?: InteropServer | null
+}
+
+export interface InteropPeerEntry {
+	site_id: string
+	name?: string | null
+	description?: string | null
+	domain?: string | null
+	manifest_url?: string | null
+}
+
+export interface InteropSiteDocument {
+	site?: InteropSiteInfo | null
+	packs: InteropPackEntry[]
+	peers: InteropPeerEntry[]
+	updated_at?: string | null
+}
+
+export interface InteropArtifactDownload {
+	path: string
+	entry_id: string
+	name?: string | null
+	game_version?: string | null
+	loader?: string | null
+}
+
+export interface YmclUnionStatus {
+	available: boolean
+	site_code?: string | null
+	site_name?: string | null
+	features: string[]
+	yggdrasil_root?: string | null
 }
 
 export interface YmclDomainsState {
@@ -521,6 +589,14 @@ export const ymcl = {
 		invoke<YmclDomainsState>('plugin:ymcl|ymcl_domain_activate', { id }),
 	manifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_get'),
 	refreshManifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_refresh'),
+	interopSite: (domainId: string, refresh = false) =>
+		invoke<InteropSiteDocument | null>('plugin:ymcl|ymcl_interop_site', { domainId, refresh }),
+	activeInteropSite: () =>
+		invoke<InteropSiteDocument | null>('plugin:ymcl|ymcl_interop_active_site'),
+	unionStatus: (domainId: string) =>
+		invoke<YmclUnionStatus>('plugin:ymcl|ymcl_union_status', { domainId }),
+	interopPackDownload: (domainId: string, entryId: string) =>
+		invoke<InteropArtifactDownload>('plugin:ymcl|ymcl_interop_pack_download', { domainId, entryId }),
 	session: (domainId: string) =>
 		invoke<YmclStoredSession | null>('plugin:ymcl|ymcl_session_get', { domainId }),
 	passwordLogin: (domainId: string, username: string, password: string) =>

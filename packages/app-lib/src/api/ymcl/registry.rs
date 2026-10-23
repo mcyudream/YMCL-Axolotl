@@ -16,6 +16,11 @@ use crate::State;
 pub const PERSONAL_DOMAIN_ID: &str = "personal";
 const PERSONAL_DOMAIN_LABEL: &str = "个人域";
 
+/// Domain protocol kinds. `yap` = a YDA adapter site (capabilities/manifest),
+/// `interop` = a plain mc-interop v1 exit site (well-known SiteDocument).
+pub const DOMAIN_KIND_YAP: &str = "yap";
+pub const DOMAIN_KIND_INTEROP: &str = "interop";
+
 #[derive(Serialize, Clone, Debug)]
 pub struct YmclDomainSummary {
     pub id: String,
@@ -28,6 +33,12 @@ pub struct YmclDomainSummary {
     pub is_active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<YmclCapabilities>,
+    /// Protocol kind; absent on the personal domain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Cached mc-interop exit document; only for `interop` domains.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<crate::ymcl::interop::InteropSiteDocument>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -44,6 +55,18 @@ struct DomainRow {
     logo_url: Option<String>,
     capabilities_json: Option<String>,
     manifest_json: Option<String>,
+    kind: String,
+    site_json: Option<String>,
+}
+
+impl DomainRow {
+    fn site_document(
+        &self,
+    ) -> Option<crate::ymcl::interop::InteropSiteDocument> {
+        self.site_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+    }
 }
 
 /// Normalizes user input into a canonical origin used for storage and all
@@ -120,6 +143,8 @@ fn summary_from_row(
             .capabilities_json
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok()),
+        kind: Some(row.kind.clone()),
+        site: row.site_document(),
     }
 }
 
@@ -132,6 +157,8 @@ fn personal_summary(active_domain_id: &str) -> YmclDomainSummary {
         is_personal: true,
         is_active: active_domain_id == PERSONAL_DOMAIN_ID,
         capabilities: None,
+        kind: None,
+        site: None,
     }
 }
 
@@ -158,7 +185,7 @@ pub async fn set_active_domain_id(
 
 async fn list_domain_rows(exec: &SqlitePool) -> crate::Result<Vec<DomainRow>> {
     let rows: Vec<DomainRow> = sqlx::query_as(
-        "SELECT id, origin, display_name, logo_url, capabilities_json, manifest_json \
+        "SELECT id, origin, display_name, logo_url, capabilities_json, manifest_json, kind, site_json \
          FROM ymcl_domains ORDER BY added_at ASC",
     )
     .fetch_all(exec)
@@ -186,6 +213,20 @@ pub async fn active_domain_id(pool: &SqlitePool) -> crate::Result<String> {
     read_active_domain_id(pool).await
 }
 
+/// (id, display label) of the active domain; `None` for the personal
+/// domain. Feature surfaces that hang off the active domain (download
+/// distribution, stats) resolve their target through this.
+pub async fn active_domain_brief() -> crate::Result<Option<(String, String)>> {
+    let state = State::get().await?;
+    let Some(row) = active_domain_row(&state.pool).await? else {
+        return Ok(None);
+    };
+    Ok(Some((
+        row.id.clone(),
+        display_label(&row.display_name, &row.origin),
+    )))
+}
+
 pub async fn domains_state() -> crate::Result<YmclDomainsState> {
     let state = State::get().await?;
     domains_state_impl(&state.pool).await
@@ -205,22 +246,27 @@ pub async fn domain_origin(domain_id: &str) -> crate::Result<String> {
 }
 
 /// Loads the cached capabilities of a joined domain, re-probing on absence.
+/// Interop domains have no YAP capabilities; they yield an empty capability
+/// set so frontend feature gates stay off instead of erroring.
 pub async fn domain_capabilities(
     domain_id: &str,
 ) -> crate::Result<YmclCapabilities> {
     let state = State::get().await?;
-    let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT capabilities_json FROM ymcl_domains WHERE id = $1",
+    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT capabilities_json, kind FROM ymcl_domains WHERE id = $1",
     )
     .bind(domain_id)
     .fetch_optional(&state.pool)
     .await?;
-    if let Some((Some(json),)) = row {
+    if let Some((Some(ref json), _)) = row {
         if let Ok(capabilities) =
             serde_json::from_str::<YmclCapabilities>(&json)
         {
             return Ok(capabilities);
         }
+    }
+    if row.map(|r| r.1.as_deref() == Some(DOMAIN_KIND_INTEROP)).unwrap_or(false) {
+        return Ok(YmclCapabilities::default());
     }
     refresh_capabilities(domain_id).await
 }
@@ -234,6 +280,14 @@ pub async fn refresh_capabilities(
 ) -> crate::Result<YmclCapabilities> {
     let state = State::get().await?;
     let origin = domain_origin(domain_id).await?;
+    let kind: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT kind FROM ymcl_domains WHERE id = $1")
+            .bind(domain_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if kind.and_then(|r| r.0).as_deref() == Some(DOMAIN_KIND_INTEROP) {
+        return Ok(YmclCapabilities::default());
+    }
     let capabilities =
         fetch_capabilities(&origin, &state.api_semaphore, &state.pool).await?;
     sqlx::query("UPDATE ymcl_domains SET capabilities_json = $1 WHERE id = $2")
@@ -244,16 +298,26 @@ pub async fn refresh_capabilities(
     Ok(capabilities)
 }
 
-/// Adds a domain by probing its adapter capabilities. Fails when the origin is
-/// already registered, unreachable, or speaks an unsupported protocol version.
+/// Adds a domain by probing its adapter capabilities, falling back to the
+/// mc-interop v1 well-known exit for plain sites. Fails when the origin is
+/// already registered, unreachable, or speaks neither protocol.
 pub async fn add_domain(origin_input: &str) -> crate::Result<YmclDomainsState> {
+    let state = State::get().await?;
+    add_domain_in(&state.pool, &state.api_semaphore, origin_input).await
+}
+
+/// [`add_domain`] 的可注入形态（live 测试用临时库直跑，不经全局 State）。
+pub async fn add_domain_in(
+    sqlite: &sqlx::SqlitePool,
+    semaphore: &crate::util::fetch::FetchSemaphore,
+    origin_input: &str,
+) -> crate::Result<YmclDomainsState> {
     let origin = normalize_origin(origin_input)?;
     let id = domain_id_for_origin(&origin);
-    let state = State::get().await?;
 
     let existing = sqlx::query("SELECT id FROM ymcl_domains WHERE id = $1")
         .bind(&id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(sqlite)
         .await?;
     if existing.is_some() {
         return Err(crate::ErrorKind::OtherError(format!(
@@ -262,41 +326,65 @@ pub async fn add_domain(origin_input: &str) -> crate::Result<YmclDomainsState> {
         .into());
     }
 
+    // YAP adapter first (full in-launcher site), mc-interop exit second
+    // (plain catalog site), so adapter sites never downgrade.
     let capabilities =
-        client::fetch_capabilities(&origin, &state.api_semaphore, &state.pool)
-            .await
-            .map_err(|e| {
-                crate::ErrorKind::OtherError(format!(
-                    "Could not reach domain {origin}: {e}"
-                ))
-            })?;
-    validate_protocol_version(capabilities.protocol_version)?;
-
-    let display_name = capabilities
-        .domain
-        .as_ref()
-        .map(|d| d.name.clone())
-        .unwrap_or_else(|| origin.clone());
-    let logo_url = capabilities
-        .domain
-        .as_ref()
-        .and_then(|d| d.logo_url.clone());
+        client::fetch_capabilities(&origin, semaphore, sqlite).await;
+    let (kind, display_name, logo_url, capabilities_json, site_json) =
+        match capabilities {
+            Ok(capabilities) => {
+                validate_protocol_version(capabilities.protocol_version)?;
+                let display_name = capabilities
+                    .domain
+                    .as_ref()
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| origin.clone());
+                let logo_url =
+                    capabilities.domain.as_ref().and_then(|d| d.logo_url.clone());
+                (
+                    DOMAIN_KIND_YAP,
+                    display_name,
+                    logo_url,
+                    Some(serde_json::to_string(&capabilities)?),
+                    None,
+                )
+            }
+            Err(_) => {
+                let site = super::interop::fetch_site_document(&origin, semaphore, sqlite)
+                    .await
+                    .map_err(|interop_error| {
+                        crate::ErrorKind::OtherError(format!(
+                            "Could not reach domain {origin}: not a YAP adapter nor an mc-interop v1 site ({interop_error})"
+                        ))
+                    })?;
+                let display_name = site.display_name(&origin);
+                (
+                    DOMAIN_KIND_INTEROP,
+                    display_name,
+                    None,
+                    None,
+                    Some(serde_json::to_string(&site)?),
+                )
+            }
+        };
     let now = chrono::Utc::now().timestamp();
 
     sqlx::query(
-        "INSERT INTO ymcl_domains (id, origin, display_name, logo_url, capabilities_json, added_at) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO ymcl_domains (id, origin, display_name, logo_url, capabilities_json, added_at, kind, site_json) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&id)
     .bind(&origin)
     .bind(&display_name)
     .bind(&logo_url)
-    .bind(&serde_json::to_string(&capabilities)?)
+    .bind(capabilities_json)
     .bind(now)
-    .execute(&state.pool)
+    .bind(kind)
+    .bind(site_json)
+    .execute(sqlite)
     .await?;
 
-    domains_state_impl(&state.pool).await
+    domains_state_impl(sqlite).await
 }
 
 pub async fn remove_domain(id: &str) -> crate::Result<YmclDomainsState> {
@@ -314,6 +402,10 @@ pub async fn remove_domain(id: &str) -> crate::Result<YmclDomainsState> {
     let active = read_active_domain_id(&state.pool).await?;
     if active == id {
         set_active_domain_id(PERSONAL_DOMAIN_ID, &state.pool).await?;
+        // 被移除的是激活域：清空下载分发，回退本地设置。
+        if let Err(error) = super::download_sources::refresh_active().await {
+            tracing::warn!("Clear download distribution on remove failed: {error}");
+        }
     }
     domains_state_impl(&state.pool).await
 }
@@ -323,35 +415,40 @@ pub async fn remove_domain(id: &str) -> crate::Result<YmclDomainsState> {
 pub async fn activate_domain(id: &str) -> crate::Result<YmclDomainsState> {
     let state = State::get().await?;
     if id != PERSONAL_DOMAIN_ID {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT origin FROM ymcl_domains WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&state.pool)
-                .await?;
-        let origin = row.map(|r| r.0).ok_or_else(|| {
-            crate::ErrorKind::OtherError("Domain not found".to_string())
-        })?;
-
-        let has_manifest: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT manifest_json FROM ymcl_domains WHERE id = $1",
+        let row: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT origin, kind FROM ymcl_domains WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&state.pool)
         .await?;
-        if has_manifest.and_then(|r| r.0).is_none() {
-            let manifest = client::fetch_manifest(
-                &origin,
-                &state.api_semaphore,
-                &state.pool,
+        let (origin, kind) = row.ok_or_else(|| {
+            crate::ErrorKind::OtherError("Domain not found".to_string())
+        })?;
+
+        // Interop domains keep their catalog in site_json, fetched at add
+        // time; there is no YAP manifest to prefetch.
+        if kind.as_deref() != Some(DOMAIN_KIND_INTEROP) {
+            let has_manifest: Option<(Option<String>,)> = sqlx::query_as(
+                "SELECT manifest_json FROM ymcl_domains WHERE id = $1",
             )
-            .await
-            .map_err(|e| {
-                crate::ErrorKind::OtherError(format!(
-                    "Could not load domain manifest: {e}"
-                ))
-            })?;
-            validate_protocol_version(manifest.protocol_version)?;
-            store_manifest(id, &manifest, &state.pool).await?;
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+            if has_manifest.and_then(|r| r.0).is_none() {
+                let manifest = client::fetch_manifest(
+                    &origin,
+                    &state.api_semaphore,
+                    &state.pool,
+                )
+                .await
+                .map_err(|e| {
+                    crate::ErrorKind::OtherError(format!(
+                        "Could not load domain manifest: {e}"
+                    ))
+                })?;
+                validate_protocol_version(manifest.protocol_version)?;
+                store_manifest(id, &manifest, &state.pool).await?;
+            }
         }
     }
     let now = chrono::Utc::now().timestamp();
@@ -361,6 +458,10 @@ pub async fn activate_domain(id: &str) -> crate::Result<YmclDomainsState> {
         .execute(&state.pool)
         .await?;
     set_active_domain_id(id, &state.pool).await?;
+    // 下载分发快照跟随激活域：失败不阻断激活（回退本地设置，后台自愈）。
+    if let Err(error) = super::download_sources::refresh_active().await {
+        tracing::warn!("Refresh download distribution on activate failed: {error}");
+    }
     domains_state_impl(&state.pool).await
 }
 
@@ -397,6 +498,10 @@ pub async fn active_manifest() -> crate::Result<Option<YmclManifest>> {
     let Some(row) = active_domain_row(&state.pool).await? else {
         return Ok(None);
     };
+    // Interop domains have no YAP manifest; the catalog lives in site_json.
+    if row.kind == DOMAIN_KIND_INTEROP {
+        return Ok(None);
+    }
     if let Some(json) = row.manifest_json.as_deref() {
         if let Ok(manifest) = serde_json::from_str::<YmclManifest>(json) {
             return Ok(Some(manifest));
@@ -442,6 +547,9 @@ pub async fn refresh_manifest() -> crate::Result<Option<YmclManifest>> {
     let Some(row) = active_domain_row(&state.pool).await? else {
         return Ok(None);
     };
+    if row.kind == DOMAIN_KIND_INTEROP {
+        return Ok(None);
+    }
     let manifest = fetch_manifest_authed(&row.id, &row.origin, &state).await?;
     validate_protocol_version(manifest.protocol_version)?;
     store_manifest(&row.id, &manifest, &state.pool).await?;
@@ -470,5 +578,151 @@ pub async fn refresh_manifest() -> crate::Result<Option<YmclManifest>> {
         .execute(&state.pool)
         .await?;
     }
+    // capabilities 重探可能新增/移除 download face，同步分发快照。
+    if let Err(error) = super::download_sources::refresh_active().await {
+        tracing::warn!("Refresh download distribution on manifest refresh failed: {error}");
+    }
     Ok(Some(manifest))
+}
+
+/// Protocol kind of a joined domain (`yap` | `interop`); `None` when unknown.
+pub async fn domain_kind(domain_id: &str) -> crate::Result<Option<String>> {
+    let state = State::get().await?;
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT kind FROM ymcl_domains WHERE id = $1")
+            .bind(domain_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    Ok(row.and_then(|r| r.0))
+}
+
+/// The cached mc-interop exit document of a domain, refreshing it from the
+/// site when `refresh` is set. Errors when the domain is not an interop site.
+pub async fn site_document(
+    domain_id: &str,
+    refresh: bool,
+) -> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
+    let state = State::get().await?;
+    site_document_in(&state.pool, &state.api_semaphore, domain_id, refresh).await
+}
+
+/// [`site_document`] 的可注入形态（live 测试用）。
+pub async fn site_document_in(
+    sqlite: &sqlx::SqlitePool,
+    semaphore: &crate::util::fetch::FetchSemaphore,
+    domain_id: &str,
+    refresh: bool,
+) -> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
+    let Some(row) = sqlx::query_as::<_, DomainRow>(
+        "SELECT id, origin, display_name, logo_url, capabilities_json, manifest_json, kind, site_json \
+         FROM ymcl_domains WHERE id = $1",
+    )
+    .bind(domain_id)
+    .fetch_optional(sqlite)
+    .await?
+    else {
+        return Err(crate::ErrorKind::OtherError(
+            "Domain not found".to_string(),
+        )
+        .into());
+    };
+    if row.kind != DOMAIN_KIND_INTEROP {
+        return Ok(None);
+    }
+    if !refresh {
+        if let Some(site) = row.site_document() {
+            return Ok(Some(site));
+        }
+    }
+    // Re-fetch: either explicitly asked for, or the cache is unreadable.
+    let site = super::interop::fetch_site_document(&row.origin, semaphore, sqlite).await?;
+    let json = serde_json::to_string(&site)?;
+    sqlx::query("UPDATE ymcl_domains SET site_json = $1 WHERE id = $2")
+        .bind(&json)
+        .bind(domain_id)
+        .execute(sqlite)
+        .await?;
+    Ok(Some(site))
+}
+
+/// The active domain's mc-interop exit document, or `None` when the active
+/// domain is the personal domain or a YAP site.
+pub async fn active_site_document(
+) -> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
+    let state = State::get().await?;
+    let Some(row) = active_domain_row(&state.pool).await? else {
+        return Ok(None);
+    };
+    if row.kind != DOMAIN_KIND_INTEROP {
+        return Ok(None);
+    }
+    match row.site_document() {
+        Some(site) => Ok(Some(site)),
+        None => site_document(&row.id, true).await,
+    }
+}
+
+/// Union federated-auth status of a domain: whether the site runs
+/// `yudream-union` v1 and which Yggdrasil root its accounts use.
+#[derive(Serialize, Clone, Debug)]
+pub struct YmclUnionStatus {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    pub features: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yggdrasil_root: Option<String>,
+}
+
+/// Probes the domain origin for the yudream-union discovery document and
+/// resolves its Yggdrasil root. `available: false` covers both "no union"
+/// and "unsupported union version" so the UI shows one honest state.
+pub async fn union_status(
+    domain_id: &str,
+) -> crate::Result<YmclUnionStatus> {
+    let state = State::get().await?;
+    let origin = domain_origin(domain_id).await?;
+    let unavailable = |features: Vec<String>| YmclUnionStatus {
+        available: false,
+        site_code: None,
+        site_name: None,
+        features,
+        yggdrasil_root: None,
+    };
+    let Some(meta) =
+        super::interop::probe_union(&origin, &state.api_semaphore, &state.pool)
+            .await
+    else {
+        return Ok(unavailable(Vec::new()));
+    };
+    // The union authlib root serves standard Yggdrasil metadata; the shared
+    // provider probe confirms it actually answers before we claim readiness.
+    let ygg = super::yggroot::ygg_endpoints(&origin).await?;
+    let metadata = crate::util::fetch::fetch_json::<
+        super::yggroot::YmclYggMetadata,
+    >(
+        reqwest::Method::GET,
+        &ygg.yggdrasil_root,
+        None,
+        None,
+        None,
+        &state.api_semaphore,
+        &state.pool,
+    )
+    .await;
+    let confirmed = metadata
+        .map(|m| m.is_yggdrasil())
+        .unwrap_or(false);
+    if !confirmed {
+        return Ok(unavailable(meta.features));
+    }
+    Ok(YmclUnionStatus {
+        available: true,
+        site_code: meta.site.as_ref().and_then(|s| s.code.clone()),
+        site_name: meta.site.as_ref().and_then(|s| s.name.clone()),
+        features: meta.features,
+        yggdrasil_root: Some(ygg.yggdrasil_root),
+    })
 }
