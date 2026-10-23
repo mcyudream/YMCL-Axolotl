@@ -315,14 +315,25 @@ async fn normalize_and_store(
 ) -> crate::Result<YmclStoredSession> {
     let state = State::get().await?;
     let session = fetch_session_info(&state, origin, &access_token).await?;
-    // Silent renewal depends entirely on the host issuing a refresh token;
-    // surface its absence so a no-renewal deployment is visible in the log.
-    if refresh_token
+    let has_refresh = refresh_token
         .as_deref()
-        .is_none_or(|token| token.trim().is_empty())
-    {
-        tracing::warn!(
-            "Domain {domain_id} login did not include a refresh token; the session will require interactive re-login after the access token expires (expires_in={expires_in:?})"
+        .is_some_and(|token| !token.trim().is_empty());
+    // 无刷新令牌的主机（Sa-Token 密码登录 / OAuth 公共客户端）不再本地强制
+    // 过期：expires_in 缺失或为 0 时按持久会话存储，失效以服务端 401 为准。
+    // 生产实测 expires_in=0 会让启动器在无感期内反复要求重新登录，而 Sa-Token
+    // 本身由服务端超时 + 活跃续期管理，本地时钟并不是失效依据。
+    let expires_at = match expires_in {
+        Some(seconds) if seconds > 0 => {
+            Some(chrono::Utc::now().timestamp() + seconds)
+        }
+        _ if has_refresh => {
+            Some(chrono::Utc::now().timestamp() + DEFAULT_TOKEN_LIFETIME_SECS)
+        }
+        _ => None,
+    };
+    if !has_refresh {
+        tracing::debug!(
+            "Domain {domain_id} login has no refresh token; session stored as persistent (expires_in={expires_in:?}) — re-login is driven by server 401, not local expiry"
         );
     } else {
         tracing::debug!(
@@ -335,8 +346,7 @@ async fn normalize_and_store(
         domain_id: domain_id.to_string(),
         access_token,
         refresh_token,
-        expires_at: expires_in
-            .map(|seconds| chrono::Utc::now().timestamp() + seconds.max(0)),
+        expires_at,
         session,
         updated_at: chrono::Utc::now().timestamp(),
     };
