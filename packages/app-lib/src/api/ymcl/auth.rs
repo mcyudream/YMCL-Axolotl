@@ -387,7 +387,10 @@ struct YdaLoginResponse {
     token: Option<String>,
     #[serde(default, alias = "accessToken")]
     access_token: Option<String>,
-    #[serde(default)]
+    /// yda 双令牌部署的登录/交换响应是 camelCase `refreshToken`（生产实测
+    /// swustmc.cn：`"refreshToken": "ydr_..."`）；缺失别名的旧版本会把它
+    /// 解析成 None，导致 2h 整点必弹重新登录。
+    #[serde(default, alias = "refreshToken")]
     refresh_token: Option<String>,
     #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
     expires_in: Option<i64>,
@@ -1608,6 +1611,36 @@ mod domain_rejection_tests {
 mod session_renewal_tests {
     use super::*;
     use chrono::Utc;
+
+    /// 生产契约锁（swustmc.cn 实测响应）：yda 双令牌登录/交换响应以
+    /// camelCase `refreshToken` + 字符串 `expiresIn` 下发，登录会话解析必须
+    /// 取到刷新令牌——缺失别名的旧版本解析成 None，2h 整点必弹重新登录。
+    #[test]
+    fn parses_production_dual_token_login_response() {
+        let payload = serde_json::json!({
+            "code": 200,
+            "message": "操作成功",
+            "data": {
+                "token": "4f739d33-satoken",
+                "tokenName": "Authorization",
+                "refreshToken": "ydr_prod_refresh",
+                "dualTokenEnabled": true,
+                "expiresIn": "7200",
+                "userId": "332905881803034624"
+            },
+            "timestamp": "1792789548810"
+        });
+        let login: YdaLoginResponse =
+            serde_json::from_value(unwrap_token_payload(payload))
+                .expect("production login payload must deserialize");
+        let (access_token, refresh_token, expires_in) =
+            login_session_parts(&login)
+                .expect("production payload must carry a token");
+        assert_eq!(access_token, "4f739d33-satoken");
+        assert_eq!(refresh_token.as_deref(), Some("ydr_prod_refresh"),
+            "camelCase refreshToken 必须被解析，否则无感续期全废");
+        assert_eq!(expires_in, Some(7200));
+    }
 
     fn stored(
         expires_in: Option<i64>,
