@@ -325,8 +325,15 @@ export async function executeAction(
 				null,
 			)
 			const done = await wait_for_install_job(job.job_id)
-			const newInstanceId = done.target.type === 'new_instance' ? done.target.instance_id : null
-			if (!newInstanceId) return false
+			// 安装器可能复用已有实例（重复安装去重为 existing_instance）：
+			// 两种 target 都给出可启动实例，否则把真实状态抛出来而不是拒绝。
+			const instanceId =
+				done.target.type === 'new_instance'
+					? done.target.instance_id
+					: done.target.type === 'existing_instance'
+						? done.target.instance_id
+						: null
+			if (!instanceId) throw new Error('安装完成但未返回实例 ID')
 			if (address && !isOfflineMode()) {
 				await invoke('plugin:instance|instance_run', {
 					instanceId: newInstanceId,
