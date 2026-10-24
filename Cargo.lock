@@ -398,6 +398,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axolotl-seed-map-native"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6783,7 +6790,7 @@ dependencies = [
 
 [[package]]
 name = "theseus"
-version = "1.9.7-beta.5"
+version = "1.9.7-beta.6"
 dependencies = [
  "async-minecraft-ping",
  "async-recursion",
@@ -8706,13 +8713,13 @@ dependencies = [
 
 [[package]]
 name = "ymcl_gui"
-version = "1.9.7-beta.5"
+version = "1.9.7-beta.6"
 dependencies = [
  "ashpd",
  "async_zip",
+ "axolotl-seed-map-native",
  "block2",
  "bytes",
- "cc",
  "chrono",
  "daedalus",
  "dashmap",

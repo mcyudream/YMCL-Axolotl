@@ -28,6 +28,66 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.6',
+		version: '1.9.7-beta.6',
+		publishedAt: '2026-10-24',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.6',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.6',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Friend-site modpack entries can be installed with one click and join the server directly, with cross-site catalog union detection built in.',
+					'zh-CN': '友站条目支持一键安装整合包并直达进服，内置跨站目录 union 一键检测。',
+				},
+				{
+					'en-US':
+						'The mc-interop v1 cross-site catalog is now integrated; friend-site content is served by the in-domain server-list contribution page.',
+					'zh-CN': '接入 mc-interop v1 跨站目录，友站内容改由域内 server-list 贡献页承载。',
+				},
+				{
+					'en-US':
+						'When the active domain distributes downloads, every download category follows the mirror order published by the site and falls back automatically; local mirror picks are managed by the domain.',
+					'zh-CN': '激活域下发下载分发时，各类下载按站点下发的镜像顺序下载并自动回退，本地镜像选择交由域统一管理。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Session parsing now accepts the refreshToken camelCase alias, fixing the production launcher prompting re-login at every two-hour mark.',
+					'zh-CN': '登录会话解析兼容 refreshToken camelCase 别名，修复生产环境每 2 小时整点必弹重新登录的问题。',
+				},
+				{
+					'en-US':
+						'Domain sessions without a refresh_token or expires_in are stored as persistent sessions instead of being force-expired locally.',
+					'zh-CN': '域主机未下发 refresh_token 或 expires_in 时按持久会话保存，不再被本地强制过期。',
+				},
+				{
+					'en-US': 'Linux builds register the mcinterop deep-link protocol at runtime.',
+					'zh-CN': 'Linux 运行时正确注册 mcinterop 深链协议。',
+				},
+				{
+					'en-US':
+						'One-click install-and-join reuses compatible instances and surfaces the real failure reason instead of failing silently.',
+					'zh-CN': '一键安装并进服复用兼容实例，失败时暴露真实原因而非静默失败。',
+				},
+				{
+					'en-US': 'Interop modpack instances use the entry name instead of the literal pack name.',
+					'zh-CN': '互操作整合包实例名改用条目名而非字面量 pack 名。',
+				},
+			],
+			changed: [
+				{
+					'en-US':
+						'Build pipeline overhaul: the seed-map engine moved to a dedicated crate and release CI gained cache warming and leaner installers.',
+					'zh-CN': '构建管线重做：seed-map 引擎抽为独立 crate，发布 CI 增加缓存预热与更精简的安装器产物。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.5',
 		version: '1.9.7-beta.5',
 		publishedAt: '2026-10-04',

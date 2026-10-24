@@ -1,11 +1,11 @@
 {
 	"name": "@modrinth/app-frontend",
 	"private": true,
-	"version": "1.9.7-beta.5",
+	"version": "1.9.7-beta.6",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "pnpm contributors:sync && vue-tsc --noEmit && vite build",
+		"build": "vue-tsc --noEmit && vite build",
 		"contributors:sync": "node ../../scripts/axolotl/sync-contributors.mjs",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
