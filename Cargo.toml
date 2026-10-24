@@ -7,6 +7,7 @@ members = [
   "packages/daedalus",
   "packages/modrinth-content-management",
   "packages/path-util",
+  "packages/seed-map-native",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ async-tungstenite = { version = "0.31.0", default-features = false, features = [
 ] }
 async-walkdir = "2.1.0"
 async_zip = "0.0.18"
+axolotl-seed-map-native = { path = "packages/seed-map-native" }
 base64 = "0.22.1"
 bon = "3.9.3"
 bytemuck = "1.24.0"
@@ -201,6 +203,7 @@ wildcard_dependencies = "warn"
 tauri-plugin-window-state = { git = "https://github.com/Lintern/plugins-workspace", branch = "v2" }
 
 [profile.dev]
+debug = "line-tables-only"
 # Keep incremental on (Cargo default). Disabling it forces full crate rebuilds
 # of ~170k-line app-lib on every touch and made local app:dev unusably slow.
 
@@ -218,3 +221,6 @@ opt-level = 3
 opt-level = "s"  # Optimize for binary size
 strip = true  # Remove debug symbols
 lto = false
+# Local release rebuilds reuse codegen work; ephemeral CI disables this with
+# CARGO_INCREMENTAL=0 rather than uploading incremental compiler state.
+incremental = true

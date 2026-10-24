@@ -3,89 +3,17 @@ use std::{
     path::Path,
 };
 
+use axolotl_seed_map_native::{
+    BridgeFeature, axolotl_seed_map_biome_at, axolotl_seed_map_find_features,
+    axolotl_seed_map_get_spawn, axolotl_seed_map_java_version,
+    axolotl_seed_map_render, axolotl_seed_map_scan_vein,
+    axolotl_seed_map_surface_heights,
+};
 use quartz_nbt::{NbtCompound, NbtTag};
 use serde::{Deserialize, Serialize};
 
 pub mod ores;
 pub mod rng;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct BridgeFeature {
-    x: i32,
-    z: i32,
-    kind: u32,
-    approximate: u8,
-    end_ship: i8,
-}
-
-unsafe extern "C" {
-    fn axolotl_seed_map_java_version(version: i32) -> i32;
-    fn axolotl_seed_map_render(
-        seed: u64,
-        minecraft_version: i32,
-        generator_flags: i32,
-        dimension: i32,
-        x: i32,
-        z: i32,
-        scale: i32,
-        width: i32,
-        height: i32,
-        elevation: i32,
-        terrain: i32,
-        contours: i32,
-        highlight_mask: *const u8,
-        rgb: *mut u8,
-        rgb_len: usize,
-    ) -> i32;
-    fn axolotl_seed_map_find_features(
-        seed: u64,
-        minecraft_version: i32,
-        generator_flags: i32,
-        dimension: i32,
-        min_x: i32,
-        min_z: i32,
-        max_x: i32,
-        max_z: i32,
-        feature_mask: u32,
-        out: *mut BridgeFeature,
-        out_len: usize,
-    ) -> usize;
-    fn axolotl_seed_map_get_spawn(
-        seed: u64,
-        minecraft_version: i32,
-        generator_flags: i32,
-        x: *mut i32,
-        z: *mut i32,
-    ) -> i32;
-    fn axolotl_seed_map_biome_at(
-        seed: u64,
-        minecraft_version: i32,
-        generator_flags: i32,
-        dimension: i32,
-        x: i32,
-        y: i32,
-        z: i32,
-    ) -> i32;
-    fn axolotl_seed_map_surface_heights(
-        seed: u64,
-        minecraft_version: i32,
-        generator_flags: i32,
-        x: i32,
-        z: i32,
-        width: i32,
-        height: i32,
-        out: *mut f32,
-    ) -> i32;
-    fn axolotl_seed_map_scan_vein(
-        seed: u64,
-        chunk_x: i32,
-        chunk_z: i32,
-        vein_kind: i32,
-        out_xyz: *mut i32,
-        out_cap: usize,
-    ) -> usize;
-}
 
 pub const FEATURE_VILLAGE: u32 = 1 << 0;
 pub const FEATURE_OUTPOST: u32 = 1 << 1;

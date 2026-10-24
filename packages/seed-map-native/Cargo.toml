@@ -1,0 +1,13 @@
+[package]
+name = "axolotl-seed-map-native"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+links = "axolotl-cubiomes"
+
+[build-dependencies]
+cc = { workspace = true, features = ["parallel"] }
+
+[lints]
+workspace = true
