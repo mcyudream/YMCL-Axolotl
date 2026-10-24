@@ -781,6 +781,13 @@ fn main() {
             window_state_builder.build()
         })
         .setup(|app| {
+            // Linux/dev 运行时注册 deep-link schemes（安装器之外的 mcinterop:// 场景）
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
+            }
+
             theseus::ymcl::events::start_event_loop(app.handle().clone());
             lightweight_mode::init(&app.handle());
             let app_handle = app.handle().clone();
