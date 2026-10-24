@@ -23,7 +23,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
@@ -34,15 +33,23 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - name: Read pinned Rust version
+        id: rust-version
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs'
+          const version = readFileSync('rust-toolchain.toml', 'utf8').match(/^channel\s*=\s*"([^"]+)"/m)[1]
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`)
+          NODE
+
+      - name: Set up pinned Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+          components: rustfmt
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Blockbench skin editor dependencies
-        run: npm ci
-        working-directory: third-party/blockbench
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Run release guardrails
         env:
@@ -98,71 +105,41 @@ jobs:
             args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
           - name: macOS universal
             runner: macos-15
+            targets: aarch64-apple-darwin x86_64-apple-darwin
             args: --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
+      CARGO_INCREMENTAL: '0'
       # Cargo.toml keeps release LTO off for local/CI builds. Published
-      # binaries force fat LTO here. PR CI (axolotl-ci.yml) also sets this
-      # to false explicitly for Windows packaging.
+      # binaries retain fat LTO; installer variants reuse the compiled binary.
       CARGO_PROFILE_RELEASE_LTO: 'true'
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           submodules: recursive
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-
-      - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - name: Restore release caches and prepare dependencies
+        uses: ./.github/actions/setup-release-build
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-
-      # Restores a warm dependency cache. Release uses fat LTO while PR CI
-      # builds with LTO off, so this job keeps its own shared-key suffix and
-      # only restores: writing here would strand entries no later release
-      # could read (tags cannot share caches with each other).
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: axolotl-rust-deps-release
-          save-if: false
+          runner: ${{ matrix.runner }}
+          targets: ${{ matrix.targets }}
 
       - name: Require full LTO for published binaries
         shell: bash
         run: |
           if [ "${CARGO_PROFILE_RELEASE_LTO}" != "true" ]; then
-            echo "CARGO_PROFILE_RELEASE_LTO must be 'true' for release builds, got '${CARGO_PROFILE_RELEASE_LTO:-}'" >&2
+            echo "Release builds require full LTO" >&2
             exit 1
           fi
-          echo "Release LTO enabled"
-
-      - name: Add macOS universal targets
-        if: runner.os == 'macOS'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get -o Acquire::ForceIPv4=true update && sudo apt-get -o Acquire::ForceIPv4=true install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Blockbench skin editor dependencies
-        run: npm ci
-        working-directory: third-party/blockbench
-
-      - uses: ./.github/actions/replace-gradle-mirror
 
       - name: Set release version
-        run: node scripts/axolotl/set-version.mjs "${{ github.ref_name }}"
+        shell: bash
+        run: |
+          node scripts/axolotl/set-version.mjs "${{ github.ref_name }}"
+          cargo update --workspace --offline
 
       - name: Build and upload release assets
         uses: tauri-apps/tauri-action@1ddc7b49b13c3038297360482fcb3e058764d7c9 # v0.6.2
@@ -175,7 +152,7 @@ jobs:
         with:
           projectPath: apps/app
           tauriScript: pnpm tauri
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} -- --locked --timings
           tagName: ${{ github.ref_name }}
           releaseName: Axolotl Launcher ${{ github.ref_name }}
           releaseDraft: true
@@ -221,7 +198,8 @@ jobs:
           }
           gh release delete-asset "${{ github.ref_name }}" $modernInstallers[0].Name --yes
 
-          pnpm --filter @modrinth/app tauri build --config tauri-release.conf.json --config tauri-native.conf.json
+          pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
+          if ($LASTEXITCODE -ne 0) { throw "Native NSIS bundling failed" }
 
           $nativeInstallers = @(Get-ChildItem $outDir -Filter '*-setup.exe' -File)
           if ($nativeInstallers.Count -ne 1) {
@@ -270,7 +248,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          ref: main
 
       - name: Download updater signatures
         env:

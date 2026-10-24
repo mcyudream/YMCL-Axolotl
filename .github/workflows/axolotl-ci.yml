@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: axolotl-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   guardrails:
     runs-on: ubuntu-latest
@@ -38,6 +42,7 @@ jobs:
       - run: node scripts/axolotl/brand-guard.mjs
       - run: node scripts/axolotl/i18n-check.mjs
       - run: node scripts/axolotl/downgrade-app-db.test.mjs
+      - run: node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs
       - run: cargo fmt --all --check
 
   desktop:
@@ -49,6 +54,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       SQLX_OFFLINE: true
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -62,8 +69,7 @@ jobs:
       # Replaces an sccache setup whose startup probe failed on every run:
       # the shared cache service rejected it, the enable step was skipped, and
       # Windows rebuilt the whole dependency tree uncached (~56 minutes).
-      # The shared key deliberately matches the release workflow's build job,
-      # so tagged releases can restore the cache this job keeps warm on main.
+      # Full-LTO release caches are warmed separately by prepare-release-cache.
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -73,11 +79,29 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: pnpm install --frozen-lockfile
-      - name: Install Blockbench skin editor dependencies
-        run: npm ci
-        working-directory: third-party/blockbench
       - uses: ./.github/actions/replace-gradle-mirror
-      - run: pnpm --filter @modrinth/app-frontend build
+      - name: Cache frontend and Java build tools
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            .turbo
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.gradle/jdks
+            packages/app-lib/java/.cache
+            .cache/build-resources/*.json
+            packages/app-lib/java/build/libs
+            apps/app/resources/blockbench-skin
+            third-party/blockbench/dist/skin.bundle.js
+          key: ${{ runner.os }}-${{ runner.arch }}-axolotl-build-tools-${{ hashFiles('pnpm-lock.yaml', 'packages/app-lib/java/**/*.kts', 'packages/app-lib/java/**/*.toml', 'packages/app-lib/java/**/*.properties') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-axolotl-build-tools-${{ hashFiles('pnpm-lock.yaml', 'packages/app-lib/java/**/*.kts', 'packages/app-lib/java/**/*.toml', 'packages/app-lib/java/**/*.properties') }}-
+            ${{ runner.os }}-${{ runner.arch }}-axolotl-build-tools-
+      - run: pnpm exec turbo run build --filter=@modrinth/app-frontend
+        env:
+          TAURI_ENV_PLATFORM: ${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'macos' || 'linux' }}
+      - name: Test native seed-map bridge
+        run: cargo test --package axolotl-seed-map-native --locked
       - name: Test version metadata writes
         run: cargo test --package theseus writing_version_info_creates_missing_parent_directory
       - run: cargo check --package ymcl_gui --features updater
@@ -93,9 +117,9 @@ jobs:
             throw "Expected one modern NSIS installer, found $($installers.Count)"
           }
           Write-Output "Built modern installer: $($installers[0].Name)"
-      - name: Build native NSIS Windows installer
+      - name: Bundle native NSIS Windows installer from the same binary
         if: runner.os == 'Windows'
-        run: pnpm --filter @modrinth/app tauri build
+        run: pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
       - name: Verify native NSIS Windows installer
         if: runner.os == 'Windows'
         shell: pwsh

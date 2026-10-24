@@ -1,0 +1,82 @@
+name: Prepare release caches
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '**/Cargo.toml'
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .cargo/**
+      - pnpm-lock.yaml
+      - package.json
+      - turbo.jsonc
+      - .nvmrc
+      - packages/app-lib/java/**
+      - third-party/blockbench
+      - apps/app/tauri*.json
+      - scripts/axolotl/prepare-build*.mjs
+      - scripts/axolotl/sync-blockbench-skin-editor.mjs
+      - .github/actions/setup-release-build/**
+      - .github/actions/replace-gradle-mirror/**
+      - .github/workflows/prepare-release-cache.yml
+      - .github/workflows/axolotl-release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    if: github.ref == 'refs/heads/main'
+    name: Warm (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            args: --config tauri-release.conf.json --config tauri-updater.conf.json
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            args: --config tauri-release.conf.json --config tauri-updater.conf.json
+          - name: Windows x64
+            runner: windows-2025
+            args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
+          - name: macOS universal
+            runner: macos-15
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            args: --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+    runs-on: ${{ matrix.runner }}
+    env:
+      SQLX_OFFLINE: true
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_RELEASE_LTO: 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - uses: ./.github/actions/setup-release-build
+        with:
+          runner: ${{ matrix.runner }}
+          targets: ${{ matrix.targets }}
+      - name: Warm the exact release compilation profile
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
+        run: |
+          read -ra args <<< "$BUILD_ARGS"
+          pnpm --filter @modrinth/app tauri build --no-bundle "${args[@]}" -- --locked --timings
+      - name: Warm installer tool downloads without signing or publishing
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
+          TAURI_BUNDLER_DMG_IGNORE_CI: ${{ runner.os == 'macOS' && 'true' || '' }}
+        run: |
+          read -ra args <<< "$BUILD_ARGS"
+          pnpm --filter @modrinth/app tauri bundle --no-sign "${args[@]}" --config '{"bundle":{"createUpdaterArtifacts":false}}'

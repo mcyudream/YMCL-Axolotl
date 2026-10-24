@@ -1,0 +1,113 @@
+name: Prepare release build
+description: Restore release-compatible Rust artifacts, package downloads, and verified shared resources.
+inputs:
+  runner:
+    description: Runner image label, shared by cache producers and release consumers.
+    required: true
+  targets:
+    description: Space-separated Rust targets to install and prefetch.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+
+    - name: Read pinned toolchain and tool cache paths
+      id: toolchain
+      shell: bash
+      run: |
+        node --input-type=module <<'NODE'
+        import { appendFileSync, readFileSync } from 'node:fs'
+        import { homedir } from 'node:os'
+        import { join } from 'node:path'
+        const version = readFileSync('rust-toolchain.toml', 'utf8').match(/^channel\s*=\s*"([^"]+)"/m)[1]
+        const tools = process.platform === 'win32'
+          ? join(process.env.LOCALAPPDATA, 'tauri')
+          : process.platform === 'darwin'
+            ? join(homedir(), 'Library/Caches/tauri')
+            : join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'tauri')
+        appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntauri-tools=${tools}\n`)
+        appendFileSync(process.env.GITHUB_ENV, `NPM_CONFIG_CACHE=${join(process.cwd(), '.cache/npm')}\n`)
+        NODE
+    - name: Install the pinned Rust toolchain
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ steps.toolchain.outputs.version }}
+        targets: ${{ inputs.targets }}
+
+    - name: Cache full-LTO Rust dependencies
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        shared-key: axolotl-release-lto-v2-${{ inputs.runner }}
+        # Workspace build output can contain embedded release secrets.
+        cache-workspace-crates: false
+        cache-bin: false
+        cache-on-failure: true
+        save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+
+    - name: Cache npm, Java toolchains, Gradle and Tauri bundler downloads
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          .cache/npm
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          ~/.gradle/jdks
+          packages/app-lib/java/.cache
+          ${{ steps.toolchain.outputs.tauri-tools }}
+        key: release-tools-v2-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'third-party/blockbench/package-lock.json', 'packages/app-lib/java/**/*.kts', 'packages/app-lib/java/gradle/**', '.github/actions/setup-release-build/action.yml') }}
+        restore-keys: |
+          release-tools-v2-${{ inputs.runner }}-${{ runner.arch }}-
+
+    - name: Cache compiled Java agents and Blockbench resources
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          .cache/build-resources/*.json
+          packages/app-lib/java/build/libs
+          apps/app/resources/blockbench-skin
+          third-party/blockbench/dist/skin.bundle.js
+        key: release-resources-v1-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'scripts/axolotl/prepare-build-resources.mjs', 'scripts/axolotl/sync-blockbench-skin-editor.mjs', 'packages/app-lib/java/src/**', 'packages/app-lib/java/gradle/**', 'packages/app-lib/java/*.kts', 'packages/app-lib/java/gradle.properties', 'packages/app-lib/java/gradlew*', 'third-party/blockbench/package*.json', 'third-party/blockbench/build.js', 'third-party/blockbench/tsconfig.json', 'third-party/blockbench/js/**', 'third-party/blockbench/lib/**', 'third-party/blockbench/lang/**', 'third-party/blockbench/keymaps/**', 'third-party/blockbench/themes/**', 'third-party/blockbench/css/**', 'third-party/blockbench/assets/**', 'third-party/blockbench/font/**', 'third-party/blockbench/index.html') }}
+        restore-keys: |
+          release-resources-v1-${{ inputs.runner }}-${{ runner.arch }}-
+
+    - name: Cache frontend build results
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: .turbo
+        key: release-frontend-v1-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+        restore-keys: |
+          release-frontend-v1-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
+    - name: Cache Linux package downloads
+      if: runner.os == 'Linux'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: .cache/apt/*.deb
+        key: release-apt-v1-${{ inputs.runner }}-${{ runner.arch }}-${{ env.ImageVersion }}-${{ hashFiles('.github/actions/setup-release-build/action.yml') }}
+        restore-keys: |
+          release-apt-v1-${{ inputs.runner }}-${{ runner.arch }}-
+    - name: Install Linux build dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        mkdir -p .cache/apt/partial
+        sudo apt-get -o Acquire::ForceIPv4=true update
+        sudo apt-get -o Acquire::ForceIPv4=true -o Dir::Cache::archives="$PWD/.cache/apt" -o APT::Keep-Downloaded-Packages=true install -y --no-install-recommends pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+
+    - uses: ./.github/actions/replace-gradle-mirror
+    - name: Install workspace packages from the pnpm store
+      shell: bash
+      run: pnpm install --frozen-lockfile --prefer-offline
+    - name: Prefetch Rust crates and prepare Java and Blockbench in parallel
+      shell: bash
+      env:
+        BUILD_TARGETS: ${{ inputs.targets }}
+      run: |
+        read -ra targets <<< "$BUILD_TARGETS"
+        pnpm app:prepare "${targets[@]}"

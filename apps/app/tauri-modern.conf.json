@@ -1,6 +1,6 @@
 {
 	"build": {
-		"beforeBuildCommand": "pnpm turbo run build --filter=@modrinth/app-frontend && cargo build --release --package axolotl-installer-ui"
+		"beforeBuildCommand": "node ../../scripts/axolotl/prepare-build-resources.mjs && pnpm turbo run build --filter=@modrinth/app-frontend && cargo build --release --package axolotl-installer-ui"
 	},
 	"bundle": {
 		"windows": {

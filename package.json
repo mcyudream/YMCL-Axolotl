@@ -8,6 +8,8 @@
 		"app:dev": "turbo run dev --filter=@modrinth/app",
 		"app:dev:test": "pnpm --filter @modrinth/app dev:test",
 		"app:build": "turbo run build --filter=@modrinth/app",
+		"app:prepare": "node scripts/axolotl/prepare-build.mjs",
+		"app:build:debug": "pnpm --filter @modrinth/app tauri build --debug --no-bundle --config tauri-release.conf.json",
 		"build": "turbo run build --continue",
 		"lint": "turbo run lint lint:ancillary --continue",
 		"lint:ancillary": "prettier --check .github README.md CLAUDE.md Cargo.toml package.json pnpm-workspace.yaml turbo.jsonc crowdin.yml web-types.json _typos.toml tombi.toml clippy.toml rustfmt.toml",

@@ -13,9 +13,7 @@ const bundle = resolve(blockbenchRoot, 'dist/skin.bundle.js')
 try {
 	await access(bundle, constants.R_OK)
 } catch {
-	throw new Error(
-		`Missing ${bundle}. Run npm run build-skin in ${blockbenchRoot} before syncing.`,
-	)
+	throw new Error(`Missing ${bundle}. Run npm run build-skin in ${blockbenchRoot} before syncing.`)
 }
 
 await mkdir(destination, { recursive: true })
@@ -29,9 +27,15 @@ await Promise.all([
 ])
 
 const bundleContents = await readFile(bundle)
-await writeIfChanged(resolve(destination, 'dist/skin.bundle.js.gz'), gzipSync(bundleContents, { level: 9 }))
+await writeIfChanged(
+	resolve(destination, 'dist/skin.bundle.js.gz'),
+	gzipSync(bundleContents, { level: 9 }),
+)
 expectedFiles.add('dist/skin.bundle.js.gz')
 await removeStaleFiles(destination)
+// A successful sync may leave every resource byte-identical. Its completion
+// time must still advance, otherwise Cargo rebuilds Blockbench indefinitely.
+await writeFile(resolve(blockbenchRoot, 'dist/.axolotl-skin-sync'), '')
 
 async function syncTree(sourceDirectory) {
 	for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {

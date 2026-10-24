@@ -74,7 +74,40 @@
 			]
 		},
 		"@modrinth/app#build": {
-			"cache": false
+			"cache": false,
+			"passThroughEnv": [
+				"CARGO_*",
+				"RUST*",
+				"SCCACHE_*",
+				"CC*",
+				"CXX*",
+				"CFLAGS*",
+				"AR",
+				"ARFLAGS*",
+				"CMAKE_*",
+				"PKG_CONFIG*",
+				"SQLX_OFFLINE",
+				"DATABASE_URL",
+				"TAURI_*",
+				"APPLE_*",
+				"CI",
+				"JAVA_HOME",
+				"GRADLE_USER_HOME",
+				"GRADLE_OPTS",
+				"JAVA_OPTS",
+				"NPM_CONFIG_*",
+				"npm_config_*",
+				"AXOLOTL_*",
+				"CURSEFORGE_API_KEY",
+				"MODRINTH_*",
+				"VITE_*"
+			]
+		},
+		"@modrinth/app-frontend#build": {
+			"dependsOn": ["^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*", "$TURBO_ROOT$/apps/app/tauri.conf.json"],
+			"outputs": ["dist/**"],
+			"env": ["NODE_ENV", "TAURI_ENV_PLATFORM", "TAURI_ENV_DEBUG", "MODRINTH_*", "VITE_*"]
 		},
 		"lint": {
 			"env": [
