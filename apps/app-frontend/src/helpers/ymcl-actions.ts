@@ -7,6 +7,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { isOfflineMode } from '@/composables/useNetworkStatus'
 import { resolveGcLaunchIntent } from '@/helpers/instance'
+import { install_create_modpack_instance, wait_for_install_job } from '@/helpers/install'
 import type { YmclNavigationItem } from '@/helpers/ymcl'
 import { interpretYmclServerActionResponse } from '@/helpers/ymcl'
 
@@ -96,6 +97,8 @@ export function isYmclActionExecutable(
 			return !!params.address
 		case 'client:install-pack':
 			return !!params.instanceId || !!params.packId
+		case 'client:install-and-join':
+			return !!params.origin && !!params.entryId
 		case 'client:open-page':
 			return !!(params.pageId ?? params.page ?? params.id)
 		case 'client:navigate': {
@@ -304,6 +307,33 @@ export async function executeAction(
 			if (!instanceId) return false
 			await preLaunchUpdate(instanceId)
 			await invoke('plugin:ymcl|ymcl_pack_apply_update', { instanceId })
+			return true
+		}
+		case 'client:install-and-join': {
+			// 友站条目一键链路：下载哈希校验 → mrpack 导入为实例 → 以
+			// quick-play 直连友站服务器地址。
+			const origin = String(params.origin ?? '')
+			const entryId = String(params.entryId ?? '')
+			const address = String(params.address ?? '')
+			if (!origin || !entryId) return false
+			const archive = await invoke('plugin:ymcl|ymcl_interop_pack_download_origin', {
+				origin,
+				entryId,
+			})
+			const job = await install_create_modpack_instance(
+				{ type: 'fromFile', path: archive.path },
+				null,
+			)
+			const done = await wait_for_install_job(job.job_id)
+			const newInstanceId = done.target.type === 'new_instance' ? done.target.instance_id : null
+			if (!newInstanceId) return false
+			if (address && !isOfflineMode()) {
+				await invoke('plugin:instance|instance_run', {
+					instanceId: newInstanceId,
+					serverAddress: address,
+					offlineMode: isOfflineMode(),
+				})
+			}
 			return true
 		}
 		case 'client:copy-server':
