@@ -1,75 +1,6 @@
 use std::process::Command;
 use tauri_build::{DefaultPermissionRule, InlinedPlugin};
 
-#[cfg(windows)]
-const NPM_COMMAND: &str = "npm.cmd";
-#[cfg(not(windows))]
-const NPM_COMMAND: &str = "npm";
-
-fn run_command(command: &mut Command, description: &str) {
-    let status = command.status().unwrap_or_else(|error| {
-        panic!("Failed to start {description}: {error}")
-    });
-    assert!(
-        status.success(),
-        "{description} failed with status {status}"
-    );
-}
-
-fn newest_mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
-    let mut newest: Option<std::time::SystemTime> = None;
-    if path.is_file() {
-        return path.metadata().and_then(|m| m.modified()).ok();
-    }
-    if path.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if let Some(time) = newest_mtime(&entry.path()) {
-                    newest =
-                        Some(newest.map_or(time, |current| current.max(time)));
-                }
-            }
-        }
-    }
-    newest
-}
-
-fn blockbench_skin_is_fresh(
-    blockbench_dir: &std::path::Path,
-    synced_bundle: &std::path::Path,
-) -> bool {
-    let bundle = blockbench_dir.join("dist/skin.bundle.js");
-    let Ok(bundle_time) = bundle.metadata().and_then(|m| m.modified()) else {
-        return false;
-    };
-    let Ok(synced_time) = synced_bundle.metadata().and_then(|m| m.modified())
-    else {
-        return false;
-    };
-    if synced_time < bundle_time {
-        return false;
-    }
-
-    // Inputs that feed `npm run build-skin` or the resource sync. node_modules
-    // is intentionally excluded: it is huge and its mtimes churn independently
-    // of Blockbench sources.
-    let input_paths = [
-        blockbench_dir.join("package.json"),
-        blockbench_dir.join("package-lock.json"),
-        blockbench_dir.join("build.js"),
-        blockbench_dir.join("js"),
-        blockbench_dir.join("css"),
-        blockbench_dir.join("assets"),
-        blockbench_dir.join("font"),
-        blockbench_dir.join("index.html"),
-    ];
-    input_paths.iter().all(|input| {
-        newest_mtime(input)
-            .map(|input_time| input_time <= bundle_time)
-            .unwrap_or(true)
-    })
-}
-
 fn build_blockbench_skin_editor() {
     if std::env::var_os("AXOLOTL_SKIP_BLOCKBENCH_BUILD").is_some_and(|value| {
         !value.is_empty() && value != "0" && value != "false"
@@ -79,45 +10,23 @@ fn build_blockbench_skin_editor() {
         );
         return;
     }
-
-    let blockbench_dir = std::path::Path::new("../../third-party/blockbench");
-    assert!(
-        blockbench_dir.join("package.json").is_file(),
-        "Blockbench skin editor submodule is missing. Run git submodule update --init --recursive."
-    );
-
-    let synced_bundle = std::path::Path::new(
-        "resources/blockbench-skin/dist/skin.bundle.js.gz",
-    );
-    if blockbench_skin_is_fresh(blockbench_dir, synced_bundle) {
-        return;
-    }
-
-    if !blockbench_dir.join("node_modules").is_dir() {
-        run_command(
-            Command::new(NPM_COMMAND)
-                .arg("ci")
-                .current_dir(blockbench_dir),
-            "Blockbench skin editor dependency install",
-        );
-    }
-
-    run_command(
-        Command::new(NPM_COMMAND)
-            .arg("run")
-            .arg("build-skin")
-            .current_dir(blockbench_dir),
-        "Blockbench skin editor build",
-    );
-    run_command(
-        Command::new("node")
-            .arg("scripts/axolotl/sync-blockbench-skin-editor.mjs")
-            .current_dir("../.."),
-        "Blockbench skin editor resource sync",
-    );
+    let status = Command::new("node")
+        .args(["scripts/axolotl/prepare-build-resources.mjs", "blockbench"])
+        .current_dir("../..")
+        .status()
+        .expect("Node.js is required to prepare the Blockbench skin editor");
+    assert!(status.success(), "Blockbench preparation failed: {status}");
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=../../.nvmrc");
+    println!(
+        "cargo:rerun-if-changed=../../scripts/axolotl/prepare-build-resources.mjs"
+    );
+    println!("cargo:rerun-if-env-changed=AXOLOTL_SKIP_BLOCKBENCH_BUILD");
+    println!(
+        "cargo:rerun-if-changed=../../scripts/axolotl/sync-blockbench-skin-editor.mjs"
+    );
     println!("cargo:rerun-if-changed=tauri.conf.json");
     println!("cargo:rerun-if-changed=tauri.windows.conf.json");
     println!("cargo:rerun-if-changed=tauri.macos.conf.json");
@@ -133,7 +42,14 @@ fn main() {
         "cargo:rerun-if-changed=../../third-party/blockbench/package-lock.json"
     );
     println!("cargo:rerun-if-changed=../../third-party/blockbench/build.js");
+    println!(
+        "cargo:rerun-if-changed=../../third-party/blockbench/tsconfig.json"
+    );
     println!("cargo:rerun-if-changed=../../third-party/blockbench/js");
+    println!("cargo:rerun-if-changed=../../third-party/blockbench/lib");
+    println!("cargo:rerun-if-changed=../../third-party/blockbench/lang");
+    println!("cargo:rerun-if-changed=../../third-party/blockbench/keymaps");
+    println!("cargo:rerun-if-changed=../../third-party/blockbench/themes");
     println!("cargo:rerun-if-changed=../../third-party/blockbench/css");
     println!("cargo:rerun-if-changed=../../third-party/blockbench/assets");
     println!("cargo:rerun-if-changed=../../third-party/blockbench/font");
@@ -145,35 +61,6 @@ fn main() {
     std::fs::create_dir_all("../app-frontend/dist")
         .expect("Failed to create the frontend distribution directory");
     build_blockbench_skin_editor();
-
-    let cubiomes_dir = std::path::Path::new("vendor/cubiomes");
-    cc::Build::new()
-        .include(cubiomes_dir)
-        .include(cubiomes_dir.join("tables"))
-        .file("src/seed_map/cubiomes_bridge.c")
-        .files([
-            "vendor/cubiomes/biomenoise.c",
-            "vendor/cubiomes/biomes.c",
-            "vendor/cubiomes/finders.c",
-            "vendor/cubiomes/generator.c",
-            "vendor/cubiomes/layers.c",
-            "vendor/cubiomes/noise.c",
-            "vendor/cubiomes/quadbase.c",
-            "vendor/cubiomes/util.c",
-        ])
-        .opt_level(3)
-        .flag_if_supported("-fwrapv")
-        .warnings(false)
-        .compile("axolotl-cubiomes");
-
-    println!("cargo:rerun-if-changed=src/seed_map/cubiomes_bridge.c");
-    println!("cargo:rerun-if-changed=src/seed_map/cubiomes_bridge.h");
-    println!("cargo:rerun-if-changed=vendor/cubiomes");
-    // Build scripts run for the host, so use Cargo's target metadata rather
-    // than `cfg(target_os = ...)` when deciding whether libm is needed.
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
-        println!("cargo:rustc-link-lib=m");
-    }
 
     // Sadly, there is no better way to do it right now
     // You could try parsing source code here and detecting #[tauri::command]

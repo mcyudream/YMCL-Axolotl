@@ -526,6 +526,9 @@ async fn download_for_site(
 
     verify_hash(&bytes, &artifact)?;
 
+    // 临时文件名用条目名：安装器从文件 stem 取实例名，固定 pack.mrpack
+    // 会让所有任务都显示「pack」。非法字符折叠为下划线，重名由
+    // cache_scope/entry_id 目录隔离。
     let destination = state
         .directories
         .caches_dir()
@@ -533,7 +536,7 @@ async fn download_for_site(
         .join("mc-interop")
         .join(cache_scope)
         .join(entry_id)
-        .join("pack.mrpack");
+        .join(format!("{}.mrpack", sanitize_file_stem(&name)));
     if let Some(parent) = destination.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -545,6 +548,27 @@ async fn download_for_site(
         game_version: entry.game_version.clone(),
         loader: entry.loader.clone(),
     })
+}
+
+/// 文件名安全的条目名（安装器实例名来源）；空白收敛，空/点回退 pack。
+fn sanitize_file_stem(name: &str) -> String {
+    let folded: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '(' | ')') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let collapsed = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() || collapsed == "." {
+        "pack".to_string()
+    } else {
+        collapsed
+    }
 }
 
 async fn stream_artifact(
