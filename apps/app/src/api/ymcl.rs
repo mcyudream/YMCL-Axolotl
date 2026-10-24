@@ -23,6 +23,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_interop_active_site,
             ymcl_union_status,
             ymcl_interop_pack_download,
+            ymcl_interop_origin_catalog,
             ymcl_domain_remove,
             ymcl_domain_activate,
             ymcl_manifest_get,
@@ -111,6 +112,15 @@ pub async fn ymcl_interop_site(
 pub async fn ymcl_interop_active_site(
 ) -> Result<Option<theseus::ymcl::interop::InteropSiteDocument>> {
     Ok(registry::active_site_document().await?)
+}
+
+// mc-interop v1 合并目录（任意 origin 的 well-known 直拉，含互采友站）
+// invoke('plugin:ymcl|ymcl_interop_origin_catalog', { origin })
+#[tauri::command]
+pub async fn ymcl_interop_origin_catalog(
+    origin: String,
+) -> Result<theseus::ymcl::interop::InteropSiteDocument> {
+    Ok(theseus::ymcl::interop::fetch_origin_catalog(&origin).await?)
 }
 
 // Union federated-auth status of a domain (yudream-union one-click access)

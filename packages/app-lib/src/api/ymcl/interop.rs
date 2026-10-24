@@ -19,6 +19,9 @@ use crate::util::fetch::fetch_json;
 /// path; published paths never change meaning (spec §2.1).
 pub const INTEROP_WELL_KNOWN_PATH: &str = "/.well-known/mc-interop-v1.json";
 
+/// YDA 插件端点路径（well-known 未网关转发时的回退发现地址）。
+pub const FALLBACK_CATALOG_PATH: &str = "/api/plugins/mc-interop/interop/v1/site";
+
 /// Discovery path of the yudream-union federated-auth plugin.
 pub const UNION_META_PATH: &str =
     "/api/plugins/yudream-union/peer/meta";
@@ -231,10 +234,45 @@ pub async fn fetch_site_document(
     api_semaphore: &crate::util::fetch::FetchSemaphore,
     pool: &sqlx::SqlitePool,
 ) -> crate::Result<InteropSiteDocument> {
-    let url = interop_url(origin);
+    fetch_catalog_url(&interop_url(origin), api_semaphore, pool).await
+}
+
+/// Fetches the unified exit document of an arbitrary origin (State-backed).
+///
+/// 先按协议读 `{origin}/.well-known/mc-interop-v1.json`；未网关转发的站点
+/// （如开发环境前端代理不覆盖根路径）回退插件端点 `/api/plugins/mc-interop/interop/v1/site`。
+pub async fn fetch_origin_catalog(
+    origin: &str,
+) -> crate::Result<InteropSiteDocument> {
+    let state = State::get().await?;
+    let base = origin.trim_end_matches('/').to_string();
+    match fetch_site_document(&base, &state.api_semaphore, &state.pool).await {
+        Ok(document) => Ok(document),
+        Err(well_known_error) => {
+            let fallback_url = format!(
+                "{base}{FALLBACK_CATALOG_PATH}"
+            );
+            fetch_catalog_url(&fallback_url, &state.api_semaphore, &state.pool)
+                .await
+                .map_err(|fallback_error| {
+                    crate::ErrorKind::OtherError(format!(
+                        "well-known 与插件端点均不可用：{well_known_error} / {fallback_error}"
+                    ))
+                    .into()
+                })
+        }
+    }
+}
+
+/// 按完整 URL 拉取并解析出口文档。
+pub async fn fetch_catalog_url(
+    url: &str,
+    api_semaphore: &crate::util::fetch::FetchSemaphore,
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<InteropSiteDocument> {
     fetch_json(
         reqwest::Method::GET,
-        &url,
+        url,
         None,
         None,
         None,

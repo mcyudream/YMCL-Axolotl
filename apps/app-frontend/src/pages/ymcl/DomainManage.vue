@@ -59,6 +59,32 @@ const activeInterop = computed(() =>
 	ymclStore.activeDomain?.kind === 'interop' ? ymclStore.activeDomain : null,
 )
 
+/** 任意非个人域都尝试读取本站 well-known 合并目录（yda 已在宿主侧合并友站内容） */
+const originCatalog = ref<InteropSiteDocument | null>(null)
+const originCatalogLoading = ref(false)
+
+async function loadOriginCatalog() {
+	const domain = ymclStore.activeDomain
+	if (!domain || domain.is_personal || !domain.origin) {
+		originCatalog.value = null
+		return
+	}
+	originCatalogLoading.value = true
+	try {
+		originCatalog.value = await ymcl.fetchOriginCatalog(domain.origin)
+	} catch {
+		originCatalog.value = null
+	} finally {
+		originCatalogLoading.value = false
+	}
+}
+
+watch(
+	() => ymclStore.activeDomainId,
+	() => void loadOriginCatalog(),
+	{ immediate: true },
+)
+
 async function probeUnion() {
 	const domain = activeInterop.value
 	if (!domain) return
@@ -82,6 +108,26 @@ async function refreshCatalog() {
 		handleError(error)
 	} finally {
 		catalogRefreshing.value = false
+	}
+}
+
+function originServerAddress(pack: InteropPackEntry): string {
+	const server = pack.server
+	if (!server) return ''
+	return server.port ? `${server.address}:${server.port}` : server.address
+}
+
+async function copyOriginServer(pack: InteropPackEntry) {
+	const address = originServerAddress(pack)
+	if (!address) return
+	try {
+		await navigator.clipboard.writeText(address)
+		copiedId.value = pack.id + ':' + (pack.source?.site_id ?? 'own')
+		setTimeout(() => {
+			if (copiedId.value === pack.id + ':' + (pack.source?.site_id ?? 'own')) copiedId.value = ''
+		}, 1500)
+	} catch {
+		handleError(new Error('clipboard unavailable'))
 	}
 }
 
@@ -237,6 +283,10 @@ const messages = defineMessages({
 	role: {
 		id: 'app.settings.ymcl-domains.role',
 		defaultMessage: '角色',
+	},
+	crossCatalogTitle: {
+		id: 'app.settings.ymcl-domains.cross-catalog',
+		defaultMessage: '跨站目录（合并友站）',
 	},
 	interoptBadge: {
 		id: 'app.settings.ymcl-domains.interop-badge',
@@ -630,6 +680,52 @@ async function switchRole(roleId: string) {
 						</button>
 					</ButtonStyled>
 				</template>
+			</div>
+		</template>
+
+		<template v-if="!activeInterop && originCatalog">
+			<h3 class="m-0 mt-2 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.crossCatalogTitle) }}
+			</h3>
+			<p class="m-0 text-sm text-secondary">
+				本站 well-known 合并视图（含互采友站条目，来源随条目标注）
+			</p>
+			<div class="flex flex-col gap-2">
+				<div
+					v-for="pack in originCatalog.packs"
+					:key="pack.id + ':' + (pack.source?.site_id ?? 'own')"
+					class="flex flex-col gap-1 rounded-xl border border-solid border-surface-5 bg-bg-raised p-3"
+				>
+					<div class="flex flex-wrap items-center gap-2">
+						<span class="font-semibold text-contrast">{{ pack.name || pack.id }}</span>
+						<span
+							v-if="pack.source"
+							class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-medium text-secondary"
+						>
+							友站 {{ pack.source.site_id }}
+						</span>
+						<span
+							v-if="pack.artifact"
+							class="rounded-full bg-brand px-2 py-0.5 text-xs font-semibold text-brand-inverted-on/bg-brand"
+						>
+							整合包 · r{{ pack.revision ?? '?' }}
+						</span>
+						<span v-else class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-medium text-secondary">
+							{{ formatMessage(messages.serverOnly) }}
+						</span>
+						<span v-if="pack.game_version" class="text-xs text-secondary">MC {{ pack.game_version }}</span>
+						<span v-if="pack.loader" class="text-xs text-secondary">{{ pack.loader }}{{ pack.loader_version ? ` ${pack.loader_version}` : '' }}</span>
+					</div>
+					<p v-if="pack.summary" class="m-0 text-sm text-secondary">{{ pack.summary }}</p>
+					<div v-if="pack.server" class="flex items-center gap-2">
+						<code class="truncate text-xs text-secondary">{{ originServerAddress(pack) }}</code>
+						<ButtonStyled type="standard">
+							<button @click="copyOriginServer(pack)">
+								{{ copiedId === pack.id + ':' + (pack.source?.site_id ?? 'own') ? formatMessage(messages.copiedLabel) : formatMessage(messages.copyAddress) }}
+							</button>
+						</ButtonStyled>
+					</div>
+				</div>
 			</div>
 		</template>
 
