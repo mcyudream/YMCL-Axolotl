@@ -607,6 +607,7 @@ const messages = defineMessages({
 	downloadSourceBmclapi: { id: 'app.downloads.source.bmclapi', defaultMessage: 'OpenBMCLAPI' },
 	downloadSourceMcim: { id: 'app.downloads.source.mcim', defaultMessage: 'MCIM' },
 	downloadSourceTianpao: { id: 'app.downloads.source.tianpao', defaultMessage: 'Tianpao' },
+	downloadSourceGateway: { id: 'app.downloads.source.gateway', defaultMessage: 'Domain gateway' },
 	downloadSourceAlternate: {
 		id: 'app.downloads.source.alternate',
 		defaultMessage: 'Alternate source',
@@ -1094,6 +1095,8 @@ function downloadSourceLabel(source: string) {
 			return formatMessage(messages.downloadSourceMcim)
 		case 'tianpao':
 			return formatMessage(messages.downloadSourceTianpao)
+		case 'gateway':
+			return formatMessage(messages.downloadSourceGateway)
 		default:
 			return formatMessage(messages.downloadSourceAlternate)
 	}

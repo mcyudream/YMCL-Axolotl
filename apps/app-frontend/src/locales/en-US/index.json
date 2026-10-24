@@ -1514,6 +1514,9 @@
 	"app.downloads.source.tianpao": {
 		"message": "Tianpao"
 	},
+	"app.downloads.source.gateway": {
+		"message": "Domain gateway"
+	},
 	"app.downloads.status.canceled": {
 		"message": "Canceled"
 	},
@@ -7723,6 +7726,9 @@
 	},
 	"app.settings.resources.download-mirrors-description": {
 		"message": "In automatic mode, Modrinth and CurseForge try the built-in mirrors first and fall back to the official source; Minecraft resources pick between official and mirror sources based on connection quality."
+	},
+	"app.settings.resources.download-mirrors.managed-banner": {
+		"message": "Download sources are managed by {domain}: each category downloads through the mirror order distributed by the site and falls back automatically. The local selections below are temporarily inactive."
 	},
 	"app.settings.resources.maximum-downloads": {
 		"message": "Maximum concurrent downloads"

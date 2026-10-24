@@ -9502,7 +9502,8 @@ fn request_routes_with_mode(
             DownloadRouteSource::Bmclapi
             | DownloadRouteSource::Mcim
             | DownloadRouteSource::Tianpao
-            | DownloadRouteSource::Aliyun => RequestRouteSource::Mirror,
+            | DownloadRouteSource::Aliyun
+            | DownloadRouteSource::Gateway => RequestRouteSource::Mirror,
             DownloadRouteSource::Official | DownloadRouteSource::Alternate => {
                 RequestRouteSource::Official
             }

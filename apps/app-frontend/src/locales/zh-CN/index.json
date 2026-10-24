@@ -1514,6 +1514,9 @@
 	"app.downloads.source.tianpao": {
 		"message": "Tianpao 镜像"
 	},
+	"app.downloads.source.gateway": {
+		"message": "域网关"
+	},
 	"app.downloads.status.canceled": {
 		"message": "已取消"
 	},
@@ -7725,6 +7728,9 @@
 	},
 	"app.settings.resources.download-mirrors-description": {
 		"message": "自动模式：Modrinth 与 CurseForge 优先尝试内置镜像并按列表回退官方源；Minecraft 资源根据连接质量在官方与镜像间选择。"
+	},
+	"app.settings.resources.download-mirrors.managed-banner": {
+		"message": "下载源由 {domain} 统一分发：各类别按站点下发的镜像顺序下载并自动回退，以下本地选择暂时不生效。"
 	},
 	"app.settings.resources.maximum-downloads": {
 		"message": "最大并发下载数"

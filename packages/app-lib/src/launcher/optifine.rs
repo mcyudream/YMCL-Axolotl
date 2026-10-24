@@ -44,15 +44,24 @@ impl BmclapiOptifineEntry {
     }
 
     fn download_url(&self) -> String {
-        format!(
-            "{BMCLAPI_OPTIFINE_BASE}/{}/{}/{}",
+        optifine_url(&format!(
+            "/{}/{}/{}",
             self.mcversion, self.type_, self.patch
-        )
+        ))
     }
 
     fn is_stable(&self) -> bool {
         !self.patch.to_ascii_lowercase().contains("pre")
     }
+}
+
+/// URL under the OptiFine mirror endpoint. When the active domain
+/// distributes a loaders chain with a BMCLAPI-compatible source, the
+/// gateway/custom base takes over (with the player download token when
+/// applicable); otherwise this stays on the built-in BMCLAPI host.
+fn optifine_url(path: &str) -> String {
+    crate::api::ymcl::download_sources::optifine_url(path)
+        .unwrap_or_else(|| format!("{BMCLAPI_OPTIFINE_BASE}{path}"))
 }
 
 async fn list_entries(
@@ -61,7 +70,7 @@ async fn list_entries(
     let state = State::get().await?;
     let entries: Vec<BmclapiOptifineEntry> = fetch_json(
         Method::GET,
-        &format!("{BMCLAPI_OPTIFINE_BASE}/{game_version}"),
+        &optifine_url(&format!("/{game_version}")),
         None,
         None,
         None,

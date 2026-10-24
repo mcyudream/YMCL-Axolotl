@@ -152,6 +152,8 @@ pub enum DownloadRouteSource {
     Mcim,
     Tianpao,
     Aliyun,
+    /// YDA 适配的域镜像网关（BMCLAPI 路由兼容，玩家下载令牌鉴权）。
+    Gateway,
     Alternate,
 }
 
@@ -163,8 +165,28 @@ impl DownloadRouteSource {
             Self::Mcim => "mcim",
             Self::Tianpao => "tianpao",
             Self::Aliyun => "aliyun",
+            Self::Gateway => "gateway",
             Self::Alternate => "alternate",
         }
+    }
+}
+
+/// 镜像路径族：同一 host→路径改写规则在多个镜像基址间复用。`BmclapiCompat`
+/// 覆盖 BMCLAPI 及其兼容实现（含 YDA 域网关/自定义基址）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MirrorKind {
+    BmclapiCompat,
+    Mcim,
+    Tianpao,
+    Aliyun,
+}
+
+pub(crate) fn builtin_mirror_base(kind: MirrorKind) -> &'static str {
+    match kind {
+        MirrorKind::BmclapiCompat => BMCLAPI_BASE_URL,
+        MirrorKind::Mcim => MCIM_BASE_URL,
+        MirrorKind::Tianpao => TIANPAO_BASE_URL,
+        MirrorKind::Aliyun => ALIYUN_MAVEN_BASE_URL,
     }
 }
 
@@ -560,14 +582,19 @@ fn route(
 /// must bypass the system proxy.
 pub(crate) fn is_loopback_url(url: &str) -> bool {
     Url::parse(url).ok().is_some_and(|url| match url.host() {
-        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Domain(domain)) => {
+            domain.eq_ignore_ascii_case("localhost")
+        }
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
         Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
         None => false,
     })
 }
 
-fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
+pub(crate) fn official_route(
+    url: &str,
+    resource: ResourceClass,
+) -> DownloadRoute {
     let url = url.to_string();
     let source = Url::parse(&url)
         .ok()
@@ -585,6 +612,7 @@ fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
             | DownloadRouteSource::Mcim
             | DownloadRouteSource::Tianpao
             | DownloadRouteSource::Aliyun
+            | DownloadRouteSource::Gateway
     );
     let route = route(
         url.clone(),
@@ -626,9 +654,39 @@ fn url_with_base(original: &Url, base: &str, path: &str) -> Option<String> {
     Some(target.into())
 }
 
+/// All-provider aggregate over [`mirror_routes_for_family`], preserving the
+/// historical per-host mirror order (bmclapi family first, then tianpao/mcim
+/// pairs, aliyun last). This is the local-settings path; distributed config
+/// routes call the family function directly in site-defined order.
 fn explicit_mirror_routes(
     url: &str,
     resource: ResourceClass,
+) -> Vec<DownloadRoute> {
+    let mut routes = Vec::new();
+    for (kind, source) in [
+        (MirrorKind::BmclapiCompat, DownloadRouteSource::Bmclapi),
+        (MirrorKind::Tianpao, DownloadRouteSource::Tianpao),
+        (MirrorKind::Mcim, DownloadRouteSource::Mcim),
+        (MirrorKind::Aliyun, DownloadRouteSource::Aliyun),
+    ] {
+        let base = builtin_mirror_base(kind);
+        routes.extend(mirror_routes_for_family(
+            url, resource, kind, base, source,
+        ));
+    }
+    routes
+}
+
+/// Rewrites the official URL onto the given mirror base using the path
+/// mapping of `kind`. `base` allows BMCLAPI-compatible gateways/custom
+/// mirrors to reuse the same routing table; the distributed download config
+/// drives this with site-defined source order.
+pub(crate) fn mirror_routes_for_family(
+    url: &str,
+    resource: ResourceClass,
+    kind: MirrorKind,
+    base: &str,
+    source: DownloadRouteSource,
 ) -> Vec<DownloadRoute> {
     let Ok(parsed) = Url::parse(url) else {
         return Vec::new();
@@ -641,153 +699,102 @@ fn explicit_mirror_routes(
     let path = parsed.path();
     let supports_range = !matches!(resource, ResourceClass::Metadata);
     let mut routes = Vec::new();
-    let push_mirror = |routes: &mut Vec<DownloadRoute>,
-                       base: &str,
-                       path: String,
-                       source: DownloadRouteSource| {
-        if let Some(url) = url_with_base(&parsed, base, &path) {
-            routes.push(route(url, source, true, supports_range));
-        }
-    };
+    let push_mirror =
+        |routes: &mut Vec<DownloadRoute>, base: &str, path: String| {
+            if let Some(url) = url_with_base(&parsed, base, &path) {
+                routes.push(route(url, source, true, supports_range));
+            }
+        };
 
-    match host {
-        "resources.download.minecraft.net" => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/assets{path}"),
-                DownloadRouteSource::Bmclapi,
-            );
+    match (host, kind) {
+        ("resources.download.minecraft.net", MirrorKind::BmclapiCompat) => {
+            push_mirror(&mut routes, base, format!("/assets{path}"));
         }
-        "libraries.minecraft.net" => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/maven{path}"),
-                DownloadRouteSource::Bmclapi,
-            );
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/libraries{path}"),
-                DownloadRouteSource::Bmclapi,
-            );
+        ("libraries.minecraft.net", MirrorKind::BmclapiCompat) => {
+            push_mirror(&mut routes, base, format!("/maven{path}"));
+            push_mirror(&mut routes, base, format!("/libraries{path}"));
         }
         // Maven Central hosts the bulk of loader-era libraries (Cleanroom,
         // LiteLoader, Babric, legacy Forge processors). Aliyun's public
         // repository mirrors it 1:1 and is reachable without a proxy, which
         // keeps a flaky proxy from stalling a whole install on one authority.
-        "repo.maven.apache.org" | "repo1.maven.org"
+        ("repo.maven.apache.org" | "repo1.maven.org", MirrorKind::Aliyun)
             if path.starts_with("/maven2/") =>
         {
             push_mirror(
                 &mut routes,
-                ALIYUN_MAVEN_BASE_URL,
+                base,
                 format!(
                     "/repository/public{}",
                     path.trim_start_matches("/maven2")
                 ),
-                DownloadRouteSource::Aliyun,
             );
         }
-        "maven.minecraftforge.net" | "maven.fabricmc.net" => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/maven{path}"),
-                DownloadRouteSource::Bmclapi,
-            );
+        (
+            "maven.minecraftforge.net" | "maven.fabricmc.net",
+            MirrorKind::BmclapiCompat,
+        ) => {
+            push_mirror(&mut routes, base, format!("/maven{path}"));
         }
-        "files.minecraftforge.net" if path.starts_with("/maven/") => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Bmclapi,
-            );
+        ("files.minecraftforge.net", MirrorKind::BmclapiCompat)
+            if path.starts_with("/maven/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
         }
-        "maven.neoforged.net" if path.starts_with("/releases/") => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/maven/{}", path.trim_start_matches("/releases/")),
-                DownloadRouteSource::Bmclapi,
-            );
-        }
-        "meta.fabricmc.net" => {
-            push_mirror(
-                &mut routes,
-                BMCLAPI_BASE_URL,
-                format!("/fabric-meta{path}"),
-                DownloadRouteSource::Bmclapi,
-            );
-        }
-        "piston-meta.mojang.com"
-        | "launchermeta.mojang.com"
-        | "launcher.mojang.com"
-        | "piston-data.mojang.com" => push_mirror(
-            &mut routes,
-            BMCLAPI_BASE_URL,
-            path.to_string(),
-            DownloadRouteSource::Bmclapi,
-        ),
-        // MCIM mirrors the v2 API path-compatible; v3 (search) is not
-        // mirrored and answers 404 there, so it stays official-only.
-        "api.modrinth.com" if path.starts_with("/v2/") => push_mirror(
-            &mut routes,
-            MCIM_BASE_URL,
-            format!("/modrinth{path}"),
-            DownloadRouteSource::Mcim,
-        ),
-        "cdn.modrinth.com" | "cdn-alt.modrinth.com"
-            if path.starts_with("/data/") =>
+        ("maven.neoforged.net", MirrorKind::BmclapiCompat)
+            if path.starts_with("/releases/") =>
         {
             push_mirror(
                 &mut routes,
-                TIANPAO_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Tianpao,
-            );
-            push_mirror(
-                &mut routes,
-                MCIM_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Mcim,
+                base,
+                format!("/maven/{}", path.trim_start_matches("/releases/")),
             );
         }
-        "api.curseforge.com" => push_mirror(
-            &mut routes,
-            MCIM_BASE_URL,
-            format!("/curseforge{path}"),
-            DownloadRouteSource::Mcim,
-        ),
-        "edge.forgecdn.net" if path.starts_with("/files/") => {
-            push_mirror(
-                &mut routes,
-                TIANPAO_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Tianpao,
-            );
-            push_mirror(
-                &mut routes,
-                MCIM_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Mcim,
-            );
+        ("meta.fabricmc.net", MirrorKind::BmclapiCompat) => {
+            push_mirror(&mut routes, base, format!("/fabric-meta{path}"));
         }
-        "media.forgecdn.net" => push_mirror(
-            &mut routes,
-            TIANPAO_BASE_URL,
-            format!("/media{path}"),
-            DownloadRouteSource::Tianpao,
-        ),
+        (
+            "piston-meta.mojang.com"
+            | "launchermeta.mojang.com"
+            | "launcher.mojang.com"
+            | "piston-data.mojang.com",
+            MirrorKind::BmclapiCompat,
+        ) => push_mirror(&mut routes, base, path.to_string()),
+        // MCIM mirrors the v2 API path-compatible; v3 (search) is not
+        // mirrored and answers 404 there, so it stays official-only.
+        ("api.modrinth.com", MirrorKind::Mcim) if path.starts_with("/v2/") => {
+            push_mirror(&mut routes, base, format!("/modrinth{path}"));
+        }
+        ("cdn.modrinth.com" | "cdn-alt.modrinth.com", MirrorKind::Tianpao)
+            if path.starts_with("/data/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        ("cdn.modrinth.com" | "cdn-alt.modrinth.com", MirrorKind::Mcim)
+            if path.starts_with("/data/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        ("api.curseforge.com", MirrorKind::Mcim) => {
+            push_mirror(&mut routes, base, format!("/curseforge{path}"));
+        }
+        ("edge.forgecdn.net", MirrorKind::Tianpao)
+            if path.starts_with("/files/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        ("edge.forgecdn.net", MirrorKind::Mcim)
+            if path.starts_with("/files/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        ("media.forgecdn.net", MirrorKind::Tianpao) => {
+            push_mirror(&mut routes, base, format!("/media{path}"));
+        }
         // Tianpao has no mirror for this host; MCIM is path-compatible.
-        "mediafilez.forgecdn.net" => push_mirror(
-            &mut routes,
-            MCIM_BASE_URL,
-            path.to_string(),
-            DownloadRouteSource::Mcim,
-        ),
+        ("mediafilez.forgecdn.net", MirrorKind::Mcim) => {
+            push_mirror(&mut routes, base, path.to_string());
+        }
         _ => {}
     }
 
@@ -881,12 +888,19 @@ fn order_auto_routes(
 /// Routes a request URL into an ordered candidate list: mirrors first or
 /// official first according to the source mode (and, in Automatic mode, the
 /// resource's mirror-first policy), with the official URL always kept as the
-/// final fallback.
+/// final fallback. When the active domain distributes a download-source
+/// chain for this resource class, the site-defined order takes precedence
+/// and the local setting no longer applies.
 pub fn resolve_download_routes_for(
     url: &str,
     resource: ResourceClass,
     mode: crate::state::DownloadSourceMode,
 ) -> Vec<DownloadRoute> {
+    if let Some(routes) =
+        crate::api::ymcl::download_sources::managed_routes(url, resource)
+    {
+        return routes;
+    }
     let url = url.to_string();
     let official = official_route(&url, resource);
     let mut routes = explicit_mirror_routes(&url, resource);
@@ -1168,9 +1182,9 @@ pub(crate) static DIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
         #[cfg(not(test))]
         let builder = builder.https_only(true);
         builder
-        .build()
-        .expect("client configuration should be valid")
-});
+            .build()
+            .expect("client configuration should be valid")
+    });
 
 pub(crate) static LOOPBACK_FETCH_CLIENT: LazyLock<reqwest::Client> =
     LazyLock::new(|| {
@@ -2141,38 +2155,37 @@ async fn fetch_advanced_with_client_and_progress(
                                 })),
                         );
                         let body = resp.text().await.unwrap_or_default();
-                        let route_error: crate::Error =
-                            if let Ok(mut error) =
-                                serde_json::from_str::<LabrinthError>(&body)
-                            {
-                                error.status = Some(status.as_u16());
-                                error.method = Some(method.as_str().to_string());
-                                error.url = Some(log_request_url.clone());
-                                error.route = uri_path.map(str::to_string);
-                                ErrorKind::LabrinthError(error).into()
-                            } else if let Some(message) =
-                                domain_envelope_message(&body)
-                            {
-                                // YAP host business errors carry the reason
-                                // as {code, message}; surface it instead of
-                                // a bare status code.
-                                ErrorKind::LabrinthError(LabrinthError {
-                                    error: "domain_error".to_string(),
-                                    description: message,
-                                    status: Some(status.as_u16()),
-                                    method: Some(method.as_str().to_string()),
-                                    url: Some(log_request_url.clone()),
-                                    route: uri_path.map(str::to_string),
-                                })
-                                .into()
-                            } else {
-                                ErrorKind::HttpError {
-                                    status: status.as_u16(),
-                                    method: method.as_str().to_string(),
-                                    url: log_request_url.clone(),
-                                }
-                                .into()
-                            };
+                        let route_error: crate::Error = if let Ok(mut error) =
+                            serde_json::from_str::<LabrinthError>(&body)
+                        {
+                            error.status = Some(status.as_u16());
+                            error.method = Some(method.as_str().to_string());
+                            error.url = Some(log_request_url.clone());
+                            error.route = uri_path.map(str::to_string);
+                            ErrorKind::LabrinthError(error).into()
+                        } else if let Some(message) =
+                            domain_envelope_message(&body)
+                        {
+                            // YAP host business errors carry the reason
+                            // as {code, message}; surface it instead of
+                            // a bare status code.
+                            ErrorKind::LabrinthError(LabrinthError {
+                                error: "domain_error".to_string(),
+                                description: message,
+                                status: Some(status.as_u16()),
+                                method: Some(method.as_str().to_string()),
+                                url: Some(log_request_url.clone()),
+                                route: uri_path.map(str::to_string),
+                            })
+                            .into()
+                        } else {
+                            ErrorKind::HttpError {
+                                status: status.as_u16(),
+                                method: method.as_str().to_string(),
+                                url: log_request_url.clone(),
+                            }
+                            .into()
+                        };
                         let route_error_message = route_error.to_string();
                         drop(permit);
                         let retry_rate_limited = status
@@ -2993,7 +3006,9 @@ fn domain_envelope_message(body: &str) -> Option<String> {
     if !has_code && !has_error_tag {
         return None;
     }
-    Some(nested_envelope_message(message).unwrap_or_else(|| message.to_string()))
+    Some(
+        nested_envelope_message(message).unwrap_or_else(|| message.to_string()),
+    )
 }
 
 /// Adapter authorize failures embed the upstream host's own envelope in the
@@ -3908,10 +3923,7 @@ pub(crate) async fn prepare_native_download_routes(
         order_auto_routes(
             routes,
             request.resource,
-            route_policy::orders_mirrors_first(
-                &request.url,
-                request.resource,
-            ),
+            route_policy::orders_mirrors_first(&request.url, request.resource),
         );
     }
 }
@@ -5432,7 +5444,9 @@ async fn download_to_path_inner(
     }
     let download_lock = destination_download_lock(destination);
     let lock_started = Instant::now();
-    let _download_guard = if let Some(cancellation) = request.cancellation.as_ref() {
+    let _download_guard = if let Some(cancellation) =
+        request.cancellation.as_ref()
+    {
         tokio::select! {
             _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("download canceled while waiting for destination lock".to_string()).into()),
             guard = download_lock.lock() => guard,
@@ -6670,16 +6684,22 @@ mod tests {
             )
         };
 
-        assert!(build(Some(1024))
-            .iter()
-            .any(|route| route.source == DownloadRouteSource::Mcim));
-        assert!(!build(Some(21 * 1024 * 1024))
-            .iter()
-            .any(|route| route.source == DownloadRouteSource::Mcim));
+        assert!(
+            build(Some(1024))
+                .iter()
+                .any(|route| route.source == DownloadRouteSource::Mcim)
+        );
+        assert!(
+            !build(Some(21 * 1024 * 1024))
+                .iter()
+                .any(|route| route.source == DownloadRouteSource::Mcim)
+        );
         // Unknown sizes keep the mirror; the 567 fast-fail covers it.
-        assert!(build(None)
-            .iter()
-            .any(|route| route.source == DownloadRouteSource::Mcim));
+        assert!(
+            build(None)
+                .iter()
+                .any(|route| route.source == DownloadRouteSource::Mcim)
+        );
     }
 
     #[test]

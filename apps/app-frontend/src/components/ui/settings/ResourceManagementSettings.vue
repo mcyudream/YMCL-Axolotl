@@ -1,5 +1,5 @@
 <script setup>
-import { BoxIcon, FolderOpenIcon, FolderSearchIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
+import { BoxIcon, FolderOpenIcon, FolderSearchIcon, InfoIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
 import {
 	Combobox,
 	defineMessages,
@@ -24,6 +24,7 @@ import {
 } from '@/helpers/downloads-scanner'
 import { get, getProxyConfig, set, setProxyConfig, testProxyConfig } from '@/helpers/settings.ts'
 import { showAppDbBackupsFolder } from '@/helpers/utils.js'
+import { useYmclStore } from '@/store/ymcl'
 import { useTheming } from '@/store/state'
 
 import SettingsRow from './SettingsRow.vue'
@@ -40,6 +41,7 @@ const props = defineProps({
 
 const { handleError } = injectNotificationManager()
 const themeStore = useTheming()
+const ymclStore = useYmclStore()
 const settings = ref(await get())
 const missingContentScannerSettings = ref(getMissingContentScannerSettings())
 const minecraftDirectories = ref(loadMinecraftDirectories())
@@ -191,6 +193,11 @@ const messages = defineMessages({
 		id: 'app.settings.resources.download-mirrors-description',
 		defaultMessage:
 			'自动模式：Modrinth 与 CurseForge 优先尝试内置镜像并按列表回退官方源；Minecraft 资源根据连接质量在官方与镜像间选择。',
+	},
+	downloadMirrorsManagedBanner: {
+		id: 'app.settings.resources.download-mirrors.managed-banner',
+		defaultMessage:
+			'下载源由 {domain} 统一分发：各类别按站点下发的镜像顺序下载并自动回退，以下本地选择暂时不生效。',
 	},
 	automaticSource: {
 		id: 'app.settings.resources.source.automatic',
@@ -511,6 +518,15 @@ function downloadSourceModel(setting) {
 		},
 	})
 }
+
+// 激活域宣告 download 分发时，对应类别的下载路由由站点统一下发，
+// 本地源设置停用（YAP 下载分发扩展）。
+const downloadDistributionDomain = computed(() => {
+	const domain = ymclStore.activeDomain
+	if (!domain || domain.is_personal) return null
+	const capabilities = domain.capabilities?.capabilities ?? []
+	return capabilities.includes('download') ? domain.display_name : null
+})
 
 const minecraftMetadataSource = downloadSourceModel('minecraft_metadata_source')
 const minecraftFileSource = downloadSourceModel('minecraft_file_source')
@@ -897,6 +913,19 @@ function validateMinecraftDirectory(value) {
 				<p class="m-0 mt-1 text-sm leading-relaxed text-secondary">
 					{{ formatMessage(messages.downloadMirrorsDescription) }}
 				</p>
+				<div
+					v-if="downloadDistributionDomain"
+					class="mt-3 flex items-start gap-2 rounded-xl border border-button-border border-solid bg-button-bg p-3 text-sm leading-relaxed text-primary"
+				>
+					<InfoIcon class="mt-0.5 min-h-5 min-w-5 shrink-0 text-brand" />
+					<span>
+						{{
+							formatMessage(messages.downloadMirrorsManagedBanner, {
+								domain: downloadDistributionDomain,
+							})
+						}}
+					</span>
+				</div>
 			</template>
 			<SettingsRow>
 				<template #label>{{ formatMessage(messages.minecraftMetadataSource) }}</template>
@@ -905,7 +934,11 @@ function validateMinecraftDirectory(value) {
 				}}</template>
 				<template #control>
 					<div class="w-full">
-						<Combobox v-model="minecraftMetadataSource" :options="minecraftSourceOptions" />
+						<Combobox
+							v-model="minecraftMetadataSource"
+							:options="minecraftSourceOptions"
+							:disabled="!!downloadDistributionDomain"
+						/>
 					</div>
 				</template>
 			</SettingsRow>
@@ -916,7 +949,11 @@ function validateMinecraftDirectory(value) {
 				}}</template>
 				<template #control>
 					<div class="w-full">
-						<Combobox v-model="minecraftFileSource" :options="minecraftSourceOptions" />
+						<Combobox
+							v-model="minecraftFileSource"
+							:options="minecraftSourceOptions"
+							:disabled="!!downloadDistributionDomain"
+						/>
 					</div>
 				</template>
 			</SettingsRow>
@@ -925,7 +962,11 @@ function validateMinecraftDirectory(value) {
 				<template #description>{{ formatMessage(messages.modrinthMirrorDescription) }}</template>
 				<template #control>
 					<div class="w-full">
-						<Combobox v-model="modrinthDownloadSource" :options="modrinthSourceOptions" />
+						<Combobox
+							v-model="modrinthDownloadSource"
+							:options="modrinthSourceOptions"
+							:disabled="!!downloadDistributionDomain"
+						/>
 					</div>
 				</template>
 			</SettingsRow>
@@ -934,7 +975,11 @@ function validateMinecraftDirectory(value) {
 				<template #description>{{ formatMessage(messages.curseforgeMirrorDescription) }}</template>
 				<template #control>
 					<div class="w-full">
-						<Combobox v-model="curseforgeDownloadSource" :options="curseforgeSourceOptions" />
+						<Combobox
+							v-model="curseforgeDownloadSource"
+							:options="curseforgeSourceOptions"
+							:disabled="!!downloadDistributionDomain"
+						/>
 					</div>
 				</template>
 			</SettingsRow>

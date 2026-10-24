@@ -1430,6 +1430,9 @@
   "app.downloads.source.tianpao": {
     "message": "Tianpao 鏡像"
   },
+  "app.downloads.source.gateway": {
+    "message": "域網關"
+  },
   "app.downloads.status.canceled": {
     "message": "已取消"
   },
@@ -6811,6 +6814,9 @@
   },
   "app.settings.resources.download-mirrors-description": {
     "message": "為每項服務選擇下載來源。當鏡像來源請求失敗時，將自動退回至官方來源。"
+  },
+  "app.settings.resources.download-mirrors.managed-banner": {
+    "message": "下載源由 {domain} 統一分發：各類別按站點下發的鏡像順序下載並自動回退，以下本地選擇暫時不生效。"
   },
   "app.settings.resources.maximum-downloads": {
     "message": "最大同時下載數"

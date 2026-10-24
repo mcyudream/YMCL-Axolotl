@@ -80,6 +80,12 @@ pub struct YmclCapabilities {
     /// server through a loopback sidecar instead of its public address.
     #[serde(default)]
     pub p2p: Option<P2pEndpointConfig>,
+    /// Download distribution face (YAP download extension). Present when
+    /// `capabilities` contains `download`; the managed config then takes
+    /// over download routing for the distributed categories and the local
+    /// source settings stop applying to them.
+    #[serde(default)]
+    pub download: Option<DownloadEndpointConfig>,
 }
 
 /// MIP distribution face advertised by the adapter (YAP §7).
@@ -104,6 +110,17 @@ pub struct SkinsEndpointConfig {
 pub struct P2pEndpointConfig {
     #[serde(default)]
     pub session_url: Option<String>,
+}
+
+/// Download distribution face advertised by the adapter. `config_url` serves
+/// the managed source chains; `token_url` issues player download tokens for
+/// gateway sources. Absent URLs fall back to `{YAP_API_BASE}/download/*`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DownloadEndpointConfig {
+    #[serde(default)]
+    pub config_url: Option<String>,
+    #[serde(default)]
+    pub token_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -197,6 +214,28 @@ pub fn p2p_session_url(origin: &str, configured: Option<&str>) -> String {
     }
 }
 
+/// Download config endpoint, derived from the advertised `config_url`.
+pub fn download_config_url(origin: &str, configured: Option<&str>) -> String {
+    match configured.map(str::trim).filter(|url| !url.is_empty()) {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => format!(
+            "{}{YAP_API_BASE}/download/config",
+            origin.trim_end_matches('/')
+        ),
+    }
+}
+
+/// Download token endpoint, derived from the advertised `token_url`.
+pub fn download_token_url(origin: &str, configured: Option<&str>) -> String {
+    match configured.map(str::trim).filter(|url| !url.is_empty()) {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => format!(
+            "{}{YAP_API_BASE}/download/token",
+            origin.trim_end_matches('/')
+        ),
+    }
+}
+
 /// Adapters must serve the major version the launcher understands; minor
 /// drift is allowed and resolved by ignoring unknown fields.
 pub fn validate_protocol_version(version: u32) -> crate::Result<()> {
@@ -207,4 +246,52 @@ pub fn validate_protocol_version(version: u32) -> crate::Result<()> {
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod download_face_tests {
+    /// Contract lock for the download distribution face: the adapter
+    /// advertises `download` with absolute config/token URLs
+    /// (`YmclCapabilitiesController.buildCapabilities`, ymcl-adapter
+    /// 0.12.0). Adapters without the face must deserialize unchanged.
+    #[test]
+    fn parses_download_enabled_capabilities_payload() {
+        let payload = r#"{
+            "protocol_version": 1,
+            "domain": { "name": "YuDream" },
+            "capabilities": ["download"],
+            "auth": { "required": true, "methods": [] },
+            "download": {
+                "config_url": "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/config",
+                "token_url": "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/token"
+            }
+        }"#;
+        let capabilities: super::YmclCapabilities =
+            serde_json::from_str(payload)
+                .expect("download payload must deserialize");
+        assert!(capabilities.capabilities.contains(&"download".to_string()));
+        let download = capabilities.download.as_ref().expect("download face");
+        assert_eq!(
+            download.config_url.as_deref(),
+            Some(
+                "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/config"
+            ),
+        );
+        assert_eq!(
+            download.token_url.as_deref(),
+            Some(
+                "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/token"
+            ),
+        );
+        // URL derivation falls back to the YAP base when the adapter omits
+        // explicit endpoints.
+        assert_eq!(
+            super::download_config_url("https://yda.example.com", None),
+            "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/config",
+        );
+        assert_eq!(
+            super::download_token_url("https://yda.example.com/", None),
+            "https://yda.example.com/api/plugins/ymcl-adapter/v1/download/token",
+        );
+    }
 }
