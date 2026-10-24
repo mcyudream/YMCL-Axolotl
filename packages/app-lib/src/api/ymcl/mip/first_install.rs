@@ -15,7 +15,9 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use super::manifest::MipManifest;
-use super::state::{self, MipInstanceBinding, MipJavaConstraint, MipPackState, StateFile};
+use super::state::{
+    self, MipInstanceBinding, MipJavaConstraint, MipPackState, StateFile,
+};
 use super::update::{
     MipServerBinding, MipServerEndpoint, MipVersionEntry, fetch_json,
     manifest_url, resolve_mip_base, resolve_target_version, servers_url,

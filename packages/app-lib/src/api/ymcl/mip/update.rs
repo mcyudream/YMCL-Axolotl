@@ -1473,7 +1473,8 @@ async fn load_optional_pack(
     optional_pack_id: &str,
     binding: &MipPackBinding,
 ) -> crate::Result<(String, Vec<super::manifest::MipFeature>)> {
-    let versions_value = fetch_json(state, &versions_url(mip_base, optional_pack_id)).await?;
+    let versions_value =
+        fetch_json(state, &versions_url(mip_base, optional_pack_id)).await?;
     let versions: Vec<MipVersionEntry> = serde_json::from_value(
         versions_value
             .get("versions")
@@ -1490,7 +1491,9 @@ async fn load_optional_pack(
             "optional pack {optional_pack_id} has no version for its channel"
         ))
     })?;
-    let manifest_value = fetch_json(state, &manifest_url(mip_base, optional_pack_id, target)).await?;
+    let manifest_value =
+        fetch_json(state, &manifest_url(mip_base, optional_pack_id, target))
+            .await?;
     let manifest: MipManifest = serde_json::from_value(manifest_value)?;
     manifest.validate()?;
     Ok((target.to_string(), manifest.features))
@@ -1615,7 +1618,9 @@ pub async fn join_preview(
         // 原版增强包：纯原版服给玩家的第三个下载选择（YAP §7 进服分流）。
         // 它只是可选项：解析/校验失败（接口瞬断、版本被清空）一律降级为
         // 两选一并留日志——不能让增强包的问题挡住进服本身。
-        match load_optional_pack(&state, &mip_base, optional_pack_id, &binding).await {
+        match load_optional_pack(&state, &mip_base, optional_pack_id, &binding)
+            .await
+        {
             Ok((target, features)) => {
                 preview.optional_pack_id = Some(optional_pack_id.clone());
                 preview.optional_target_version = Some(target.to_string());

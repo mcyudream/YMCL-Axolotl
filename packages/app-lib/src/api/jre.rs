@@ -2042,10 +2042,9 @@ pub fn automatic_memory_max_mb(
 ) -> u32 {
     const BYTES_PER_GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-    let mut available_gib = ((total_memory_bytes as f64 / BYTES_PER_GIB)
-        * 10.0)
-    .round_ties_even()
-        / 10.0;
+    let mut available_gib =
+        ((total_memory_bytes as f64 / BYTES_PER_GIB) * 10.0).round_ties_even()
+            / 10.0;
     let total_gib = available_gib;
     let (minimum, target1, target2, target3) = if modded {
         (

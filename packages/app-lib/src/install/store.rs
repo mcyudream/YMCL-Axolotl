@@ -1055,7 +1055,9 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let insert = |id: &'static str, status: &'static str, finished: Option<i64>| {
+        let insert = |id: &'static str,
+                      status: &'static str,
+                      finished: Option<i64>| {
             let pool = pool.clone();
             async move {
                 sqlx::query(
@@ -1081,7 +1083,8 @@ mod tests {
         // Still awaiting user action — never dismissed, however old.
         insert("old_waiting", "waiting_for_user", Some(100)).await;
 
-        let dismissed = dismiss_stale_failures_on_pool(200, &pool).await.unwrap();
+        let dismissed =
+            dismiss_stale_failures_on_pool(200, &pool).await.unwrap();
         assert_eq!(dismissed, 3);
 
         let survivors: Vec<String> = sqlx::query_scalar(

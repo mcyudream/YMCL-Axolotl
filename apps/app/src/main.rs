@@ -698,7 +698,9 @@ fn main() {
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
 
-    tracing::info!("Initialized tracing subscriber. Loading YMCL (YuDream Launcher)!");
+    tracing::info!(
+        "Initialized tracing subscriber. Loading YMCL (YuDream Launcher)!"
+    );
 
     let mut builder = tauri::Builder::default().register_uri_scheme_protocol(
         "axolotl-skin",
@@ -799,7 +801,9 @@ fn main() {
                 if let Some(window) = app_handle.get_window("main")
                     && !window.is_visible().unwrap_or(true)
                 {
-                    tracing::warn!("Main window still hidden after 2s; forcing show");
+                    tracing::warn!(
+                        "Main window still hidden after 2s; forcing show"
+                    );
                     let _ = window.show();
                     let _ = window.set_focus();
                 }

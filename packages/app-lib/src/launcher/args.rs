@@ -258,8 +258,7 @@ pub fn get_jvm_arguments(
     // every GC pause worse, so the user's value is capped rather than
     // forwarded verbatim.
     let memory_cap_mb =
-        ((crate::api::jre::system_memory_bytes() / 1024 / 1024) * 3 / 4)
-            as u32;
+        ((crate::api::jre::system_memory_bytes() / 1024 / 1024) * 3 / 4) as u32;
     let mut memory = memory;
     if memory_cap_mb > 0 && memory.maximum > memory_cap_mb {
         tracing::warn!(
@@ -382,7 +381,8 @@ pub async fn get_minecraft_arguments(
     // MC 1.21.6+ 只为 MSA 类型账户创建档案密钥管理器（UserType 门控），
     // legacy 账户在 enforce-secure-profile 服务器上聊天会被禁用；
     // Yggdrasil 账户同样需要聊天签名密钥，与 HMCL/PCL 一致传 msa。
-    let user_type = if credentials.is_microsoft() || credentials.is_yggdrasil() {
+    let user_type = if credentials.is_microsoft() || credentials.is_yggdrasil()
+    {
         "msa"
     } else {
         "legacy"

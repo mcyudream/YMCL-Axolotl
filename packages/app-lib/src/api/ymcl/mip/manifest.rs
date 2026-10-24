@@ -58,7 +58,9 @@ where
     let value = Option::<serde_json::Value>::deserialize(deserializer)?;
     Ok(match value {
         Some(serde_json::Value::Number(number)) => number.as_u64(),
-        Some(serde_json::Value::String(text)) => text.trim().parse::<u64>().ok(),
+        Some(serde_json::Value::String(text)) => {
+            text.trim().parse::<u64>().ok()
+        }
         _ => None,
     })
 }

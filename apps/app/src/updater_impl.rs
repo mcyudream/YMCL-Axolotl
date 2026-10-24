@@ -119,7 +119,8 @@ fn update_manifest_endpoint(update_base: Option<String>) -> Result<Url> {
             .unwrap_or_else(|_| UPDATE_SERVER_LATEST_URL.to_string())
     };
     Url::parse(url.trim().trim_end_matches('/')).map_err(|error| {
-        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string()))
+            .into()
     })
 }
 
@@ -141,22 +142,28 @@ fn update_site_origin(update_base: Option<String>) -> String {
         .unwrap_or_else(|_| UPDATE_SERVER_BASE.to_string())
 }
 
-fn artifact_download_url(entry: &ArtifactEntry, update_base: Option<String>) -> Result<Url> {
-    if let Some(url) = entry
-        .url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| value.starts_with("http://") || value.starts_with("https://"))
-    {
+fn artifact_download_url(
+    entry: &ArtifactEntry,
+    update_base: Option<String>,
+) -> Result<Url> {
+    if let Some(url) = entry.url.as_deref().map(str::trim).filter(|value| {
+        value.starts_with("http://") || value.starts_with("https://")
+    }) {
         return Url::parse(url).map_err(|error| {
-            theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+            theseus::Error::from(theseus::ErrorKind::OtherError(
+                error.to_string(),
+            ))
+            .into()
         });
     }
 
     let relative = entry.relative_path.trim();
     if relative.starts_with("http://") || relative.starts_with("https://") {
         return Url::parse(relative).map_err(|error| {
-            theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+            theseus::Error::from(theseus::ErrorKind::OtherError(
+                error.to_string(),
+            ))
+            .into()
         });
     }
 
@@ -167,7 +174,8 @@ fn artifact_download_url(entry: &ArtifactEntry, update_base: Option<String>) -> 
         relative.trim_start_matches('/')
     );
     Url::parse(&joined).map_err(|error| {
-        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string())).into()
+        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string()))
+            .into()
     })
 }
 
@@ -182,7 +190,10 @@ fn apt_deb_arch() -> Result<&'static str> {
     }
 }
 
-async fn fetch_apt_deb_asset(version: &str, update_base: Option<String>) -> Result<AptDebAsset> {
+async fn fetch_apt_deb_asset(
+    version: &str,
+    update_base: Option<String>,
+) -> Result<AptDebAsset> {
     let catalog_url = update_versions_endpoint(update_base.clone());
     let response = ClientBuilder::new()
         .user_agent(launcher_user_agent())
@@ -325,7 +336,9 @@ async fn check_with_updater<R: Runtime>(
     update_base: Option<String>,
 ) -> Result<Option<UpdateMetadata>> {
     remember_update_base(update_base.clone());
-    let Some(mut update) = check_with_endpoints(webview, channel, update_base.clone()).await? else {
+    let Some(mut update) =
+        check_with_endpoints(webview, channel, update_base.clone()).await?
+    else {
         return Ok(None);
     };
     update.timeout = Some(UPDATE_DOWNLOAD_TIMEOUT);
@@ -335,7 +348,8 @@ async fn check_with_updater<R: Runtime>(
     // Update Server catalog instead of the AppImage artifact. Its integrity
     // is verified with the catalog's sha256/size during the download.
     if is_apt_linux() {
-        update.download_url = fetch_apt_deb_asset(&update.version, update_base).await?.url;
+        update.download_url =
+            fetch_apt_deb_asset(&update.version, update_base).await?.url;
     }
 
     let published_at = update

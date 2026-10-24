@@ -66,10 +66,8 @@ pub async fn build_publish_archive(
     mip_json: serde_json::Value,
 ) -> crate::Result<PathBuf> {
     let archive_dir = std::env::temp_dir();
-    let archive_path = archive_dir.join(format!(
-        "ymcl-publish-{}.mrpack",
-        uuid::Uuid::new_v4()
-    ));
+    let archive_path = archive_dir
+        .join(format!("ymcl-publish-{}.mrpack", uuid::Uuid::new_v4()));
     write_mrpack_archive(
         instance_id,
         &archive_path,
@@ -290,8 +288,10 @@ async fn write_mrpack_archive(
     // 适配器在 ingest 时合并进 manifest。
     if let Some(mip_json) = mip_json {
         let mip_data = serde_json::to_vec_pretty(&mip_json)?;
-        let builder =
-            ZipEntryBuilder::new("mip.json".to_string().into(), Compression::Deflate);
+        let builder = ZipEntryBuilder::new(
+            "mip.json".to_string().into(),
+            Compression::Deflate,
+        );
         writer.write_entry_whole(builder, &mip_data).await?;
     }
     writer.close().await?;

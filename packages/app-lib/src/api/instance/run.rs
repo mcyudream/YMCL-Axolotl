@@ -97,7 +97,9 @@ async fn run_with_extra_launch_args_inner(
         );
     // 域整合包（MIP）：启动前的权威更新检查——绑定版本有推进就先增量更新再
     // 启动；尽力而为，域不可达或检查失败只记日志，不阻断本地启动。
-    if let Err(error) = crate::api::ymcl::mip::update::pre_launch_update(instance_id).await {
+    if let Err(error) =
+        crate::api::ymcl::mip::update::pre_launch_update(instance_id).await
+    {
         tracing::warn!("MIP pre-launch update skipped: {error}");
     }
     let default_account = if offline_mode {

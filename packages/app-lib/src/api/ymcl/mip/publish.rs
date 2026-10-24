@@ -92,10 +92,8 @@ pub struct PublishExclusions {
 
 impl PublishExclusions {
     pub fn new(paths: &[String]) -> Self {
-        let mut normalized: Vec<String> = paths
-            .iter()
-            .map(|path| path.replace('\\', "/"))
-            .collect();
+        let mut normalized: Vec<String> =
+            paths.iter().map(|path| path.replace('\\', "/")).collect();
         normalized.sort();
         normalized.dedup();
         Self { paths: normalized }
@@ -250,13 +248,16 @@ pub async fn diff_instance(instance_id: &str) -> crate::Result<PublishDiff> {
     };
     let profile = pack_state.publish_profile.clone();
     let state = State::get().await?;
-    let Some(server_base) = resolve_server_base(&state, &pack_state).await? else {
+    let Some(server_base) = resolve_server_base(&state, &pack_state).await?
+    else {
         // 服务端基线已消失（版本被删 / 绑定解除 / 包被删）：按首发处理。
         return Ok(unmanaged_diff(&instance_dir, &local_hashes, profile).await);
     };
-    let exclusions =
-        PublishExclusions::new(profile.as_ref().map_or(&[], |p| p.excluded.as_slice()));
-    let mut diff = compute_publish_diff(&server_base, &local_hashes, &exclusions);
+    let exclusions = PublishExclusions::new(
+        profile.as_ref().map_or(&[], |p| p.excluded.as_slice()),
+    );
+    let mut diff =
+        compute_publish_diff(&server_base, &local_hashes, &exclusions);
     // Recover list: local publishable files (the pruned scan only sees those)
     // currently hidden by a profile rule, so the dialog can offer them back.
     // Player-side (locked/disabled) files stay out — they are managed by the
@@ -278,7 +279,10 @@ pub async fn diff_instance(instance_id: &str) -> crate::Result<PublishDiff> {
         excluded_by_policy.sort_by(|a, b| a.path.cmp(&b.path));
         diff.excluded_by_policy = excluded_by_policy;
     }
-    diff.bound_server_id = pack_state.binding.as_ref().map(|binding| binding.server_id.clone());
+    diff.bound_server_id = pack_state
+        .binding
+        .as_ref()
+        .map(|binding| binding.server_id.clone());
     diff.profile = profile;
     diff.filters = Some(publish_filters());
     fill_entry_sizes(&instance_dir, &mut diff).await;
@@ -294,8 +298,9 @@ async fn unmanaged_diff(
     local_hashes: &HashMap<String, String>,
     profile: Option<state::PublishProfile>,
 ) -> PublishDiff {
-    let exclusions =
-        PublishExclusions::new(profile.as_ref().map_or(&[], |p| p.excluded.as_slice()));
+    let exclusions = PublishExclusions::new(
+        profile.as_ref().map_or(&[], |p| p.excluded.as_slice()),
+    );
     let (mut pack_files, mut excluded) = split_initial_files(local_hashes);
     if !exclusions.is_empty() {
         pack_files.retain(|(path, _)| {
@@ -365,7 +370,10 @@ async fn resolve_server_base(
 
 /// Stamps local file sizes onto the diff entries so the publish dialog can
 /// show them per file (deleted paths are base-only and stay sizeless).
-async fn fill_entry_sizes(instance_dir: &std::path::Path, diff: &mut PublishDiff) {
+async fn fill_entry_sizes(
+    instance_dir: &std::path::Path,
+    diff: &mut PublishDiff,
+) {
     for entry in diff
         .changed
         .iter_mut()
@@ -373,7 +381,9 @@ async fn fill_entry_sizes(instance_dir: &std::path::Path, diff: &mut PublishDiff
         .chain(diff.moved.iter_mut())
         .chain(diff.excluded_by_policy.iter_mut())
     {
-        if let Ok(metadata) = tokio::fs::metadata(instance_dir.join(&entry.path)).await {
+        if let Ok(metadata) =
+            tokio::fs::metadata(instance_dir.join(&entry.path)).await
+        {
             entry.size = Some(metadata.len());
         }
     }
@@ -429,9 +439,9 @@ pub(crate) fn is_excluded_from_publish(path: &str) -> bool {
     if path == state::STATE_FILE_NAME
         || path == state::HASH_CACHE_FILE_NAME
         || PUBLISH_EXCLUDED_ROOT_FILES.contains(&path)
-        || PUBLISH_EXCLUDED_TOP_LEVEL.iter().any(|name| {
-            path == *name || path.starts_with(&format!("{name}/"))
-        })
+        || PUBLISH_EXCLUDED_TOP_LEVEL
+            .iter()
+            .any(|name| path == *name || path.starts_with(&format!("{name}/")))
         || has_excluded_extension(path)
     {
         return true;
@@ -471,10 +481,15 @@ fn split_initial_files(
 
 /// Lists the active domain's servers (MIP appendix B) for the publish
 /// dialog's binding selector. Empty when the domain has no MIP face.
-pub async fn list_servers() -> crate::Result<Vec<super::update::MipServerBinding>> {
+pub async fn list_servers()
+-> crate::Result<Vec<super::update::MipServerBinding>> {
     let state = State::get().await?;
     let mip_base = active_mip_base().await?;
-    let value = super::update::fetch_json(&state, &super::update::servers_url(&mip_base)).await?;
+    let value = super::update::fetch_json(
+        &state,
+        &super::update::servers_url(&mip_base),
+    )
+    .await?;
     let servers: Vec<super::update::MipServerBinding> = serde_json::from_value(
         value
             .get("servers")
@@ -486,13 +501,13 @@ pub async fn list_servers() -> crate::Result<Vec<super::update::MipServerBinding
 
 /// Admin-declared optional feature for a publish (mip.json features, MIP
 /// §3.5) — the same shape the profile persists for later pushes.
-pub use super::state::{PublishFeature as PublishFeatureInput, PublishPolicy as PublishPolicyInput};
+pub use super::state::{
+    PublishFeature as PublishFeatureInput, PublishPolicy as PublishPolicyInput,
+};
 
 /// Export candidates for the publish archive: everything the pack should
 /// own, minus player-side content, runtime logs, and bookkeeping files.
-async fn publish_candidates(
-    instance_id: &str,
-) -> crate::Result<Vec<String>> {
+async fn publish_candidates(instance_id: &str) -> crate::Result<Vec<String>> {
     let candidates =
         crate::api::instance::get_pack_export_candidates(instance_id).await?;
     Ok(candidates
@@ -527,7 +542,8 @@ async fn expand_candidate_files(
                     let Ok(relative) = path.strip_prefix(instance_dir) else {
                         continue;
                     };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
+                    let relative =
+                        relative.to_string_lossy().replace('\\', "/");
                     if path.is_dir() {
                         if !exclusions.matches(&relative) {
                             stack.push(path);
@@ -600,7 +616,8 @@ async fn mirror_github_resources(
     // pick up tags published since the last mirror.
     let mut targets: Vec<(String, &str, bool)> = Vec::new();
     if let Ok(Some(metadata)) = crate::api::instance::get(instance_id).await
-        && metadata.applied_content_set.loader == crate::state::ModLoader::Cleanroom
+        && metadata.applied_content_set.loader
+            == crate::state::ModLoader::Cleanroom
     {
         if let Some(loader_version) = metadata
             .applied_content_set
@@ -609,7 +626,9 @@ async fn mirror_github_resources(
             .filter(|version| !version.is_empty())
         {
             targets.push((
-                crate::api::loader_metadata::cleanroom_installer_url(loader_version),
+                crate::api::loader_metadata::cleanroom_installer_url(
+                    loader_version,
+                ),
                 "loader-installer",
                 false,
             ));
@@ -622,14 +641,19 @@ async fn mirror_github_resources(
     }
     let mut mirrors = Vec::with_capacity(targets.len());
     for (url, kind, force) in targets {
-        mirrors.push(super::mirrors::ensure_mirrored(mip_base, &url, kind, force).await);
+        mirrors.push(
+            super::mirrors::ensure_mirrored(mip_base, &url, kind, force).await,
+        );
     }
     mirrors
 }
 
 /// Stamps the mirror summary onto the publish report; no-op when nothing
 /// was mirror-eligible so non-GitHub publishes keep their report unchanged.
-fn attach_mirrors(report: &mut serde_json::Value, mirrors: Vec<serde_json::Value>) {
+fn attach_mirrors(
+    report: &mut serde_json::Value,
+    mirrors: Vec<serde_json::Value>,
+) {
     if mirrors.is_empty() {
         return;
     }
@@ -719,14 +743,13 @@ pub async fn push_initial(
     if let Some(min_major) = min_java {
         mip_json["java"] = serde_json::json!({ "minMajor": min_major });
     }
-    let archive_path =
-        crate::api::instance::build_publish_archive(
-            instance_id,
-            candidates,
-            Some(version.to_string()),
-            mip_json,
-        )
-        .await?;
+    let archive_path = crate::api::instance::build_publish_archive(
+        instance_id,
+        candidates,
+        Some(version.to_string()),
+        mip_json,
+    )
+    .await?;
 
     let upload = match build_initial_upload(
         &archive_path,
@@ -743,9 +766,12 @@ pub async fn push_initial(
             return Err(error);
         }
     };
-    let report =
-        post_multipart(&mip_base, &format!("/api/packs/{pack_id}/ingest"), upload)
-            .await;
+    let report = post_multipart(
+        &mip_base,
+        &format!("/api/packs/{pack_id}/ingest"),
+        upload,
+    )
+    .await;
     tokio::fs::remove_file(&archive_path).await.ok();
     let report = report?;
 
@@ -778,7 +804,10 @@ pub async fn push_initial(
     )
     .await?;
     let mut report = report;
-    attach_mirrors(&mut report, mirror_github_resources(instance_id, &mip_base).await);
+    attach_mirrors(
+        &mut report,
+        mirror_github_resources(instance_id, &mip_base).await,
+    );
     Ok(report)
 }
 
@@ -834,7 +863,8 @@ async fn build_initial_upload(
     if let Some(channel) = channel {
         form = form.text("channel", channel.to_string());
     }
-    if let Some(notes) = notes.map(str::trim).filter(|notes| !notes.is_empty()) {
+    if let Some(notes) = notes.map(str::trim).filter(|notes| !notes.is_empty())
+    {
         form = form.text("notes", notes.to_string());
     }
     if let Some(bind) = bind {
@@ -870,14 +900,18 @@ async fn adopt_state_from_report(
         pack_id: pack_id.to_string(),
         version: version.to_string(),
         channel: channel.map(|value| value.to_string()),
-        binding: binding_server.map(|server_id| super::state::MipInstanceBinding {
-            server_id: server_id.to_string(),
-            season_id: binding_season.map(|season| season.to_string()),
+        binding: binding_server.map(|server_id| {
+            super::state::MipInstanceBinding {
+                server_id: server_id.to_string(),
+                season_id: binding_season.map(|season| season.to_string()),
+            }
         }),
         publish_profile: Some(publish_profile),
         ..MipPackState::default()
     };
-    if let Some(files) = manifest.get("files").and_then(|files| files.as_array()) {
+    if let Some(files) =
+        manifest.get("files").and_then(|files| files.as_array())
+    {
         for file in files {
             let (Some(path), Some(sha512)) = (
                 file.get("path").and_then(|path| path.as_str()),
@@ -902,7 +936,8 @@ async fn adopt_state_from_report(
             );
         }
     }
-    if let Some(features) = manifest.get("features").and_then(|f| f.as_array()) {
+    if let Some(features) = manifest.get("features").and_then(|f| f.as_array())
+    {
         for feature in features {
             let Some(id) = feature.get("id").and_then(|id| id.as_str()) else {
                 continue;
@@ -1010,7 +1045,8 @@ pub async fn push_delta(
     // 引导走初始包重发（前端由 diff 的 managed:false 分流）。首发时持久化的
     // 排除策略继续生效：管理员刻意排除的文件不再以「新增」反复出现。
     let state = State::get().await?;
-    let Some(server_base) = resolve_server_base(&state, &pack_state).await? else {
+    let Some(server_base) = resolve_server_base(&state, &pack_state).await?
+    else {
         return Err(crate::ErrorKind::OtherError(
             "服务端基线已不存在（版本可能已被删除），请作为初始包重新发布"
                 .to_string(),
@@ -1147,7 +1183,10 @@ pub async fn push_delta(
                         serde_json::Value::String(feature.clone());
                 }
             }
-            delta[key].as_array_mut().expect("array literal").push(entry);
+            delta[key]
+                .as_array_mut()
+                .expect("array literal")
+                .push(entry);
             part_index += 1;
         }
     }
@@ -1157,7 +1196,8 @@ pub async fn push_delta(
     if let Some(channel_value) = channel {
         delta["channel"] = serde_json::Value::String(channel_value.to_string());
     }
-    if let Some(notes) = notes.map(str::trim).filter(|notes| !notes.is_empty()) {
+    if let Some(notes) = notes.map(str::trim).filter(|notes| !notes.is_empty())
+    {
         delta["notes"] = serde_json::Value::String(notes.to_string());
     }
     form = form.text("delta", delta.to_string());
@@ -1188,7 +1228,10 @@ pub async fn push_delta(
     pack_state.publish_profile = Some(profile);
     state::save(&instance_dir, &pack_state).await?;
 
-    attach_mirrors(&mut report, mirror_github_resources(instance_id, &mip_base).await);
+    attach_mirrors(
+        &mut report,
+        mirror_github_resources(instance_id, &mip_base).await,
+    );
     Ok(report)
 }
 
@@ -1225,7 +1268,9 @@ async fn active_mip_base() -> crate::Result<String> {
 
 /// Resolves the (instance dir, MIP base URL) pair every publish operation
 /// needs.
-async fn publish_target(instance_id: &str) -> crate::Result<(std::path::PathBuf, String)> {
+async fn publish_target(
+    instance_id: &str,
+) -> crate::Result<(std::path::PathBuf, String)> {
     let instance_dir = crate::api::instance::get_full_path(instance_id).await?;
     let mip_base = active_mip_base().await?;
     Ok((instance_dir, mip_base))
@@ -1257,7 +1302,9 @@ pub struct PackVersionInfo {
 
 /// Lists released versions for a pack (newest first as returned by the
 /// adapter). Used by the publish console's withdraw picker.
-pub async fn list_versions(pack_id: &str) -> crate::Result<Vec<PackVersionInfo>> {
+pub async fn list_versions(
+    pack_id: &str,
+) -> crate::Result<Vec<PackVersionInfo>> {
     let state = State::get().await?;
     let mip_base = active_mip_base().await?;
     let value = super::update::fetch_json(
@@ -1299,7 +1346,8 @@ pub async fn withdraw_version(
 ) -> crate::Result<serde_json::Value> {
     if pack_id.trim().is_empty() || version.trim().is_empty() {
         return Err(crate::ErrorKind::OtherError(
-            "pack id and version are required to withdraw a release".to_string(),
+            "pack id and version are required to withdraw a release"
+                .to_string(),
         )
         .into());
     }
@@ -1347,7 +1395,8 @@ fn urlencoding_minimal(value: &str) -> String {
     value
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~')
+            {
                 ch.to_string()
             } else {
                 format!("%{:02X}", ch as u32)
@@ -1441,7 +1490,8 @@ mod tests {
             ("mods/added.jar", "h-added"),
         ]);
 
-        let diff = compute_publish_diff(&base, &local, &PublishExclusions::default());
+        let diff =
+            compute_publish_diff(&base, &local, &PublishExclusions::default());
         assert_eq!(diff.changed.len(), 1);
         assert_eq!(diff.changed[0].path, "mods/changed.jar");
         assert_eq!(diff.added.len(), 1);
@@ -1466,7 +1516,8 @@ mod tests {
             ("mods/renamed.jar", "h-d"),
         ]);
 
-        let diff = compute_publish_diff(&base, &local, &PublishExclusions::default());
+        let diff =
+            compute_publish_diff(&base, &local, &PublishExclusions::default());
         assert!(diff.changed.is_empty() && diff.deleted.is_empty());
         assert_eq!(diff.excluded.len(), 2);
         // The renamed copy of a disabled file counts as an addition of a
@@ -1505,10 +1556,11 @@ mod tests {
         // and the excluded new directory stays out of the additions.
         assert!(diff.deleted.iter().all(|path| path != "mods/extra.jar"));
         assert!(diff.excluded.contains(&"mods/extra.jar".to_string()));
-        assert!(diff
-            .added
-            .iter()
-            .all(|entry| entry.path != "mods/new/thing.jar"));
+        assert!(
+            diff.added
+                .iter()
+                .all(|entry| entry.path != "mods/new/thing.jar")
+        );
     }
 
     #[test]
@@ -1552,7 +1604,8 @@ mod tests {
             }],
         });
         let json = serde_json::to_string(&state).expect("serialize");
-        let parsed: MipPackState = serde_json::from_str(&json).expect("deserialize");
+        let parsed: MipPackState =
+            serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, state);
         // States written before the profile existed still load.
         let legacy: MipPackState =

@@ -55,8 +55,9 @@ pub fn external_begin_url(
         // tokens are forwarded so no percent-encoding is needed.
         Some(t)
             if !t.is_empty()
-                && t.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') =>
+                && t.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || c == '-' || c == '_'
+                }) =>
         {
             format!("{base}?type={t}")
         }
@@ -183,7 +184,11 @@ struct TokenResponse {
     #[serde(default, alias = "refreshToken")]
     #[allow(dead_code)]
     refresh_token: Option<String>,
-    #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
+    #[serde(
+        default,
+        alias = "expiresIn",
+        deserialize_with = "de_opt_i64_lenient"
+    )]
     #[allow(dead_code)]
     expires_in: Option<i64>,
 }
@@ -254,14 +259,11 @@ async fn request_tokens(
         .send()
         .await?;
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|error| {
-            crate::ErrorKind::OtherError(format!(
-                "Token response from {url} could not be read: {error}"
-            ))
-        })?;
+    let text = response.text().await.map_err(|error| {
+        crate::ErrorKind::OtherError(format!(
+            "Token response from {url} could not be read: {error}"
+        ))
+    })?;
     if !status.is_success() {
         return Err(crate::ErrorKind::OtherError(format!(
             "Token exchange failed ({status}): {}",
@@ -392,7 +394,11 @@ struct YdaLoginResponse {
     /// 解析成 None，导致 2h 整点必弹重新登录。
     #[serde(default, alias = "refreshToken")]
     refresh_token: Option<String>,
-    #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
+    #[serde(
+        default,
+        alias = "expiresIn",
+        deserialize_with = "de_opt_i64_lenient"
+    )]
     expires_in: Option<i64>,
     /// yda business endpoints envelope the payload in `{code, data}`.
     #[serde(default)]
@@ -416,7 +422,8 @@ pub async fn password_login(
                     "Could not fetch login methods from {origin}: {error}"
                 ))
             })?;
-    let endpoint = rebase_to_origin(&password_endpoint(&capabilities)?, &origin);
+    let endpoint =
+        rebase_to_origin(&password_endpoint(&capabilities)?, &origin);
 
     let body =
         serde_json::json!({ "username": username, "password": password });
@@ -438,20 +445,30 @@ pub async fn password_login(
             "Login request to {endpoint} failed: {error}"
         ))
     })?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-        crate::ErrorKind::OtherError(format!(
-            "Login response from {endpoint} is not valid JSON: {error}"
-        ))
-    })?;
-    let login: YdaLoginResponse =
-        serde_json::from_value(unwrap_token_payload(value)).map_err(|error| {
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| {
             crate::ErrorKind::OtherError(format!(
-                "Login response from {endpoint} has an unexpected shape: {error}"
+                "Login response from {endpoint} is not valid JSON: {error}"
             ))
         })?;
-    let (access_token, refresh_token, expires_in) = login_session_parts(&login)?;
-    normalize_and_store(domain_id, &origin, access_token, refresh_token, expires_in)
-        .await
+    let login: YdaLoginResponse = serde_json::from_value(unwrap_token_payload(
+        value,
+    ))
+    .map_err(|error| {
+        crate::ErrorKind::OtherError(format!(
+            "Login response from {endpoint} has an unexpected shape: {error}"
+        ))
+    })?;
+    let (access_token, refresh_token, expires_in) =
+        login_session_parts(&login)?;
+    normalize_and_store(
+        domain_id,
+        &origin,
+        access_token,
+        refresh_token,
+        expires_in,
+    )
+    .await
 }
 
 /// Registers a new domain account via the host `/api/user/register` endpoint
@@ -501,7 +518,8 @@ pub async fn register(
         "password": password,
     });
     if let Some(nickname) = nickname.filter(|value| !value.trim().is_empty()) {
-        body["nickname"] = serde_json::Value::String(nickname.trim().to_string());
+        body["nickname"] =
+            serde_json::Value::String(nickname.trim().to_string());
     }
     let bytes = fetch_advanced(
         Method::POST,
@@ -521,7 +539,8 @@ pub async fn register(
             "Registration request to {endpoint} failed: {error}"
         ))
     })?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).unwrap_or_default();
     // Host envelopes business errors as `{code, message}` with HTTP 200.
     let code = value.get("code").and_then(|c| c.as_i64()).unwrap_or(200);
     if code != 200 {
@@ -540,17 +559,26 @@ fn login_session_parts(
     login: &YdaLoginResponse,
 ) -> crate::Result<(String, Option<String>, Option<i64>)> {
     let data = login.data.as_deref();
-    let pick = |flat: Option<&String>, nested: Option<&String>| -> Option<String> {
-        flat.cloned().or_else(|| nested.cloned())
-    };
+    let pick =
+        |flat: Option<&String>, nested: Option<&String>| -> Option<String> {
+            flat.cloned().or_else(|| nested.cloned())
+        };
     let access_token = pick(login.access_token.as_ref(), login.token.as_ref())
-        .or_else(|| pick(data.and_then(|data| data.access_token.as_ref()), data.and_then(|data| data.token.as_ref())))
+        .or_else(|| {
+            pick(
+                data.and_then(|data| data.access_token.as_ref()),
+                data.and_then(|data| data.token.as_ref()),
+            )
+        })
         .ok_or_else(|| {
             crate::ErrorKind::OtherError(
                 "Login response did not contain a token".to_string(),
             )
         })?;
-    let refresh_token = pick(login.refresh_token.as_ref(), data.and_then(|data| data.refresh_token.as_ref()));
+    let refresh_token = pick(
+        login.refresh_token.as_ref(),
+        data.and_then(|data| data.refresh_token.as_ref()),
+    );
     let expires_in = login
         .expires_in
         .or_else(|| data.and_then(|data| data.expires_in));
@@ -631,10 +659,18 @@ pub async fn oauth_finish(
     let tokens = request_tokens(token_url, form).await?;
     // The OAuth token only bootstraps the session: swap it for the host's
     // login session so the launcher speaks to the domain as the real user.
-    let login = exchange_for_login_session(&origin, &tokens.access_token).await?;
-    let (access_token, refresh_token, expires_in) = login_session_parts(&login)?;
-    normalize_and_store(domain_id, &origin, access_token, refresh_token, expires_in)
-        .await
+    let login =
+        exchange_for_login_session(&origin, &tokens.access_token).await?;
+    let (access_token, refresh_token, expires_in) =
+        login_session_parts(&login)?;
+    normalize_and_store(
+        domain_id,
+        &origin,
+        access_token,
+        refresh_token,
+        expires_in,
+    )
+    .await
 }
 
 fn form_urlencoded(pairs: &[(&str, &str)]) -> String {
@@ -729,7 +765,11 @@ pub struct YmclExternalPoll {
     pub refresh_token: Option<String>,
     // The host's Jackson config serializes every Long as a JSON string, so
     // the adapter's `expires_in` lands quoted ("7200"); accept both shapes.
-    #[serde(default, alias = "expiresIn", deserialize_with = "de_opt_i64_lenient")]
+    #[serde(
+        default,
+        alias = "expiresIn",
+        deserialize_with = "de_opt_i64_lenient"
+    )]
     pub expires_in: Option<i64>,
 }
 
@@ -854,30 +894,44 @@ async fn refresh_session_locked(
         ))
         .into()
     })?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-        crate::ErrorKind::OtherError(format!(
-            "Refresh response from {endpoint} is not valid JSON: {error}"
-        ))
-    })?;
-    let login: YdaLoginResponse = serde_json::from_value(unwrap_token_payload(value))
-        .map_err(|error| {
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| {
             crate::ErrorKind::OtherError(format!(
-                "Refresh response from {endpoint} has an unexpected shape: {error}"
+                "Refresh response from {endpoint} is not valid JSON: {error}"
             ))
         })?;
-    let (access_token, mut refresh_token, expires_in) = login_session_parts(&login)?;
+    let login: YdaLoginResponse = serde_json::from_value(unwrap_token_payload(
+        value,
+    ))
+    .map_err(|error| {
+        crate::ErrorKind::OtherError(format!(
+            "Refresh response from {endpoint} has an unexpected shape: {error}"
+        ))
+    })?;
+    let (access_token, mut refresh_token, expires_in) =
+        login_session_parts(&login)?;
     // Hosts that do not rotate refresh tokens omit the field on refresh;
     // keep the previous one so the next expiry can still renew silently.
-    if refresh_token.as_deref().is_none_or(|token| token.trim().is_empty()) {
+    if refresh_token
+        .as_deref()
+        .is_none_or(|token| token.trim().is_empty())
+    {
         refresh_token = previous_refresh_token;
     }
     // A missing lifetime on refresh would clear expires_at and disable
     // proactive renewal; fall back to the host's usual 2h window.
-    let expires_in = Some(expires_in.unwrap_or(DEFAULT_TOKEN_LIFETIME_SECS).max(0));
+    let expires_in =
+        Some(expires_in.unwrap_or(DEFAULT_TOKEN_LIFETIME_SECS).max(0));
 
-    normalize_and_store(domain_id, &origin, access_token, refresh_token, expires_in)
-        .await
-        .map(Some)
+    normalize_and_store(
+        domain_id,
+        &origin,
+        access_token,
+        refresh_token,
+        expires_in,
+    )
+    .await
+    .map(Some)
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -904,14 +958,14 @@ pub async fn ygg_exchange(
     profile_name: Option<&str>,
 ) -> crate::Result<YmclYggExchange> {
     use crate::state::{
-        create_credentials, YggdrasilMetadata, YggdrasilProfile,
+        YggdrasilMetadata, YggdrasilProfile, create_credentials,
     };
 
     let state = State::get().await?;
     let origin = super::registry::domain_origin(domain_id).await?;
-    let stored = ensure_session(domain_id)
-        .await?
-        .ok_or_else(|| crate::ErrorKind::OtherError("Not logged in to this domain".to_string()))?;
+    let stored = ensure_session(domain_id).await?.ok_or_else(|| {
+        crate::ErrorKind::OtherError("Not logged in to this domain".to_string())
+    })?;
     // The provider shape is resolved by probe; a call that fails on a cached
     // shape re-probes once, in case the node switched providers.
     let mut reprobed = false;
@@ -939,7 +993,7 @@ pub async fn ygg_exchange(
                 return Err(crate::ErrorKind::OtherError(format!(
                     "Minecraft session exchange from {url} failed: {error}"
                 ))
-                .into())
+                .into());
             }
         }
     };
@@ -1004,7 +1058,7 @@ pub async fn ygg_exchange(
             return Err(crate::ErrorKind::OtherError(
                 "This account has no available Minecraft profile".to_string(),
             )
-            .into())
+            .into());
         }
     };
 
@@ -1026,7 +1080,10 @@ pub async fn ygg_exchange(
         })?;
     let login = stored.session.username;
     let credentials = create_credentials(
-        YggdrasilProfile { id: profile_id, name: selected.name },
+        YggdrasilProfile {
+            id: profile_id,
+            name: selected.name,
+        },
         access_token,
         client_token,
         YggdrasilMetadata {
@@ -1037,12 +1094,17 @@ pub async fn ygg_exchange(
         &login,
     );
     credentials.upsert(&state.pool).await?;
-    Ok(YmclYggExchange { credentials, profiles })
+    Ok(YmclYggExchange {
+        credentials,
+        profiles,
+    })
 }
 
 /// Lists the Minecraft profiles the signed-in user owns on the domain's
 /// Yggdrasil service. No session is issued (list-only mode).
-pub async fn ygg_profiles(domain_id: &str) -> crate::Result<Vec<YmclYggProfile>> {
+pub async fn ygg_profiles(
+    domain_id: &str,
+) -> crate::Result<Vec<YmclYggProfile>> {
     let state = State::get().await?;
     let origin = super::registry::domain_origin(domain_id).await?;
     let mut reprobed = false;
@@ -1063,16 +1125,17 @@ pub async fn ygg_profiles(domain_id: &str) -> crate::Result<Vec<YmclYggProfile>>
                 return Err(crate::ErrorKind::OtherError(format!(
                     "Profile list from {url} failed: {error}"
                 ))
-                .into())
+                .into());
             }
         }
     };
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-        crate::ErrorKind::OtherError(format!(
-            "Profile list from {url} is not valid JSON: {error}; body: {}",
-            body_snippet(&String::from_utf8_lossy(&bytes))
-        ))
-    })?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| {
+            crate::ErrorKind::OtherError(format!(
+                "Profile list from {url} is not valid JSON: {error}; body: {}",
+                body_snippet(&String::from_utf8_lossy(&bytes))
+            ))
+        })?;
     Ok(value
         .get("profiles")
         .and_then(|value| value.as_array())
@@ -1227,12 +1290,8 @@ async fn touch_domain_session(domain_id: &str) {
     if session.is_expired() {
         return;
     }
-    let result = fetch_session_info(
-        &state,
-        &origin,
-        &session.access_token,
-    )
-    .await;
+    let result =
+        fetch_session_info(&state, &origin, &session.access_token).await;
     if let Err(error) = result {
         tracing::debug!(
             "Domain session touch for {domain_id} failed (ignored): {error}"
@@ -1247,7 +1306,8 @@ const DOMAIN_PERMISSION_DENIED_PREFIX: &str = "无此插件权限：";
 
 /// Sentinel surfaced when the domain token is dead and cannot be renewed —
 /// the frontend localizes it and pops the domain login dialog.
-const SESSION_EXPIRED_MESSAGE: &str = "Domain session expired — sign in to this domain again";
+const SESSION_EXPIRED_MESSAGE: &str =
+    "Domain session expired — sign in to this domain again";
 
 fn session_expired_error() -> crate::Error {
     crate::ErrorKind::OtherError(SESSION_EXPIRED_MESSAGE.to_string()).into()
@@ -1411,8 +1471,15 @@ pub async fn domain_request(
     };
     let can_refresh = session.can_refresh();
     let token = session.access_token;
-    match send_domain_request(state, url, method.clone(), json_body.clone(), Some(&token), None)
-        .await
+    match send_domain_request(
+        state,
+        url,
+        method.clone(),
+        json_body.clone(),
+        Some(&token),
+        None,
+    )
+    .await
     {
         Ok(bytes) => Ok(bytes),
         Err(error) => {
@@ -1442,7 +1509,8 @@ pub async fn domain_request_opt(
     url: &str,
     json_body: Option<serde_json::Value>,
 ) -> crate::Result<bytes::Bytes> {
-    domain_request_opt_with_bar(state, domain_id, method, url, json_body, None).await
+    domain_request_opt_with_bar(state, domain_id, method, url, json_body, None)
+        .await
 }
 
 /// [`domain_request_opt`] with a streaming download progress bar: the
@@ -1457,9 +1525,12 @@ pub async fn domain_request_opt_with_bar(
     loading_bar: Option<(&LoadingBarId, f64)>,
 ) -> crate::Result<bytes::Bytes> {
     let session = ensure_session(domain_id).await?;
-    let can_refresh = session.as_ref().is_some_and(YmclStoredSession::can_refresh);
+    let can_refresh =
+        session.as_ref().is_some_and(YmclStoredSession::can_refresh);
     let had_session = session.is_some();
-    let token = session.as_ref().map(|session| session.access_token.as_str());
+    let token = session
+        .as_ref()
+        .map(|session| session.access_token.as_str());
     match send_domain_request(
         state,
         url,
@@ -1637,8 +1708,11 @@ mod session_renewal_tests {
             login_session_parts(&login)
                 .expect("production payload must carry a token");
         assert_eq!(access_token, "4f739d33-satoken");
-        assert_eq!(refresh_token.as_deref(), Some("ydr_prod_refresh"),
-            "camelCase refreshToken 必须被解析，否则无感续期全废");
+        assert_eq!(
+            refresh_token.as_deref(),
+            Some("ydr_prod_refresh"),
+            "camelCase refreshToken 必须被解析，否则无感续期全废"
+        );
         assert_eq!(expires_in, Some(7200));
     }
 
@@ -1660,22 +1734,30 @@ mod session_renewal_tests {
     /// Tokens without expiry information are never proactively refreshed.
     #[test]
     fn missing_expiry_does_not_need_refresh() {
-        assert!(!stored(None, Some("refresh")).needs_refresh(REFRESH_SKEW_SECS));
+        assert!(
+            !stored(None, Some("refresh")).needs_refresh(REFRESH_SKEW_SECS)
+        );
     }
 
     /// A fresh 2h token is left alone until the skew window.
     #[test]
     fn fresh_token_outside_skew_is_not_refreshed() {
-        assert!(!stored(Some(DEFAULT_TOKEN_LIFETIME_SECS), Some("refresh"))
-            .needs_refresh(REFRESH_SKEW_SECS));
+        assert!(
+            !stored(Some(DEFAULT_TOKEN_LIFETIME_SECS), Some("refresh"))
+                .needs_refresh(REFRESH_SKEW_SECS)
+        );
     }
 
     /// Tokens inside the skew window (or already expired) renew up-front.
     #[test]
     fn near_expiry_token_is_refreshed_proactively() {
-        assert!(stored(Some(REFRESH_SKEW_SECS - 1), Some("refresh"))
-            .needs_refresh(REFRESH_SKEW_SECS));
-        assert!(stored(Some(-1), Some("refresh")).needs_refresh(REFRESH_SKEW_SECS));
+        assert!(
+            stored(Some(REFRESH_SKEW_SECS - 1), Some("refresh"))
+                .needs_refresh(REFRESH_SKEW_SECS)
+        );
+        assert!(
+            stored(Some(-1), Some("refresh")).needs_refresh(REFRESH_SKEW_SECS)
+        );
     }
 
     /// Blank refresh tokens are treated as missing so the keeper skips them.
@@ -1740,10 +1822,9 @@ mod external_poll_parse_tests {
         .unwrap();
         assert_eq!(poll.expires_in, Some(7200));
 
-        let aliased: YmclExternalPoll = serde_json::from_str(
-            r#"{"status":"pending","expiresIn":"86400"}"#,
-        )
-        .unwrap();
+        let aliased: YmclExternalPoll =
+            serde_json::from_str(r#"{"status":"pending","expiresIn":"86400"}"#)
+                .unwrap();
         assert_eq!(aliased.expires_in, Some(86400));
     }
 

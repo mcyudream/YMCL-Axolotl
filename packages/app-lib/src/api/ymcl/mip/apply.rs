@@ -218,7 +218,8 @@ where
     // Skipped changes leave the local file alone, so they are not backed up
     // and are not committed either (nothing was staged for them).
     let mut backed_up: Vec<PathBuf> = Vec::new();
-    let backup_result = backup_targets(instance_dir, &backup, plan, &skipped_files).await;
+    let backup_result =
+        backup_targets(instance_dir, &backup, plan, &skipped_files).await;
     if let Err(error) = backup_result {
         restore_backup(instance_dir, &backup).await;
         tokio::fs::remove_dir_all(&staging).await.ok();
@@ -227,7 +228,8 @@ where
     backed_up.push(backup.clone());
 
     // Commit phase: move staged content in, then delete.
-    let commit_result = commit(instance_dir, &staging, plan, &skipped_files).await;
+    let commit_result =
+        commit(instance_dir, &staging, plan, &skipped_files).await;
     if let Err(error) = commit_result {
         restore_backup(instance_dir, &backup).await;
         tokio::fs::remove_dir_all(&staging).await.ok();
@@ -239,7 +241,13 @@ where
     tokio::fs::remove_dir_all(&backup).await.ok();
 
     Ok(ApplyOutcome {
-        new_state: build_new_state(base, target, plan, entry_by_path, &skipped_files),
+        new_state: build_new_state(
+            base,
+            target,
+            plan,
+            entry_by_path,
+            &skipped_files,
+        ),
         staged_files: plan.changes.len() - skipped_files.len(),
         deleted_files: plan.deletions.len(),
         skipped_files,
@@ -394,10 +402,7 @@ where
     Ok(bytes)
 }
 
-fn is_skipped(
-    skipped: &[SkippedFile],
-    path: &str,
-) -> bool {
+fn is_skipped(skipped: &[SkippedFile], path: &str) -> bool {
     skipped.iter().any(|item| item.path == path)
 }
 
@@ -765,10 +770,11 @@ mod tests {
             (hash(new_add).as_str(), new_add.as_slice()),
         ]);
 
-        let outcome =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
-                .await
-                .unwrap();
+        let outcome = apply_update(
+            instance, &base, &target, &plan, &entries, &fetcher, None,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             tokio::fs::read(instance.join("mods/replace.jar"))
@@ -818,10 +824,11 @@ mod tests {
         // Fetcher has no objects: any download attempt would fail the test.
         let fetcher = MemoryFetcher::new(&[]);
 
-        let outcome =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
-                .await
-                .unwrap();
+        let outcome = apply_update(
+            instance, &base, &target, &plan, &entries, &fetcher, None,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             tokio::fs::read(instance.join("mods/new.jar"))
@@ -947,10 +954,11 @@ mod tests {
             (hash(new_b).as_str(), new_b.as_slice()),
         ]);
 
-        let outcome =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
-                .await
-                .unwrap();
+        let outcome = apply_update(
+            instance, &base, &target, &plan, &entries, &fetcher, None,
+        )
+        .await
+        .unwrap();
 
         // Local content kept for the failed file; the rest of the update applied.
         assert_eq!(
@@ -988,9 +996,10 @@ mod tests {
         let fetcher =
             MemoryFetcher::new(&[(bad_hash.as_str(), b"corrupt".as_slice())]);
 
-        let result =
-            apply_update(instance, &base, &target, &plan, &entries, &fetcher, None)
-                .await;
+        let result = apply_update(
+            instance, &base, &target, &plan, &entries, &fetcher, None,
+        )
+        .await;
         assert!(result.is_err());
         assert!(!instance.join("mods/required.jar").exists());
         assert!(!instance.join(STAGING_DIR_NAME).exists());

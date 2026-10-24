@@ -47,11 +47,20 @@ pub async fn fetch_manifest(
 /// YDA filters navigation/pages by the caller's RBAC — an anonymous GET
 /// often returns only native launcher entries, so custom plugin pages
 /// never reach the sidebar. Authenticated refresh is required after login.
-pub async fn fetch_manifest_for_domain(domain_id: &str) -> crate::Result<YmclManifest> {
+pub async fn fetch_manifest_for_domain(
+    domain_id: &str,
+) -> crate::Result<YmclManifest> {
     let state = State::get().await?;
     let origin = super::registry::domain_origin(domain_id).await?;
     let url = manifest_url(&origin);
-    let bytes = super::auth::domain_request_opt(&state, domain_id, Method::GET, &url, None).await?;
+    let bytes = super::auth::domain_request_opt(
+        &state,
+        domain_id,
+        Method::GET,
+        &url,
+        None,
+    )
+    .await?;
     let manifest: YmclManifest = serde_json::from_slice(&bytes)?;
     super::manifest::validate_protocol_version(manifest.protocol_version)?;
     Ok(manifest)

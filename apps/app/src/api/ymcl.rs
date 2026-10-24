@@ -110,8 +110,8 @@ pub async fn ymcl_interop_site(
 // Active domain's mc-interop catalog; None unless an interop domain is active
 // invoke('plugin:ymcl|ymcl_interop_active_site')
 #[tauri::command]
-pub async fn ymcl_interop_active_site(
-) -> Result<Option<theseus::ymcl::interop::InteropSiteDocument>> {
+pub async fn ymcl_interop_active_site()
+-> Result<Option<theseus::ymcl::interop::InteropSiteDocument>> {
     Ok(registry::active_site_document().await?)
 }
 
@@ -141,7 +141,10 @@ pub async fn ymcl_interop_pack_download(
     domain_id: String,
     entry_id: String,
 ) -> Result<theseus::ymcl::interop::InteropArtifactDownload> {
-    Ok(theseus::ymcl::interop::download_entry_artifact(&domain_id, &entry_id).await?)
+    Ok(
+        theseus::ymcl::interop::download_entry_artifact(&domain_id, &entry_id)
+            .await?,
+    )
 }
 
 // Origin-keyed variant: works for YAP domains too (their well-known carries
@@ -151,7 +154,10 @@ pub async fn ymcl_interop_pack_download_origin(
     origin: String,
     entry_id: String,
 ) -> Result<theseus::ymcl::interop::InteropArtifactDownload> {
-    Ok(theseus::ymcl::interop::download_entry_artifact_by_origin(&origin, &entry_id).await?)
+    Ok(theseus::ymcl::interop::download_entry_artifact_by_origin(
+        &origin, &entry_id,
+    )
+    .await?)
 }
 
 // Remove a joined domain
@@ -393,7 +399,8 @@ pub async fn ymcl_auth_external_begin<R: Runtime>(
     login_type: Option<String>,
 ) -> Result<YmclExternalFlow> {
     let flow =
-        auth::external_begin(&domain_id, &provider, login_type.as_deref()).await?;
+        auth::external_begin(&domain_id, &provider, login_type.as_deref())
+            .await?;
     app.opener()
         .open_url(&flow.authorize_url, None::<&str>)
         .map_err(|e| {

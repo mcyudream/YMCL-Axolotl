@@ -203,7 +203,9 @@ fn is_feature_selected(
 ) -> bool {
     match &file.feature {
         Some(feature) => {
-            base.selected_features.iter().any(|selected| selected == feature)
+            base.selected_features
+                .iter()
+                .any(|selected| selected == feature)
                 || new_default_features.contains(feature.as_str())
         }
         None => true,
@@ -408,18 +410,24 @@ mod tests {
             declared_features: Some(Vec::new()),
             ..MipPackState::default()
         };
-        let plan = compute_update_plan(&base, &target, &HashMap::new()).unwrap();
+        let plan =
+            compute_update_plan(&base, &target, &HashMap::new()).unwrap();
         assert_eq!(plan.changes.len(), 1);
         assert_eq!(plan.changes[0].path, "shaders/oms.jar");
 
         // Base declared "shaders" but the player deselected it: stays out.
         base.declared_features = Some(vec!["shaders".to_string()]);
-        let plan = compute_update_plan(&base, &target, &HashMap::new()).unwrap();
+        let plan =
+            compute_update_plan(&base, &target, &HashMap::new()).unwrap();
         assert!(plan.changes.is_empty());
 
         // Legacy state without the declared list: nothing is assumed.
-        let plan =
-            compute_update_plan(&MipPackState::default(), &target, &HashMap::new()).unwrap();
+        let plan = compute_update_plan(
+            &MipPackState::default(),
+            &target,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(plan.changes.is_empty());
     }
 

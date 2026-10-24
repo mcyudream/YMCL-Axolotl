@@ -81,11 +81,15 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
         }
         return match url {
             Some(url) if !url.trim().is_empty() => {
-                Ok(CommandPayload::AddSite { url: url.trim().to_string() })
+                Ok(CommandPayload::AddSite {
+                    url: url.trim().to_string(),
+                })
             }
             _ => {
-                emit_warning("Invalid command, add-site requires a url parameter")
-                    .await?;
+                emit_warning(
+                    "Invalid command, add-site requires a url parameter",
+                )
+                .await?;
                 Err(crate::ErrorKind::InputError(
                     "add-site requires a url parameter".to_string(),
                 )
@@ -227,12 +231,11 @@ mod tests {
 
     #[tokio::test]
     async fn parses_launch_query_command() {
-        let command =
-            parse_command(&deep_link(
-                "launch?instance_id=example%20instance&server=example.org%3A25565",
-            ))
-            .await
-            .unwrap();
+        let command = parse_command(&deep_link(
+            "launch?instance_id=example%20instance&server=example.org%3A25565",
+        ))
+        .await
+        .unwrap();
         assert!(matches!(
             command,
             CommandPayload::LaunchInstance { id, server: Some(server), singleplayer_world: None }

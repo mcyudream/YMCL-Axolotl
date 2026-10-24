@@ -41,7 +41,14 @@ pub async fn fetch_data(
         }
     }
 
-    let bytes = super::auth::domain_request_opt(&state, &active, Method::GET, &url, None).await?;
+    let bytes = super::auth::domain_request_opt(
+        &state,
+        &active,
+        Method::GET,
+        &url,
+        None,
+    )
+    .await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 

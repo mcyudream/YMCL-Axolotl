@@ -269,7 +269,6 @@ pub enum UrlOrBlob {
     Blob(Bytes),
 }
 
-
 /// Gets the capes for the selected Minecraft profile.
 /// Only one cape can be equipped.
 #[tracing::instrument]

@@ -74,7 +74,9 @@ pub struct YmclSkinUploadResult {
 
 /// Parses an upload/collect response: protocol shape `{ "skin": { … } }`,
 /// tolerating adapters that return the bare closet-skin object.
-fn parse_skin_mutation(value: serde_json::Value) -> crate::Result<YmclSkinUploadResult> {
+fn parse_skin_mutation(
+    value: serde_json::Value,
+) -> crate::Result<YmclSkinUploadResult> {
     let node = match value.get("skin") {
         Some(skin) if skin.is_object() => skin.clone(),
         // 容错：适配器直回裸皮肤对象。
@@ -185,13 +187,14 @@ async fn skins_request(
     let base = skins_base_url(domain_id).await?;
     let state = State::get().await?;
     let url = format!("{base}{path}");
-    let bytes = super::auth::domain_request(&state, domain_id, method, &url, json_body)
-        .await
-        .map_err(|error| {
-            crate::ErrorKind::OtherError(format!(
-                "Domain skin service request to {url} failed: {error}"
-            ))
-        })?;
+    let bytes =
+        super::auth::domain_request(&state, domain_id, method, &url, json_body)
+            .await
+            .map_err(|error| {
+                crate::ErrorKind::OtherError(format!(
+                    "Domain skin service request to {url} failed: {error}"
+                ))
+            })?;
     if bytes.is_empty() {
         return Ok(serde_json::Value::Null);
     }
@@ -214,7 +217,9 @@ async fn skins_request(
 }
 
 /// Lists the Minecraft profiles the domain session's user owns.
-pub async fn list_profiles(domain_id: &str) -> crate::Result<Vec<YmclSkinProfile>> {
+pub async fn list_profiles(
+    domain_id: &str,
+) -> crate::Result<Vec<YmclSkinProfile>> {
     let value =
         skins_request(domain_id, Method::GET, "/profiles", None).await?;
     let profiles = match value.get("profiles") {
@@ -227,7 +232,10 @@ pub async fn list_profiles(domain_id: &str) -> crate::Result<Vec<YmclSkinProfile
 }
 
 /// Fetches a profile's wardrobe.
-pub async fn fetch_closet(domain_id: &str, profile_id: &str) -> crate::Result<YmclCloset> {
+pub async fn fetch_closet(
+    domain_id: &str,
+    profile_id: &str,
+) -> crate::Result<YmclCloset> {
     let value = skins_request(
         domain_id,
         Method::GET,
@@ -249,20 +257,14 @@ pub async fn equip(
     let value = skins_request(
         domain_id,
         Method::POST,
-        &format!(
-            "/closet/{}/equip",
-            urlencoding::encode(profile_id)
-        ),
+        &format!("/closet/{}/equip", urlencoding::encode(profile_id)),
         Some(serde_json::json!({
             "skin_id": skin_id,
             "cape_id": cape_id,
         })),
     )
     .await?;
-    let equipped = value
-        .get("equipped")
-        .cloned()
-        .unwrap_or(value);
+    let equipped = value.get("equipped").cloned().unwrap_or(value);
     Ok(serde_json::from_value(equipped)?)
 }
 
@@ -290,10 +292,7 @@ pub async fn upload_skin(
     let value = skins_request(
         domain_id,
         Method::POST,
-        &format!(
-            "/closet/{}/skins",
-            urlencoding::encode(profile_id)
-        ),
+        &format!("/closet/{}/skins", urlencoding::encode(profile_id)),
         Some(serde_json::json!({
             "filename": filename,
             "model": model,
@@ -332,10 +331,7 @@ pub async fn upload_cape(
     let value = skins_request(
         domain_id,
         Method::POST,
-        &format!(
-            "/closet/{}/capes",
-            urlencoding::encode(profile_id)
-        ),
+        &format!("/closet/{}/capes", urlencoding::encode(profile_id)),
         Some(serde_json::json!({
             "filename": filename,
             "name": name,
@@ -418,10 +414,7 @@ pub async fn collect(
     let value = skins_request(
         domain_id,
         Method::POST,
-        &format!(
-            "/closet/{}/collect",
-            urlencoding::encode(profile_id)
-        ),
+        &format!("/closet/{}/collect", urlencoding::encode(profile_id)),
         Some(serde_json::json!({
             "hash": hash,
             "name": name,
@@ -451,7 +444,9 @@ pub async fn fetch_texture_data_url(url: &str) -> crate::Result<String> {
     )
     .await
     .map_err(|error| {
-        crate::ErrorKind::OtherError(format!("Failed to download texture from {url}: {error}"))
+        crate::ErrorKind::OtherError(format!(
+            "Failed to download texture from {url}: {error}"
+        ))
     })?;
     Ok(format!(
         "data:image/png;base64,{}",
@@ -481,11 +476,19 @@ mod adapter_contract_tests {
             ],
             "capes": [ { "id": "c1", "name": "域庆披风", "url": "https://d.example/c1.png" } ]
         }"#;
-        let closet: YmclCloset =
-            serde_json::from_str(payload).expect("closet payload must deserialize");
+        let closet: YmclCloset = serde_json::from_str(payload)
+            .expect("closet payload must deserialize");
         assert_eq!(closet.profile.name, "Steve");
         let equipped = closet.equipped.as_ref().expect("equipped present");
-        assert_eq!(equipped.skin.as_ref().expect("skin worn").variant.as_deref(), Some("SLIM"));
+        assert_eq!(
+            equipped
+                .skin
+                .as_ref()
+                .expect("skin worn")
+                .variant
+                .as_deref(),
+            Some("SLIM")
+        );
         assert_eq!(equipped.cape_id.as_deref(), Some("c1"));
         assert_eq!(closet.skins.len(), 2);
         assert!(closet.skins[1].name.is_none());
@@ -501,8 +504,8 @@ mod adapter_contract_tests {
             "skins": [],
             "capes": []
         }"#;
-        let closet: YmclCloset =
-            serde_json::from_str(payload).expect("bare closet must deserialize");
+        let closet: YmclCloset = serde_json::from_str(payload)
+            .expect("bare closet must deserialize");
         let equipped = closet.equipped.as_ref().expect("equipped present");
         assert!(equipped.skin.is_none());
         assert!(equipped.cape_id.is_none());
@@ -519,7 +522,8 @@ mod adapter_contract_tests {
         ] }"#;
         let value: serde_json::Value = serde_json::from_str(payload).unwrap();
         let profiles: Vec<YmclSkinProfile> =
-            serde_json::from_value(value.get("profiles").cloned().unwrap()).unwrap();
+            serde_json::from_value(value.get("profiles").cloned().unwrap())
+                .unwrap();
         assert_eq!(profiles.len(), 2);
         assert!(profiles[0].current);
         assert!(!profiles[1].current);
@@ -536,7 +540,8 @@ mod adapter_contract_tests {
         }"#;
         let value: serde_json::Value = serde_json::from_str(payload).unwrap();
         let equipped: YmclEquippedState =
-            serde_json::from_value(value.get("equipped").cloned().unwrap()).unwrap();
+            serde_json::from_value(value.get("equipped").cloned().unwrap())
+                .unwrap();
         assert_eq!(equipped.skin.as_ref().expect("skin").id, "s1");
         assert!(equipped.cape_id.is_none());
     }
@@ -549,7 +554,8 @@ mod adapter_contract_tests {
             "skin": { "id": "s9", "variant": "CLASSIC", "url": "https://d.example/s9.png" }
         }"#;
         let result: YmclSkinUploadResult = parse_skin_mutation(
-            serde_json::from_str(wrapped).expect("wrapped payload must be valid JSON"),
+            serde_json::from_str(wrapped)
+                .expect("wrapped payload must be valid JSON"),
         )
         .expect("wrapped skin payload must deserialize");
         assert_eq!(result.skin.id, "s9");
@@ -557,7 +563,8 @@ mod adapter_contract_tests {
         // 容错：适配器直回裸皮肤对象。
         let bare = r#"{ "id": "s9", "variant": "CLASSIC", "url": "https://d.example/s9.png" }"#;
         let result: YmclSkinUploadResult = parse_skin_mutation(
-            serde_json::from_str(bare).expect("bare payload must be valid JSON"),
+            serde_json::from_str(bare)
+                .expect("bare payload must be valid JSON"),
         )
         .expect("bare skin payload must deserialize");
         assert_eq!(result.skin.id, "s9");
@@ -577,8 +584,8 @@ mod adapter_contract_tests {
                   "variant": "UNKNOWN", "url": "https://d.example/def.png" }
             ]
         }"#;
-        let page: YmclLibraryPage =
-            serde_json::from_str(payload).expect("library payload must deserialize");
+        let page: YmclLibraryPage = serde_json::from_str(payload)
+            .expect("library payload must deserialize");
         assert!(page.has_more);
         assert_eq!(page.items.len(), 2);
         assert_eq!(page.items[0].entry_type.as_deref(), Some("skin"));
@@ -589,7 +596,8 @@ mod adapter_contract_tests {
     /// YAP §6.2 error envelope must surface as a readable message.
     #[test]
     fn error_envelope_shape() {
-        let payload = r#"{ "error": "forbidden", "message": "不是该档案的拥有者" }"#;
+        let payload =
+            r#"{ "error": "forbidden", "message": "不是该档案的拥有者" }"#;
         let value: serde_json::Value = serde_json::from_str(payload).unwrap();
         assert_eq!(
             value.get("error").and_then(|error| error.as_str()),

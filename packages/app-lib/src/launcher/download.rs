@@ -3674,10 +3674,11 @@ mod fabric_network_merge_tests {
     async fn fabric_1218_install_keeps_single_asm_on_classpath() {
         crate::event::EventState::init().await.unwrap();
         let root = tempfile::tempdir().unwrap().keep();
-        let state =
-            crate::state::State::init_for_test(root.to_string_lossy().to_string())
-                .await
-                .unwrap();
+        let state = crate::state::State::init_for_test(
+            root.to_string_lossy().to_string(),
+        )
+        .await
+        .unwrap();
 
         let manifest: d::minecraft::VersionManifest = fetch_json(
             Method::GET,
@@ -3696,11 +3697,14 @@ mod fabric_network_merge_tests {
             .find(|candidate| candidate.id == "1.21.8")
             .expect("1.21.8 in version manifest")
             .clone();
-        let loader =
-            crate::launcher::get_loader_version_from_profile("1.21.8", ModLoader::Fabric, None)
-                .await
-                .expect("loader profile fetch")
-                .expect("fabric loader for 1.21.8");
+        let loader = crate::launcher::get_loader_version_from_profile(
+            "1.21.8",
+            ModLoader::Fabric,
+            None,
+        )
+        .await
+        .expect("loader profile fetch")
+        .expect("fabric loader for 1.21.8");
 
         let info = download_version_info(
             &state,

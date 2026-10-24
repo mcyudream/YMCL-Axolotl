@@ -43,7 +43,9 @@ impl DirectoryInfo {
     // signature compatibility.
     pub fn initial_settings_dir_path(_app_identifier: &str) -> Option<PathBuf> {
         Self::env_path("THESEUS_CONFIG_DIR").or_else(|| {
-            Some(dirs::data_dir()?.join(crate::brand::app_data_dir_identifier()))
+            Some(
+                dirs::data_dir()?.join(crate::brand::app_data_dir_identifier()),
+            )
         })
     }
 

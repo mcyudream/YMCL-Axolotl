@@ -89,7 +89,9 @@ fn is_authlib_injector_agent(argument: &str) -> bool {
     if !argument.starts_with("-javaagent:") {
         return false;
     }
-    argument.to_ascii_lowercase().contains("authlib-injector.jar")
+    argument
+        .to_ascii_lowercase()
+        .contains("authlib-injector.jar")
 }
 
 fn patch_lwjgl3ify_relauncher_config_value(
@@ -117,7 +119,10 @@ fn patch_lwjgl3ify_relauncher_config_value(
             .as_str()
             .is_none_or(|option| !is_authlib_injector_agent(option))
     });
-    if !options.iter().any(|option| option.as_str() == Some(agent_argument)) {
+    if !options
+        .iter()
+        .any(|option| option.as_str() == Some(agent_argument))
+    {
         options.push(Value::String(agent_argument.to_string()));
     }
 
@@ -147,11 +152,10 @@ async fn configure_lwjgl3ify_relauncher(
         }
         Err(error) => return Err(error.into()),
     };
-    let agent_argument = format!(
-        "-javaagent:{}={api_root}",
-        agent_path.to_string_lossy()
-    );
-    let patched = patch_lwjgl3ify_relauncher_config_value(config, &agent_argument)?;
+    let agent_argument =
+        format!("-javaagent:{}={api_root}", agent_path.to_string_lossy());
+    let patched =
+        patch_lwjgl3ify_relauncher_config_value(config, &agent_argument)?;
     if let Some(parent) = config_path.parent() {
         io::create_dir_all(parent).await?;
     }
@@ -2745,12 +2749,10 @@ pub async fn launch_minecraft(
     // Identify the launcher to Minecraft and mods consistently across every
     // loader. Append these after profile-provided JVM arguments so custom
     // arguments cannot accidentally replace the launcher's identity.
-    command
-        .arg("-Dminecraft.launcher.brand=YMCL")
-        .arg(format!(
-            "-Dminecraft.launcher.version={}",
-            env!("CARGO_PKG_VERSION")
-        ));
+    command.arg("-Dminecraft.launcher.brand=YMCL").arg(format!(
+        "-Dminecraft.launcher.version={}",
+        env!("CARGO_PKG_VERSION")
+    ));
 
     // The java launcher requires access to java.lang.reflect in order to force access in to
     // whatever module the main class is in
@@ -3160,12 +3162,8 @@ mod lwjgl3ify_relauncher_tests {
 
     #[test]
     fn identifies_only_the_rfb_main_class() {
-        assert!(uses_lwjgl3ify_relauncher(
-            LWJGL3IFY_RFB_MAIN_CLASS
-        ));
-        assert!(!uses_lwjgl3ify_relauncher(
-            "net.minecraft.client.main.Main"
-        ));
+        assert!(uses_lwjgl3ify_relauncher(LWJGL3IFY_RFB_MAIN_CLASS));
+        assert!(!uses_lwjgl3ify_relauncher("net.minecraft.client.main.Main"));
     }
 
     #[test]
@@ -3202,7 +3200,8 @@ mod lwjgl3ify_relauncher_tests {
             agent,
         )
         .unwrap();
-        let twice = patch_lwjgl3ify_relauncher_config_value(once, agent).unwrap();
+        let twice =
+            patch_lwjgl3ify_relauncher_config_value(once, agent).unwrap();
         assert_eq!(twice["customOptions"], json!([agent]));
     }
 

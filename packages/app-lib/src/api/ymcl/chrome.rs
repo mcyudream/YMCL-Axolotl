@@ -21,9 +21,14 @@ pub async fn get_home_config() -> crate::Result<serde_json::Value> {
         .into());
     }
     let origin = super::registry::domain_origin(&active).await?;
-    let bytes =
-        super::auth::domain_request(&state, &active, Method::GET, &chrome_home_url(&origin), None)
-            .await?;
+    let bytes = super::auth::domain_request(
+        &state,
+        &active,
+        Method::GET,
+        &chrome_home_url(&origin),
+        None,
+    )
+    .await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 

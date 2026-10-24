@@ -85,7 +85,9 @@ impl MipJavaConstraint {
 
 fn parse_json_number_u32(value: &serde_json::Value) -> Option<u32> {
     match value {
-        serde_json::Value::Number(number) => number.as_u64().map(|value| value as u32),
+        serde_json::Value::Number(number) => {
+            number.as_u64().map(|value| value as u32)
+        }
         serde_json::Value::String(text) => text.trim().parse::<u32>().ok(),
         _ => None,
     }
@@ -197,7 +199,8 @@ mod tests {
             "enforce": true,
             "note": "Cleanroom 需要 Java 21+"
         });
-        let constraint = MipJavaConstraint::from_manifest_value(&value).expect("parses");
+        let constraint =
+            MipJavaConstraint::from_manifest_value(&value).expect("parses");
         assert_eq!(constraint.min_major, 21);
         assert!(constraint.enforce);
         assert_eq!(constraint.note.as_deref(), Some("Cleanroom 需要 Java 21+"));
@@ -205,9 +208,10 @@ mod tests {
 
     #[test]
     fn java_constraint_defaults_advisory_and_tolerates_strings() {
-        let constraint =
-            MipJavaConstraint::from_manifest_value(&serde_json::json!({ "minMajor": "17" }))
-                .expect("parses string major");
+        let constraint = MipJavaConstraint::from_manifest_value(
+            &serde_json::json!({ "minMajor": "17" }),
+        )
+        .expect("parses string major");
         assert_eq!(constraint.min_major, 17);
         assert!(!constraint.enforce);
         assert_eq!(constraint.note, None);
@@ -216,12 +220,18 @@ mod tests {
     #[test]
     fn java_constraint_rejects_unusable_shapes() {
         assert!(
-            MipJavaConstraint::from_manifest_value(&serde_json::json!({ "minMajor": 0 }))
+            MipJavaConstraint::from_manifest_value(
+                &serde_json::json!({ "minMajor": 0 })
+            )
+            .is_none()
+        );
+        assert!(
+            MipJavaConstraint::from_manifest_value(&serde_json::json!({}))
                 .is_none()
         );
-        assert!(MipJavaConstraint::from_manifest_value(&serde_json::json!({})).is_none());
         assert!(
-            MipJavaConstraint::from_manifest_value(&serde_json::json!("21")).is_none()
+            MipJavaConstraint::from_manifest_value(&serde_json::json!("21"))
+                .is_none()
         );
     }
 }

@@ -265,7 +265,10 @@ pub async fn domain_capabilities(
             return Ok(capabilities);
         }
     }
-    if row.map(|r| r.1.as_deref() == Some(DOMAIN_KIND_INTEROP)).unwrap_or(false) {
+    if row
+        .map(|r| r.1.as_deref() == Some(DOMAIN_KIND_INTEROP))
+        .unwrap_or(false)
+    {
         return Ok(YmclCapabilities::default());
     }
     refresh_capabilities(domain_id).await
@@ -339,8 +342,10 @@ pub async fn add_domain_in(
                     .as_ref()
                     .map(|d| d.name.clone())
                     .unwrap_or_else(|| origin.clone());
-                let logo_url =
-                    capabilities.domain.as_ref().and_then(|d| d.logo_url.clone());
+                let logo_url = capabilities
+                    .domain
+                    .as_ref()
+                    .and_then(|d| d.logo_url.clone());
                 (
                     DOMAIN_KIND_YAP,
                     display_name,
@@ -404,7 +409,9 @@ pub async fn remove_domain(id: &str) -> crate::Result<YmclDomainsState> {
         set_active_domain_id(PERSONAL_DOMAIN_ID, &state.pool).await?;
         // 被移除的是激活域：清空下载分发，回退本地设置。
         if let Err(error) = super::download_sources::refresh_active().await {
-            tracing::warn!("Clear download distribution on remove failed: {error}");
+            tracing::warn!(
+                "Clear download distribution on remove failed: {error}"
+            );
         }
     }
     domains_state_impl(&state.pool).await
@@ -460,7 +467,9 @@ pub async fn activate_domain(id: &str) -> crate::Result<YmclDomainsState> {
     set_active_domain_id(id, &state.pool).await?;
     // 下载分发快照跟随激活域：失败不阻断激活（回退本地设置，后台自愈）。
     if let Err(error) = super::download_sources::refresh_active().await {
-        tracing::warn!("Refresh download distribution on activate failed: {error}");
+        tracing::warn!(
+            "Refresh download distribution on activate failed: {error}"
+        );
     }
     domains_state_impl(&state.pool).await
 }
@@ -507,16 +516,17 @@ pub async fn active_manifest() -> crate::Result<Option<YmclManifest>> {
             return Ok(Some(manifest));
         }
     }
-    let manifest = match fetch_manifest_authed(&row.id, &row.origin, &state).await {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            tracing::warn!(
-                "Failed to fetch manifest for domain {}: {error}",
-                row.origin
-            );
-            return Ok(None);
-        }
-    };
+    let manifest =
+        match fetch_manifest_authed(&row.id, &row.origin, &state).await {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                tracing::warn!(
+                    "Failed to fetch manifest for domain {}: {error}",
+                    row.origin
+                );
+                return Ok(None);
+            }
+        };
     store_manifest(&row.id, &manifest, &state.pool).await?;
     Ok(Some(manifest))
 }
@@ -534,7 +544,8 @@ async fn fetch_manifest_authed(
             tracing::debug!(
                 "Authed manifest fetch failed for {domain_id} ({auth_error}); trying anonymous"
             );
-            client::fetch_manifest(origin, &state.api_semaphore, &state.pool).await
+            client::fetch_manifest(origin, &state.api_semaphore, &state.pool)
+                .await
         }
     }
 }
@@ -554,9 +565,12 @@ pub async fn refresh_manifest() -> crate::Result<Option<YmclManifest>> {
     validate_protocol_version(manifest.protocol_version)?;
     store_manifest(&row.id, &manifest, &state.pool).await?;
 
-    if let Ok(capabilities) =
-        client::fetch_capabilities(&row.origin, &state.api_semaphore, &state.pool)
-            .await
+    if let Ok(capabilities) = client::fetch_capabilities(
+        &row.origin,
+        &state.api_semaphore,
+        &state.pool,
+    )
+    .await
     {
         let name = capabilities
             .domain
@@ -580,7 +594,9 @@ pub async fn refresh_manifest() -> crate::Result<Option<YmclManifest>> {
     }
     // capabilities 重探可能新增/移除 download face，同步分发快照。
     if let Err(error) = super::download_sources::refresh_active().await {
-        tracing::warn!("Refresh download distribution on manifest refresh failed: {error}");
+        tracing::warn!(
+            "Refresh download distribution on manifest refresh failed: {error}"
+        );
     }
     Ok(Some(manifest))
 }
@@ -603,7 +619,8 @@ pub async fn site_document(
     refresh: bool,
 ) -> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
     let state = State::get().await?;
-    site_document_in(&state.pool, &state.api_semaphore, domain_id, refresh).await
+    site_document_in(&state.pool, &state.api_semaphore, domain_id, refresh)
+        .await
 }
 
 /// [`site_document`] 的可注入形态（live 测试用）。
@@ -635,7 +652,9 @@ pub async fn site_document_in(
         }
     }
     // Re-fetch: either explicitly asked for, or the cache is unreadable.
-    let site = super::interop::fetch_site_document(&row.origin, semaphore, sqlite).await?;
+    let site =
+        super::interop::fetch_site_document(&row.origin, semaphore, sqlite)
+            .await?;
     let json = serde_json::to_string(&site)?;
     sqlx::query("UPDATE ymcl_domains SET site_json = $1 WHERE id = $2")
         .bind(&json)
@@ -647,8 +666,8 @@ pub async fn site_document_in(
 
 /// The active domain's mc-interop exit document, or `None` when the active
 /// domain is the personal domain or a YAP site.
-pub async fn active_site_document(
-) -> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
+pub async fn active_site_document()
+-> crate::Result<Option<crate::ymcl::interop::InteropSiteDocument>> {
     let state = State::get().await?;
     let Some(row) = active_domain_row(&state.pool).await? else {
         return Ok(None);
@@ -679,9 +698,7 @@ pub struct YmclUnionStatus {
 /// Probes the domain origin for the yudream-union discovery document and
 /// resolves its Yggdrasil root. `available: false` covers both "no union"
 /// and "unsupported union version" so the UI shows one honest state.
-pub async fn union_status(
-    domain_id: &str,
-) -> crate::Result<YmclUnionStatus> {
+pub async fn union_status(domain_id: &str) -> crate::Result<YmclUnionStatus> {
     let state = State::get().await?;
     let origin = domain_origin(domain_id).await?;
     let unavailable = |features: Vec<String>| YmclUnionStatus {
@@ -700,21 +717,18 @@ pub async fn union_status(
     // The union authlib root serves standard Yggdrasil metadata; the shared
     // provider probe confirms it actually answers before we claim readiness.
     let ygg = super::yggroot::ygg_endpoints(&origin).await?;
-    let metadata = crate::util::fetch::fetch_json::<
-        super::yggroot::YmclYggMetadata,
-    >(
-        reqwest::Method::GET,
-        &ygg.yggdrasil_root,
-        None,
-        None,
-        None,
-        &state.api_semaphore,
-        &state.pool,
-    )
-    .await;
-    let confirmed = metadata
-        .map(|m| m.is_yggdrasil())
-        .unwrap_or(false);
+    let metadata =
+        crate::util::fetch::fetch_json::<super::yggroot::YmclYggMetadata>(
+            reqwest::Method::GET,
+            &ygg.yggdrasil_root,
+            None,
+            None,
+            None,
+            &state.api_semaphore,
+            &state.pool,
+        )
+        .await;
+    let confirmed = metadata.map(|m| m.is_yggdrasil()).unwrap_or(false);
     if !confirmed {
         return Ok(unavailable(meta.features));
     }

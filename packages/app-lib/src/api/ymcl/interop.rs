@@ -20,20 +20,17 @@ use crate::util::fetch::fetch_json;
 pub const INTEROP_WELL_KNOWN_PATH: &str = "/.well-known/mc-interop-v1.json";
 
 /// YDA 插件端点路径（well-known 未网关转发时的回退发现地址）。
-pub const FALLBACK_CATALOG_PATH: &str = "/api/plugins/mc-interop/interop/v1/site";
+pub const FALLBACK_CATALOG_PATH: &str =
+    "/api/plugins/mc-interop/interop/v1/site";
 
 /// Discovery path of the yudream-union federated-auth plugin.
-pub const UNION_META_PATH: &str =
-    "/api/plugins/yudream-union/peer/meta";
+pub const UNION_META_PATH: &str = "/api/plugins/yudream-union/peer/meta";
 
 /// Union major version this launcher understands.
 pub const UNION_VERSION: &str = "1";
 
 pub fn interop_url(origin: &str) -> String {
-    format!(
-        "{}{INTEROP_WELL_KNOWN_PATH}",
-        origin.trim_end_matches('/')
-    )
+    format!("{}{INTEROP_WELL_KNOWN_PATH}", origin.trim_end_matches('/'))
 }
 
 pub fn union_meta_url(origin: &str) -> String {
@@ -42,7 +39,7 @@ pub fn union_meta_url(origin: &str) -> String {
 
 /// `site` block of the exit document (spec §3).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropSiteInfo {
     pub id: String,
     #[serde(default)]
@@ -57,7 +54,7 @@ pub struct InteropSiteInfo {
 /// system use its native reconciliation; others fall back to the full
 /// artifact download.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropDistribution {
     pub system: String,
     #[serde(default)]
@@ -69,7 +66,7 @@ pub struct InteropDistribution {
 /// Artifact of a pack entry (spec §4). Both hashes are always present in the
 /// wire format; unknown ones arrive as `null`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropArtifact {
     #[serde(default)]
     pub format: Option<String>,
@@ -87,7 +84,7 @@ pub struct InteropArtifact {
 /// Server bound to an entry (spec §5). `port` omitted means "unspecified —
 /// let SRV records or the client default decide".
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropServer {
     pub address: String,
     #[serde(default)]
@@ -97,7 +94,7 @@ pub struct InteropServer {
 /// Source attribution of a merged peer entry (spec §7.2). Present only on
 /// foreign entries.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropSource {
     pub site_id: String,
     #[serde(default)]
@@ -108,7 +105,7 @@ pub struct InteropSource {
 
 /// One catalog entry: a pack (optional) bound to exactly one server (spec §4).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropPackEntry {
     pub id: String,
     #[serde(default)]
@@ -140,7 +137,7 @@ impl InteropPackEntry {
 /// Peer site declaration (spec §7.1). Launchers may ignore it entirely; the
 /// site-side aggregator is the consumer.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct InteropPeerEntry {
     pub site_id: String,
     #[serde(default)]
@@ -178,16 +175,14 @@ impl InteropSiteDocument {
                     .filter(|name| !name.is_empty())
                     .map(str::to_string)
             })
-            .or_else(|| {
-                self.site.as_ref().map(|site| site.id.clone())
-            })
+            .or_else(|| self.site.as_ref().map(|site| site.id.clone()))
             .unwrap_or_else(|| origin.to_string())
     }
 }
 
 /// `site` block of the union discovery document.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct UnionSiteInfo {
     #[serde(default)]
     pub code: Option<String>,
@@ -199,7 +194,7 @@ pub struct UnionSiteInfo {
 
 /// `authlib` block: the site's Yggdrasil API root.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-    #[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct UnionAuthlibInfo {
     #[serde(default, rename = "apiRoot")]
     pub api_root: Option<String>,
@@ -249,9 +244,7 @@ pub async fn fetch_origin_catalog(
     match fetch_site_document(&base, &state.api_semaphore, &state.pool).await {
         Ok(document) => Ok(document),
         Err(well_known_error) => {
-            let fallback_url = format!(
-                "{base}{FALLBACK_CATALOG_PATH}"
-            );
+            let fallback_url = format!("{base}{FALLBACK_CATALOG_PATH}");
             fetch_catalog_url(&fallback_url, &state.api_semaphore, &state.pool)
                 .await
                 .map_err(|fallback_error| {
@@ -410,19 +403,18 @@ mod tests {
             meta.authlib.and_then(|a| a.api_root).as_deref(),
             Some("https://skin.sitmc.club/api/plugins/authlib-injector")
         );
-        let future: UnionMeta =
-            serde_json::from_str(r#"{"unionVersion":"2"}"#)
-                .expect("version-only meta must deserialize");
+        let future: UnionMeta = serde_json::from_str(r#"{"unionVersion":"2"}"#)
+            .expect("version-only meta must deserialize");
         assert!(!future.is_supported());
     }
 }
 
 // ----- artifact acquisition (catalog entry → local mrpack for the importer) -----
 
+use crate::State;
 use crate::event::LoadingBarId;
 use crate::event::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
-use crate::State;
 
 use sha2::Digest;
 
@@ -451,9 +443,7 @@ pub async fn download_entry_artifact(
     let site = super::registry::site_document(domain_id, false)
         .await?
         .ok_or_else(|| {
-            crate::ErrorKind::OtherError(
-                "Not an mc-interop domain".to_string(),
-            )
+            crate::ErrorKind::OtherError("Not an mc-interop domain".to_string())
         })?;
     let cache_scope = domain_id.to_string();
     download_for_site(&site, &cache_scope, entry_id).await
@@ -504,10 +494,7 @@ async fn download_for_site(
     }
 
     let state = State::get().await?;
-    let name = entry
-        .name
-        .clone()
-        .unwrap_or_else(|| entry_id.to_string());
+    let name = entry.name.clone().unwrap_or_else(|| entry_id.to_string());
     let bar = init_loading(
         LoadingBarType::PackFileDownload {
             instance_id: String::new(),
@@ -556,7 +543,9 @@ fn sanitize_file_stem(name: &str) -> String {
         .trim()
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '(' | ')') {
+            if c.is_alphanumeric()
+                || matches!(c, ' ' | '-' | '_' | '.' | '(' | ')')
+            {
                 c
             } else {
                 '_'
@@ -592,8 +581,10 @@ async fn stream_artifact(
                 "Artifact download failed: {e}"
             ))
         })?;
-    let total: Option<i64> =
-        response.content_length().map(|value| value as i64).or(artifact.size);
+    let total: Option<i64> = response
+        .content_length()
+        .map(|value| value as i64)
+        .or(artifact.size);
     if let Some(total) = total {
         if total > MAX_ARTIFACT_BYTES {
             return Err(crate::ErrorKind::OtherError(
@@ -620,8 +611,7 @@ async fn stream_artifact(
         }
         if let (Some(bar), Some(total)) = (bar, total) {
             if total > 0 {
-                let fraction =
-                    bytes.len() as f64 / total as f64 * 100.0;
+                let fraction = bytes.len() as f64 / total as f64 * 100.0;
                 let delta = fraction - emitted;
                 if delta > 0.0 {
                     emit_loading(bar, delta, None)?;
@@ -635,8 +625,11 @@ async fn stream_artifact(
 
 /// sha512 wins when the site published both hashes (spec §4).
 fn verify_hash(bytes: &[u8], artifact: &InteropArtifact) -> crate::Result<()> {
-    if let Some(expected) =
-        artifact.sha512.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    if let Some(expected) = artifact
+        .sha512
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
     {
         let digest = hex_lower(&sha2::Sha512::digest(bytes));
         if !digest.eq_ignore_ascii_case(expected) {
@@ -647,8 +640,11 @@ fn verify_hash(bytes: &[u8], artifact: &InteropArtifact) -> crate::Result<()> {
         }
         return Ok(());
     }
-    if let Some(expected) =
-        artifact.sha1.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    if let Some(expected) = artifact
+        .sha1
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
     {
         let mut hasher = sha1_smol::Sha1::new();
         hasher.update(bytes);
@@ -697,7 +693,10 @@ mod live_tests {
             .await
             .expect("sitmc 清单可拉取");
         assert!(response.status().is_success());
-        let document: InteropSiteDocument = response.json().await.expect("sitmc 清单应为本插件模型可解析的合法 v1 文档");
+        let document: InteropSiteDocument = response
+            .json()
+            .await
+            .expect("sitmc 清单应为本插件模型可解析的合法 v1 文档");
         let site = document.site.as_ref().expect("site 块必填");
         assert_eq!(site.id, "sitmc");
         assert!(document.packs.len() >= 3, "sitmc 目录应含已知实例");
@@ -724,14 +723,12 @@ mod live_tests {
             .await
             .expect("本地出口可拉取");
         assert!(response.status().is_success());
-        let document: InteropSiteDocument = response.json().await.expect("本地出口应为合法 v1 文档");
+        let document: InteropSiteDocument =
+            response.json().await.expect("本地出口应为合法 v1 文档");
         assert_eq!(document.site.as_ref().expect("site 块").id, "yda");
         assert!(document.packs.iter().any(|pack| pack.id == "survival"));
         // 未发布条目在任何出口形态（插件直连/宿主聚合）都不可见
-        assert!(!document
-            .packs
-            .iter()
-            .any(|pack| pack.id == "beta-test"));
+        assert!(!document.packs.iter().any(|pack| pack.id == "beta-test"));
 
         let meta: UnionMeta = http
             .get(format!("{LOCAL}/api/plugins/yudream-union/peer/meta"))
@@ -743,7 +740,10 @@ mod live_tests {
             .expect("union meta 应可解析");
         assert!(meta.is_supported());
         assert_eq!(
-            meta.site.as_ref().and_then(|site| site.code.clone()).as_deref(),
+            meta.site
+                .as_ref()
+                .and_then(|site| site.code.clone())
+                .as_deref(),
             Some("yda")
         );
     }

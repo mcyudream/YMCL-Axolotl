@@ -31,16 +31,15 @@ pub(crate) fn is_official_version_manifest_url(url: &str) -> bool {
 pub(crate) fn prefers_mirror_routes(resource: ResourceClass) -> bool {
     matches!(
         resource,
-        ResourceClass::Modrinth | ResourceClass::Modpack | ResourceClass::CurseForge
+        ResourceClass::Modrinth
+            | ResourceClass::Modpack
+            | ResourceClass::CurseForge
     )
 }
 
 /// Whether Automatic ordering ranks mirrors ahead of the official source
 /// for this URL and resource class.
-pub(crate) fn orders_mirrors_first(
-    url: &str,
-    resource: ResourceClass,
-) -> bool {
+pub(crate) fn orders_mirrors_first(url: &str, resource: ResourceClass) -> bool {
     uses_mirror_first_loader_routes(url, resource)
         || prefers_mirror_routes(resource)
 }

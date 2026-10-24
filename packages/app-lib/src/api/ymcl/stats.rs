@@ -39,12 +39,11 @@ async fn try_report_launch(
         return Ok(());
     };
     let origin = super::registry::domain_origin(&active).await?;
-    let url = format!(
-        "{origin}{}/stats/launch",
-        super::manifest::YAP_API_BASE
-    );
+    let url = format!("{origin}{}/stats/launch", super::manifest::YAP_API_BASE);
     let quick_play_label = match quick_play {
-        crate::instance::QuickPlayType::Server(_) => serde_json::json!("server"),
+        crate::instance::QuickPlayType::Server(_) => {
+            serde_json::json!("server")
+        }
         crate::instance::QuickPlayType::Singleplayer(_) => {
             serde_json::json!("singleplayer")
         }
