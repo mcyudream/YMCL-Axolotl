@@ -243,6 +243,9 @@ jobs:
     name: Verify and publish
     needs: build
     runs-on: ubuntu-24.04
+    env:
+      UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+      CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -314,6 +317,7 @@ jobs:
           node scripts/axolotl/create-update-server-catalog.test.mjs
 
       - name: Notify Update Server to publish release assets
+        if: env.UPDATE_SERVER_URL != ''
         env:
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           UPDATE_SERVER_WEBHOOK_SECRET: ${{ secrets.UPDATE_SERVER_WEBHOOK_SECRET }}
@@ -346,6 +350,7 @@ jobs:
           fi
 
       - name: Mirror published release to CNB
+        if: env.CNB_TOKEN != ''
         env:
           CNB_REPO_URL_HTTPS: ${{ secrets.CNB_REPO_URL_HTTPS }}
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
@@ -353,10 +358,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${CNB_TOKEN:-}" ]]; then
-            echo "CNB_TOKEN is not configured"
-            exit 1
-          fi
 
           cnb_url="${CNB_REPO_URL_HTTPS:-https://cnb.cool/axlmc/Axolotl.git}"
           token_user="${CNB_TOKEN_USER_NAME:-cnb}"
