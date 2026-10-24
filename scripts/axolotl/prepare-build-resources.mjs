@@ -185,14 +185,30 @@ export function prepareBlockbench(root = repositoryRoot, execute = run) {
 		outputs: [resources, developmentBundle],
 		required: [`${resources}/index.html`, `${resources}/dist/skin.bundle.js.gz`, developmentBundle],
 		build: async () => {
-			const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+			// Windows: drive npm's CLI through the interpreter directly. The
+			// npm.cmd shim resolves its launcher relative to %~dp0 and picks
+			// up stray shims under spawn, so never put npm.cmd on the line.
+			const [npmBin, ...npmPrefixArgs] =
+				process.platform === 'win32'
+					? [
+							process.execPath,
+							resolve(
+								dirname(process.execPath),
+								'node_modules/npm/bin/npm-cli.js',
+							),
+						]
+					: ['npm']
 			await execute(
-				npm,
-				['ci', '--prefer-offline', '--no-audit', '--no-fund'],
+				npmBin,
+				[...npmPrefixArgs, 'ci', '--prefer-offline', '--no-audit', '--no-fund'],
 				resolve(root, blockbench),
 				{ ELECTRON_SKIP_BINARY_DOWNLOAD: '1' },
 			)
-			await execute(npm, ['run', 'build-skin'], resolve(root, blockbench))
+			await execute(
+				npmBin,
+				[...npmPrefixArgs, 'run', 'build-skin'],
+				resolve(root, blockbench),
+			)
 			await execute(process.execPath, ['scripts/axolotl/sync-blockbench-skin-editor.mjs'], root)
 		},
 	})
