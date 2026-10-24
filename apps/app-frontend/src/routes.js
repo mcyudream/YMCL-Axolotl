@@ -46,14 +46,6 @@ export default new createRouter({
 			},
 		},
 		{
-			path: '/friend-servers',
-			name: 'YmclFriendServers',
-			component: () => import('@/pages/ymcl/FriendServers.vue'),
-			meta: {
-				breadcrumb: [{ name: 'Friend servers' }],
-			},
-		},
-		{
 			path: '/ymcl/design',
 			name: 'YmclHomeDesigner',
 			component: () => import('@/pages/ymcl/HomeDesigner.vue'),

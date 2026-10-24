@@ -315,7 +315,12 @@ export async function executeAction(
 			const origin = String(params.origin ?? '')
 			const entryId = String(params.entryId ?? '')
 			const address = String(params.address ?? '')
-			if (!origin || !entryId) return false
+			if (!origin || !entryId) {
+				// 模块传入参数缺失时暴露实际值，秒拒不可诊断。
+				throw new Error(
+					`参数缺失：origin=${origin || '∅'} entryId=${entryId || '∅'} record=${JSON.stringify(params).slice(0, 200)}`,
+				)
+			}
 			const archive = await invoke('plugin:ymcl|ymcl_interop_pack_download_origin', {
 				origin,
 				entryId,

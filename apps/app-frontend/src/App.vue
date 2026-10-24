@@ -2857,13 +2857,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					<ChangeSkinIcon />
 				</NavButton>
 				<NavButton
-					v-if="ymclStore.activeDomain"
-					v-tooltip.right="'友站服务器'"
-					to="/friend-servers"
-				>
-					<GlobeIcon />
-				</NavButton>
-				<NavButton
 					v-tooltip.right="formatMessage(messages.library)"
 					data-onboarding-id="nav-library"
 					to="/library"
