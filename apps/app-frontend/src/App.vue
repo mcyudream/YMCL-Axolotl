@@ -6,6 +6,7 @@ import {
 	DownloadIcon,
 	ExternalIcon,
 	FlaskConicalIcon,
+	GlobeIcon,
 	FolderOpenIcon,
 	HomeIcon,
 	ImagesIcon,
@@ -2854,6 +2855,13 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					to="/skins"
 				>
 					<ChangeSkinIcon />
+				</NavButton>
+				<NavButton
+					v-if="ymclStore.activeDomain"
+					v-tooltip.right="'友站服务器'"
+					to="/friend-servers"
+				>
+					<GlobeIcon />
 				</NavButton>
 				<NavButton
 					v-tooltip.right="formatMessage(messages.library)"

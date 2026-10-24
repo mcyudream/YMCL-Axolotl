@@ -597,6 +597,8 @@ export const ymcl = {
 		invoke<YmclUnionStatus>('plugin:ymcl|ymcl_union_status', { domainId }),
 	fetchOriginCatalog: (origin: string) =>
 		invoke<InteropSiteDocument>('plugin:ymcl|ymcl_interop_origin_catalog', { origin }),
+	interopPackDownloadByOrigin: (origin: string, entryId: string) =>
+		invoke<InteropArtifactDownload>('plugin:ymcl|ymcl_interop_pack_download_origin', { origin, entryId }),
 	interopPackDownload: (domainId: string, entryId: string) =>
 		invoke<InteropArtifactDownload>('plugin:ymcl|ymcl_interop_pack_download', { domainId, entryId }),
 	session: (domainId: string) =>

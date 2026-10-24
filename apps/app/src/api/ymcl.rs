@@ -24,6 +24,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_union_status,
             ymcl_interop_pack_download,
             ymcl_interop_origin_catalog,
+            ymcl_interop_pack_download_origin,
             ymcl_domain_remove,
             ymcl_domain_activate,
             ymcl_manifest_get,
@@ -141,6 +142,16 @@ pub async fn ymcl_interop_pack_download(
     entry_id: String,
 ) -> Result<theseus::ymcl::interop::InteropArtifactDownload> {
     Ok(theseus::ymcl::interop::download_entry_artifact(&domain_id, &entry_id).await?)
+}
+
+// Origin-keyed variant: works for YAP domains too (their well-known carries
+// the merged interop catalog). invoke('plugin:ymcl|ymcl_interop_pack_download_origin', { origin, entryId })
+#[tauri::command]
+pub async fn ymcl_interop_pack_download_origin(
+    origin: String,
+    entry_id: String,
+) -> Result<theseus::ymcl::interop::InteropArtifactDownload> {
+    Ok(theseus::ymcl::interop::download_entry_artifact_by_origin(&origin, &entry_id).await?)
 }
 
 // Remove a joined domain

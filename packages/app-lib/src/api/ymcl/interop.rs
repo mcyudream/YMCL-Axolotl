@@ -455,6 +455,26 @@ pub async fn download_entry_artifact(
                 "Not an mc-interop domain".to_string(),
             )
         })?;
+    let cache_scope = domain_id.to_string();
+    download_for_site(&site, &cache_scope, entry_id).await
+}
+
+/// Same as [`download_entry_artifact`] but keyed by origin — works for YAP
+/// domains too (their well-known carries the merged interop catalog).
+pub async fn download_entry_artifact_by_origin(
+    origin: &str,
+    entry_id: &str,
+) -> crate::Result<InteropArtifactDownload> {
+    let site = fetch_origin_catalog(origin).await?;
+    let cache_scope = crate::ymcl::registry::domain_id_for_origin(origin);
+    download_for_site(&site, &cache_scope, entry_id).await
+}
+
+async fn download_for_site(
+    site: &InteropSiteDocument,
+    cache_scope: &str,
+    entry_id: &str,
+) -> crate::Result<InteropArtifactDownload> {
     let entry = site
         .packs
         .iter()
@@ -511,7 +531,7 @@ pub async fn download_entry_artifact(
         .caches_dir()
         .join("modpacks")
         .join("mc-interop")
-        .join(domain_id)
+        .join(cache_scope)
         .join(entry_id)
         .join("pack.mrpack");
     if let Some(parent) = destination.parent() {

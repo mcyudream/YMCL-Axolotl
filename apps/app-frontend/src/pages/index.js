@@ -1,4 +1,5 @@
 import Browse from './Browse.vue'
+import FriendServers from './ymcl/FriendServers.vue'
 import Downloads from './Downloads.vue'
 import Index from './Index.vue'
 import Lab from './Lab.vue'
@@ -12,6 +13,7 @@ import Worlds from './Worlds.vue'
 
 export {
 	Browse,
+	FriendServers,
 	Downloads,
 	Index,
 	Lab,
