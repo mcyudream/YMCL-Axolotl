@@ -28,6 +28,24 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.7',
+		version: '1.9.7-beta.7',
+		publishedAt: '2026-10-25',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.7',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.7',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'One-click install-and-join no longer crashes at the launch step after installation completes; it now starts the instance returned by the installer.',
+					'zh-CN': '一键安装并进服在安装完成后的启动阶段不再因引用未定义变量而中断，现改用安装返回的实例 ID 正常启动。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.6',
 		version: '1.9.7-beta.6',
 		publishedAt: '2026-10-24',
