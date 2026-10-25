@@ -9,6 +9,8 @@ if (!manifestPath || !expectedVersion || !['github', 'cnb'].includes(source)) {
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
 
+const repository = (process.env.GITHUB_REPOSITORY ?? 'mcyudream/YMCL-Axolotl').toLowerCase()
+
 if (manifest.version !== expectedVersion) {
 	throw new Error(`Manifest version ${manifest.version} does not match ${expectedVersion}`)
 }
@@ -34,7 +36,7 @@ for (const platform of requiredPlatforms) {
 		url.protocol === 'https:' &&
 		(source === 'github'
 			? url.hostname === 'github.com' &&
-				pathname.includes('/mystic-stars/axolotl/releases/download/')
+				pathname.includes(`/${repository}/releases/download/`)
 			: url.hostname === 'cnb.cool' &&
 				pathname.includes(`/axlmc/axolotl/-/releases/download/${tag.toLowerCase()}/`))
 	if (!isExpectedUrl) {
