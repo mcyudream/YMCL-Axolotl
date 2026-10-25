@@ -172,7 +172,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
-          $appName = "Axolotl Launcher"
+          $appName = "YMCL"
           $outDir = "target/release/bundle/nsis"
           $buildDir = "target/portable-build"
           $publishDir = Join-Path $env:RUNNER_TEMP "windows-assets"
@@ -184,7 +184,7 @@ jobs:
             throw "Expected one modern installer, found $($modernInstallers.Count)"
           }
 
-          $modernName = "Axolotl_Launcher_${version}_x64_modern-setup.exe"
+          $modernName = "YMCL_${version}_x64_modern-setup.exe"
           $modernPath = Join-Path $publishDir $modernName
           Copy-Item -Force $modernInstallers[0].FullName $modernPath
           gh release upload "${{ github.ref_name }}" $modernPath --clobber
@@ -206,7 +206,7 @@ jobs:
             throw "Expected one native NSIS installer, found $($nativeInstallers.Count)"
           }
 
-          $nativeName = "Axolotl_Launcher_${version}_x64_nsis-setup.exe"
+          $nativeName = "YMCL_${version}_x64_nsis-setup.exe"
           $nativePath = Join-Path $publishDir $nativeName
           Copy-Item -Force $nativeInstallers[0].FullName $nativePath
           gh release upload "${{ github.ref_name }}" $nativePath --clobber
@@ -228,7 +228,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$buildDir\Axolotl\.Axolotl" | Out-Null
 
             # Create portable zip (for manual download)
-            $zipName = "Axolotl_Launcher_${version}_x64_portable.zip"
+            $zipName = "YMCL_${version}_x64_portable.zip"
             $zipPath = Join-Path $publishDir $zipName
             Compress-Archive -Path "$buildDir\Axolotl" -DestinationPath $zipPath -Force
             Write-Output "Created portable zip: $zipPath"
