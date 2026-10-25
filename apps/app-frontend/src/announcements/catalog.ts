@@ -28,6 +28,31 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.8',
+		version: '1.9.7-beta.8',
+		publishedAt: '2026-10-26',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.8',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.8',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Repeating one-click install-and-join no longer installs duplicate copies or launches a second game while the pack instance is already running.',
+					'zh-CN': '重复触发一键安装并进服不再装出多份实例，目标实例已在运行时也不再拉起第二个游戏窗口。',
+				},
+			],
+			changed: [
+				{
+					'en-US':
+						'The bundled authlib-injector now ships the authlib-injector-union fork; every third-party launch checks the Nexus mirror for the newest release and updates automatically, falling back to the cached or bundled agent when the mirror is unreachable.',
+					'zh-CN': '内置 authlib-injector 切换为 authlib-injector-union fork：每次第三方登录启动都会检查 Nexus 镜像上的最新版本并自动更新，镜像不可达时回退本地缓存或内置 agent。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.7',
 		version: '1.9.7-beta.7',
 		publishedAt: '2026-10-25',
