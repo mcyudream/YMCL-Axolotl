@@ -2,6 +2,7 @@
 //! and manifest fetching. See docs/ymcl-adapter-protocol.md in the spec repo.
 
 pub mod auth;
+pub mod authlib_union;
 pub mod bundle;
 pub mod chrome;
 pub mod client;

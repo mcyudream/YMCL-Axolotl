@@ -58,10 +58,12 @@ val authlibInjector by tasks.registering {
     // Lives outside the build directory so the jar survives cargo build-script
     // fingerprint changes, which would otherwise re-trigger the download.
     val cacheDir = layout.projectDirectory.dir(".cache")
-    inputs.property("version", "1.2.8")
+    // The union fork is the shipped agent; the launcher also refreshes it at
+    // runtime from the same Nexus repo, so build and runtime stay in step.
+    inputs.property("version", "1.4.0")
     inputs.property(
         "sha256",
-        "9c7f4343e6c82034958ffb48c14a2cb0c85928be7283103ce17da00c6d5a7b10",
+        "a81609e39de1f57a4c522e6de5b02bf4037fcb303481730498d730db5e747687",
     )
     outputs.file(output)
 
@@ -70,8 +72,7 @@ val authlibInjector by tasks.registering {
         val expected = inputs.properties["sha256"] as String
         val cachedFile = cacheDir.file("authlib-injector-$version.jar").asFile
         val sources = listOf(
-            "https://authlib-injector.yushi.moe/artifact/56/authlib-injector-$version.jar",
-            "https://bmclapi.bangbang93.com/mirrors/authlib-injector/artifact/56/authlib-injector-$version.jar",
+            "https://nexus.yudream.online/repository/maven-releases/online/yudream/authlib-injector-union/$version/authlib-injector-union-$version.jar",
         )
 
         fun ByteArray.sha256() =

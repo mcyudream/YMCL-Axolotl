@@ -2674,14 +2674,23 @@ pub async fn launch_minecraft(
             crate::state::fetch_yggdrasil_metadata(&account.api_root).await?;
         let agent_path =
             main_class_keep_alive.path().join("authlib-injector.jar");
-        io::write(
-            &agent_path,
-            include_bytes!(concat!(
-                env!("JAVA_JARS_DIR"),
-                "/authlib-injector.jar"
-            )),
-        )
-        .await?;
+        // union fork 优先：运行时查 Nexus 上的最新 release（带缓存）；
+        // 源不可达且无缓存时回退编译期内置的上游 agent。
+        match crate::api::ymcl::authlib_union::resolve_union_agent_jar().await {
+            Some(union_jar) => {
+                tokio::fs::copy(&union_jar, &agent_path).await?;
+            }
+            None => {
+                io::write(
+                    &agent_path,
+                    include_bytes!(concat!(
+                        env!("JAVA_JARS_DIR"),
+                        "/authlib-injector.jar"
+                    )),
+                )
+                .await?;
+            }
+        }
         let agent_path = io::canonicalize(agent_path)?;
         configure_lwjgl3ify_relauncher(
             &instance_path,
