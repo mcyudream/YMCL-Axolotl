@@ -341,7 +341,7 @@ export async function executeAction(
 			if (!instanceId) throw new Error('安装完成但未返回实例 ID')
 			if (address && !isOfflineMode()) {
 				await invoke('plugin:instance|instance_run', {
-					instanceId: newInstanceId,
+					instanceId,
 					serverAddress: address,
 					offlineMode: isOfflineMode(),
 				})
