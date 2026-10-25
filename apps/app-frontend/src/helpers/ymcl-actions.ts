@@ -7,7 +7,11 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { isOfflineMode } from '@/composables/useNetworkStatus'
 import { resolveGcLaunchIntent } from '@/helpers/instance'
-import { install_create_modpack_instance, wait_for_install_job } from '@/helpers/install'
+import {
+	install_create_modpack_instance,
+	install_existing_instance,
+	wait_for_install_job,
+} from '@/helpers/install'
 import type { YmclNavigationItem } from '@/helpers/ymcl'
 import { interpretYmclServerActionResponse } from '@/helpers/ymcl'
 
@@ -29,9 +33,7 @@ export interface YmclAction {
 export function isActionAllowed(action: YmclAction, allow: string[] = []): boolean {
 	if (allow.length === 0) return true
 	return allow.some((pattern) =>
-		pattern.endsWith(':*')
-			? action.kind.startsWith(pattern.slice(0, -1))
-			: action.kind === pattern,
+		pattern.endsWith(':*') ? action.kind.startsWith(pattern.slice(0, -1)) : action.kind === pattern,
 	)
 }
 
@@ -129,9 +131,7 @@ export function parseServerActionKind(
 	action: YmclAction,
 	record: Record<string, unknown> = {},
 ): { providerCode: string; actionCode: string } {
-	const rest = action.kind.startsWith('server:')
-		? action.kind.slice('server:'.length)
-		: action.kind
+	const rest = action.kind.startsWith('server:') ? action.kind.slice('server:'.length) : action.kind
 	const recordProvider =
 		(typeof record.providerCode === 'string' && record.providerCode) ||
 		(typeof record.provider_code === 'string' && record.provider_code) ||
@@ -325,20 +325,54 @@ export async function executeAction(
 				origin,
 				entryId,
 			})
-			const job = await install_create_modpack_instance(
-				{ type: 'fromFile', path: archive.path },
-				null,
-			)
-			const done = await wait_for_install_job(job.job_id)
-			// 安装器可能复用已有实例（重复安装去重为 existing_instance）：
-			// 两种 target 都给出可启动实例，否则把真实状态抛出来而不是拒绝。
-			const instanceId =
-				done.target.type === 'new_instance'
-					? done.target.instance_id
-					: done.target.type === 'existing_instance'
+
+			// 安装器对重复触发每次都会新建实例：重复一键进服会装出多份并
+			// 拉起多个游戏窗口，同服重连还会被代理拒绝（"You are already
+			// connected to this proxy!"）。按整合包名复用已有实例——原地
+			// 重装兼做更新；实例仍在运行时则不再拉起第二个游戏。
+			let instanceId: string | null = null
+			const preview = await invoke<{ name: string }>('plugin:install|install_get_modpack_preview', {
+				location: { type: 'fromFile', path: archive.path },
+			}).catch(() => null)
+			const existing = preview
+				? (
+						await invoke<{ id: string; name: string }[]>('plugin:instance|instance_list').catch(
+							() => [],
+						)
+					).find((inst) => inst.name === preview.name)
+				: undefined
+			if (existing) {
+				// 实例已在运行：不再重装文件也不拉起第二个游戏，进服意图已满足。
+				const busy = await invoke<unknown[]>('plugin:process|process_get_by_instance_id', {
+					instanceId: existing.id,
+				}).catch(() => [])
+				if (busy.length > 0) return true
+				const job = await install_existing_instance(existing.id, false)
+				await wait_for_install_job(job.job_id)
+				instanceId = existing.id
+			} else {
+				const job = await install_create_modpack_instance(
+					{ type: 'fromFile', path: archive.path },
+					null,
+				)
+				const done = await wait_for_install_job(job.job_id)
+				// 安装器可能复用已有实例（重复安装去重为 existing_instance）：
+				// 两种 target 都给出可启动实例，否则把真实状态抛出来而不是拒绝。
+				instanceId =
+					done.target.type === 'new_instance'
 						? done.target.instance_id
-						: null
-			if (!instanceId) throw new Error('安装完成但未返回实例 ID')
+						: done.target.type === 'existing_instance'
+							? done.target.instance_id
+							: null
+				if (!instanceId) throw new Error('安装完成但未返回实例 ID')
+			}
+
+			// 目标实例已在运行：进服意图已满足，绝不再拉起第二个游戏。
+			const running = await invoke<unknown[]>('plugin:process|process_get_by_instance_id', {
+				instanceId,
+			}).catch(() => [])
+			if (running.length > 0) return true
+
 			if (address && !isOfflineMode()) {
 				await invoke('plugin:instance|instance_run', {
 					instanceId,
