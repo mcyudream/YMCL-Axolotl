@@ -28,6 +28,24 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.9',
+		version: '1.9.7-beta.9',
+		publishedAt: '2026-10-26',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.7-beta.9',
+			'zh-CN': 'Axolotl Launcher 1.9.7-beta.9',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'A second click on one-click install-and-join now reuses the remembered local instance directly — no repeated pack download or reinstall — and falls back to a fresh install only when the instance was deleted.',
+					'zh-CN': '一键安装并进服二次点击直接复用记忆中的本地实例，不再重复下载整合包或重装；实例被删除时才自动回落重新下载安装。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.8',
 		version: '1.9.7-beta.8',
 		publishedAt: '2026-10-26',
