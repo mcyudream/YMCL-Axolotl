@@ -1,0 +1,19 @@
+name: Publish completed platform
+description: Upload verified platform assets and make them available without waiting for other builds.
+runs:
+  using: composite
+  steps:
+    - name: Upload verified release assets
+      shell: bash
+      run: gh release upload "${GITHUB_REF_NAME}" "${RUNNER_TEMP}/release-assets/"* --clobber
+    - name: Make completed platform available
+      shell: bash
+      run: |
+        if [[ "$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft')" != "true" ]]; then
+          exit 0
+        fi
+        if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --prerelease
+        else
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest=false
+        fi

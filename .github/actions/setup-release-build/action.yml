@@ -8,6 +8,10 @@ inputs:
     description: Space-separated Rust targets to install and prefetch.
     required: false
     default: ''
+  bundle-only:
+    description: Prepare bundling resources without restoring compiled Rust dependencies or building Java agents.
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -41,6 +45,7 @@ runs:
         targets: ${{ inputs.targets }}
 
     - name: Cache full-LTO Rust dependencies
+      if: inputs.bundle-only != 'true'
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         shared-key: axolotl-release-lto-v2-${{ inputs.runner }}
@@ -51,6 +56,7 @@ runs:
         save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v') }}
 
     - name: Cache npm, Java toolchains, Gradle and Tauri bundler downloads
+      if: inputs.bundle-only != 'true'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: |
@@ -63,6 +69,15 @@ runs:
         key: release-tools-v2-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'third-party/blockbench/package-lock.json', 'packages/app-lib/java/**/*.kts', 'packages/app-lib/java/gradle/**', '.github/actions/setup-release-build/action.yml') }}
         restore-keys: |
           release-tools-v2-${{ inputs.runner }}-${{ runner.arch }}-
+
+    - name: Cache standalone bundler downloads
+      if: inputs.bundle-only == 'true'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ${{ steps.toolchain.outputs.tauri-tools }}
+        key: release-bundler-v1-${{ inputs.runner }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'apps/app/tauri*.json') }}
+        restore-keys: |
+          release-bundler-v1-${{ inputs.runner }}-${{ runner.arch }}-
 
     - name: Cache compiled Java agents and Blockbench resources
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -77,6 +92,7 @@ runs:
           release-resources-v1-${{ inputs.runner }}-${{ runner.arch }}-
 
     - name: Cache frontend build results
+      if: inputs.bundle-only != 'true'
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: .turbo
@@ -100,14 +116,20 @@ runs:
         sudo apt-get -o Acquire::ForceIPv4=true update
         sudo apt-get -o Acquire::ForceIPv4=true -o Dir::Cache::archives="$PWD/.cache/apt" -o APT::Keep-Downloaded-Packages=true install -y --no-install-recommends pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
 
-    - uses: ./.github/actions/replace-gradle-mirror
+    - if: inputs.bundle-only != 'true'
+      uses: ./.github/actions/replace-gradle-mirror
     - name: Install workspace packages from the pnpm store
       shell: bash
       run: pnpm install --frozen-lockfile --prefer-offline
     - name: Prefetch Rust crates and prepare Java and Blockbench in parallel
+      if: inputs.bundle-only != 'true'
       shell: bash
       env:
         BUILD_TARGETS: ${{ inputs.targets }}
       run: |
         read -ra targets <<< "$BUILD_TARGETS"
         pnpm app:prepare "${targets[@]}"
+    - name: Prepare resources for bundling existing binaries
+      if: inputs.bundle-only == 'true'
+      shell: bash
+      run: node scripts/axolotl/prepare-build-resources.mjs blockbench

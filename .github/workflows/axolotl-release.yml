@@ -101,8 +101,7 @@ jobs:
     name: Build (${{ matrix.name }})
     needs: preflight
     strategy:
-      fail-fast: true
-      max-parallel: 4
+      fail-fast: false
       matrix:
         include:
           - name: Linux x64
@@ -114,10 +113,6 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
-          - name: macOS universal
-            runner: macos-15
-            targets: aarch64-apple-darwin x86_64-apple-darwin
-            args: --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
@@ -137,7 +132,6 @@ jobs:
         uses: ./.github/actions/setup-release-build
         with:
           runner: ${{ matrix.runner }}
-          targets: ${{ matrix.targets }}
 
       - name: Require full LTO for published binaries
         shell: bash
@@ -153,22 +147,17 @@ jobs:
           node scripts/axolotl/set-version.mjs "${{ github.ref_name }}"
           cargo update --workspace --offline
 
-      - name: Build and upload release assets
+      - name: Build release assets
+        id: package
         uses: tauri-apps/tauri-action@1ddc7b49b13c3038297360482fcb3e058764d7c9 # v0.6.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_BUNDLER_DMG_IGNORE_CI: ${{ runner.os == 'macOS' && 'true' || '' }}
         with:
           projectPath: apps/app
           tauriScript: pnpm tauri
           args: ${{ matrix.args }} -- --locked --timings
-          tagName: ${{ github.ref_name }}
-          releaseName: Axolotl Launcher ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
           generateReleaseNotes: false
           includeUpdaterJson: false
           updaterJsonPreferNsis: true
@@ -182,15 +171,18 @@ jobs:
           binary="target/release/YMCL"
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             binary="${binary}.exe"
-          elif [[ "${RUNNER_OS}" == "macOS" ]]; then
-            binary="target/universal-apple-darwin/release/YMCL"
           fi
           node scripts/axolotl/verify-embedded-curseforge-key.mjs "$binary"
 
-      - name: Publish Windows distribution variants
+      - name: Stage release assets before rebundling
+        shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.package.outputs.artifactPaths }}
+        run: node scripts/axolotl/stage-release-assets.mjs "${RUNNER_TEMP}/release-assets"
+
+      - name: Prepare Windows distribution variants
         if: runner.os == 'Windows'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -200,7 +192,7 @@ jobs:
           $appName = "YMCL"
           $outDir = "target/release/bundle/nsis"
           $buildDir = "target/portable-build"
-          $publishDir = Join-Path $env:RUNNER_TEMP "windows-assets"
+          $publishDir = Join-Path $env:RUNNER_TEMP "release-assets"
 
           New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 
@@ -212,16 +204,14 @@ jobs:
           $modernName = "YMCL_${version}_x64_modern-setup.exe"
           $modernPath = Join-Path $publishDir $modernName
           Copy-Item -Force $modernInstallers[0].FullName $modernPath
-          gh release upload "${{ github.ref_name }}" $modernPath --clobber
+          Remove-Item (Join-Path $publishDir $modernInstallers[0].Name)
 
           $modernSignature = "$($modernInstallers[0].FullName).sig"
           if (Test-Path $modernSignature) {
             $modernSignaturePath = "$modernPath.sig"
             Copy-Item -Force $modernSignature $modernSignaturePath
-            gh release upload "${{ github.ref_name }}" $modernSignaturePath --clobber
-            gh release delete-asset "${{ github.ref_name }}" "$($modernInstallers[0].Name).sig" --yes
+            Remove-Item (Join-Path $publishDir "$($modernInstallers[0].Name).sig")
           }
-          gh release delete-asset "${{ github.ref_name }}" $modernInstallers[0].Name --yes
 
           pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
           if ($LASTEXITCODE -ne 0) { throw "Native NSIS bundling failed" }
@@ -234,7 +224,6 @@ jobs:
           $nativeName = "YMCL_${version}_x64_nsis-setup.exe"
           $nativePath = Join-Path $publishDir $nativeName
           Copy-Item -Force $nativeInstallers[0].FullName $nativePath
-          gh release upload "${{ github.ref_name }}" $nativePath --clobber
 
           # Reuse the binary already built by tauri-action
           $appExe = "target/release/${appName}.exe"
@@ -250,16 +239,144 @@ jobs:
             $zipPath = Join-Path $publishDir $zipName
             Compress-Archive -Path "$buildDir\Axolotl" -DestinationPath $zipPath -Force
             Write-Output "Created portable zip: $zipPath"
-
-            # Upload portable zip (for manual download only)
-            gh release upload "${{ github.ref_name }}" "$zipPath" --clobber
           } else {
             throw "Binary not found at $appExe"
           }
 
+      - name: Publish completed platform immediately
+        uses: ./.github/actions/publish-release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Compile (${{ matrix.name }})
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-15
+            targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+          - name: macOS Intel
+            runner: macos-15-intel
+            targets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+    runs-on: ${{ matrix.runner }}
+    env:
+      SQLX_OFFLINE: true
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_RELEASE_LTO: 'true'
+      AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - name: Restore release caches and prepare dependencies
+        uses: ./.github/actions/setup-release-build
+        with:
+          runner: ${{ matrix.runner }}
+          targets: ${{ matrix.targets }}
+      - name: Set release version
+        shell: bash
+        run: |
+          node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"
+          cargo update --workspace --offline
+      - name: Compile one native macOS architecture
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          read -ra args <<< "$BUILD_ARGS"
+          pnpm --filter @modrinth/app tauri build --no-bundle "${args[@]}" -- --locked --timings
+      - name: Verify the production binary contains the CurseForge key
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          BUILD_TARGET: ${{ matrix.targets }}
+        run: node scripts/axolotl/verify-embedded-curseforge-key.mjs "target/${BUILD_TARGET}/release/YMCL"
+      - name: Upload compiled architecture for universal bundling
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-${{ matrix.targets }}
+          path: target/${{ matrix.targets }}/release/YMCL
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  bundle-macos:
+    name: Bundle and publish macOS universal
+    needs: build-macos
+    runs-on: macos-15
+    env:
+      SQLX_OFFLINE: true
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          submodules: recursive
+      - name: Prepare bundling tools and resources
+        uses: ./.github/actions/setup-release-build
+        with:
+          runner: macos-15
+          bundle-only: 'true'
+      - name: Set release version
+        run: node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"
+      - name: Download both compiled architectures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: macos-*
+          path: macos-binaries
+      - name: Assemble and verify the universal binary
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          output=target/universal-apple-darwin/release/YMCL
+          mkdir -p "$(dirname "$output")"
+          lipo -create \
+            macos-binaries/macos-aarch64-apple-darwin/YMCL \
+            macos-binaries/macos-x86_64-apple-darwin/YMCL \
+            -output "$output"
+          lipo -verify_arch arm64 x86_64 "$output"
+          chmod +x "$output"
+          node scripts/axolotl/verify-embedded-curseforge-key.mjs "$output"
+      - name: Bundle and sign without recompiling Rust or the frontend
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+        run: pnpm --filter @modrinth/app tauri bundle --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+      - name: Stage universal release assets
+        run: |
+          ARTIFACT_PATHS="$(node --input-type=module <<'NODE'
+          import { readdirSync } from 'node:fs'
+          import { join } from 'node:path'
+          const bundle = 'target/universal-apple-darwin/release/bundle'
+          const dmgs = readdirSync(join(bundle, 'dmg')).filter(name => name.endsWith('.dmg'))
+          const archives = readdirSync(join(bundle, 'macos')).filter(name => name.endsWith('.app.tar.gz'))
+          if (dmgs.length !== 1 || archives.length !== 1) throw new Error('Expected one universal DMG and updater archive')
+          console.log(JSON.stringify([
+            join(bundle, 'dmg', dmgs[0]),
+            join(bundle, 'macos', archives[0]),
+            join(bundle, 'macos', `${archives[0]}.sig`),
+          ]))
+          NODE
+          )"
+          export ARTIFACT_PATHS
+          node scripts/axolotl/stage-release-assets.mjs "${RUNNER_TEMP}/release-assets" universal-apple-darwin
+      - name: Publish completed platform immediately
+        uses: ./.github/actions/publish-release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   verify-and-publish:
-    name: Verify and publish
-    needs: build
+    name: Verify complete update and publish mirrors
+    needs: [build, bundle-macos]
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -279,19 +396,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release download "${GITHUB_REF_NAME}" --pattern '*.sig' --dir release-check/signatures
-
-      # Publish first: draft assets carry untagged-<hash> download URLs, which
-      # break update-manifest verification and lack published_at for the
-      # update-server notification.
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            gh release edit "${GITHUB_REF_NAME}" --draft=false --prerelease
-          else
-            gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
-          fi
 
       - name: Download release metadata
         env:
@@ -318,6 +422,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" release-check/latest.json --clobber
+
+      - name: Promote complete stable release to latest
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --latest
 
       - name: Build Update Server artifact catalog
         run: |

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { parse } from 'yaml'
+import { stageReleaseAssets } from './stage-release-assets.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
@@ -96,10 +97,15 @@ test('native Windows installers do not publish stale modern updater signatures',
 	const native = JSON.parse(await readFile(join(root, 'apps/app/tauri-native.conf.json'), 'utf8'))
 	assert.equal(native.bundle.createUpdaterArtifacts, false)
 	const variants = release.jobs.build.steps.find(
-		(step) => step.name === 'Publish Windows distribution variants',
+		(step) => step.name === 'Prepare Windows distribution variants',
 	)
 	assert.ok(variants.run.includes('$modernSignaturePath'))
 	assert.doesNotMatch(variants.run, /\$nativeSignature/)
+	const staging = release.jobs.build.steps.findIndex((step) =>
+		step.run?.includes('stage-release-assets.mjs'),
+	)
+	assert.ok(staging >= 0 && staging < release.jobs.build.steps.indexOf(variants))
+	assert.doesNotMatch(variants.run, /gh release (upload|delete-asset)/)
 })
 
 test('release and branch cache warming use the same full-LTO targets and setup', async () => {
@@ -110,21 +116,22 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 	const setup = parse(
 		await readFile(join(root, '.github/actions/setup-release-build/action.yml'), 'utf8'),
 	)
-	assert.deepEqual(
-		warm.jobs.warm.strategy.matrix.include,
-		release.jobs.build.strategy.matrix.include,
-	)
-	for (const job of [release.jobs.build, warm.jobs.warm]) {
+	assert.deepEqual(warm.jobs.warm.strategy.matrix.include, [
+		...release.jobs.build.strategy.matrix.include,
+		...release.jobs['build-macos'].strategy.matrix.include,
+	])
+	for (const job of [release.jobs.build, release.jobs['build-macos'], warm.jobs.warm]) {
 		assert.equal(job.env.CARGO_PROFILE_RELEASE_LTO, 'true')
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 		const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
 		assert.equal(checkout.with['fetch-depth'], 1)
 		assert.equal(checkout.with.submodules, 'recursive')
 		const step = job.steps.find((step) => step.uses === './.github/actions/setup-release-build')
-		assert.deepEqual(step.with, {
-			runner: '${{ matrix.runner }}',
-			targets: '${{ matrix.targets }}',
-		})
+		const inputs = { runner: '${{ matrix.runner }}' }
+		if (job.strategy.matrix.include.some((entry) => entry.targets)) {
+			inputs.targets = '${{ matrix.targets }}'
+		}
+		assert.deepEqual(step.with, inputs)
 	}
 	const cache = setup.runs.steps.find((step) => step.uses?.startsWith('Swatinem/rust-cache@'))
 	assert.match(cache.with['shared-key'], /release-lto/)
@@ -149,6 +156,183 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 	)
 })
 
+test('macOS compiles architectures on native runners and only bundles the combined binary', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const compile = release.jobs['build-macos']
+	assert.equal(compile.needs, 'preflight')
+	assert.equal(compile.strategy['fail-fast'], false)
+	assert.deepEqual(
+		compile.strategy.matrix.include.map(({ runner, targets }) => ({ runner, targets })),
+		[
+			{ runner: 'macos-15', targets: 'aarch64-apple-darwin' },
+			{ runner: 'macos-15-intel', targets: 'x86_64-apple-darwin' },
+		],
+	)
+	assert.ok(compile.steps.some((step) => step.run?.includes('tauri build --no-bundle')))
+	const upload = compile.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))
+	assert.equal(upload.with['if-no-files-found'], 'error')
+	assert.equal(upload.with['compression-level'], 0)
+	const bundle = release.jobs['bundle-macos']
+	assert.equal(bundle.needs, 'build-macos')
+	const setup = bundle.steps.find((step) => step.uses === './.github/actions/setup-release-build')
+	assert.equal(setup.with['bundle-only'], 'true')
+	const preparation = parse(
+		await readFile(join(root, '.github/actions/setup-release-build/action.yml'), 'utf8'),
+	).runs.steps
+	for (const step of preparation.filter((step) =>
+		/Cache full-LTO|Cache npm, Java|Cache frontend|Prefetch Rust/.test(step.name ?? ''),
+	)) {
+		assert.equal(step.if, "inputs.bundle-only != 'true'")
+	}
+	const commands = bundle.steps.map((step) => step.run ?? '').join('\n')
+	assert.match(commands, /lipo -create/)
+	assert.match(commands, /lipo -verify_arch arm64 x86_64/)
+	assert.match(commands, /tauri bundle --target universal-apple-darwin/)
+	assert.doesNotMatch(commands, /tauri build|cargo (build|check|test)/)
+	const signing = bundle.steps.find((step) => step.run?.includes('tauri bundle'))
+	assert.equal(signing.env.TAURI_SIGNING_PRIVATE_KEY, '${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}')
+})
+
+test('completed platforms publish independently while update manifests require the complete release', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	assert.equal(release.jobs.build.strategy['fail-fast'], false)
+	assert.equal(release.jobs.build.needs, 'preflight')
+	for (const job of [release.jobs.build, release.jobs['bundle-macos']]) {
+		const verification = job.steps.findIndex((step) =>
+			step.run?.includes('verify-embedded-curseforge-key.mjs'),
+		)
+		const publish = job.steps.findIndex(
+			(step) => step.uses === './.github/actions/publish-release-assets',
+		)
+		assert.ok(verification >= 0 && publish > verification)
+		assert.equal(job.steps[publish].env.GH_TOKEN, '${{ secrets.GITHUB_TOKEN }}')
+	}
+	const build = release.jobs.build.steps.find((step) =>
+		step.uses?.startsWith('tauri-apps/tauri-action@'),
+	)
+	assert.equal(build.with.tagName, undefined)
+	assert.equal(build.with.releaseId, undefined)
+	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['build', 'bundle-macos'])
+	const publish = parse(
+		await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
+	)
+	assert.match(publish.runs.steps[0].run, /gh release upload/)
+	assert.match(publish.runs.steps[1].run, /--draft=false --prerelease/)
+	assert.match(publish.runs.steps[1].run, /--draft=false --latest=false/)
+	const finalize = release.jobs['verify-and-publish'].steps
+	const upload = finalize.findIndex((step) =>
+		step.run?.includes('release-check/latest.json --clobber'),
+	)
+	const latest = finalize.findIndex((step) => step.run?.includes('gh release edit'))
+	assert.ok(upload >= 0 && latest > upload)
+})
+
+test('staging preserves signed updater bytes across rebundling and keeps universal asset names', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-staging-'))
+	try {
+		const source = join(directory, 'original')
+		await mkdir(source)
+		const archive = join(source, 'YMCL.app.tar.gz')
+		const signature = `${archive}.sig`
+		await writeFile(archive, 'signed updater bytes')
+		await writeFile(signature, 'signature bytes')
+		const staged = await stageReleaseAssets(
+			[archive, signature],
+			join(directory, 'assets'),
+			'universal-apple-darwin',
+		)
+		assert.deepEqual(staged, [
+			join(directory, 'assets/YMCL_universal.app.tar.gz'),
+			join(directory, 'assets/YMCL_universal.app.tar.gz.sig'),
+		])
+		await writeFile(archive, 'native variant overwrote source')
+		assert.equal(await readFile(staged[0], 'utf8'), 'signed updater bytes')
+		assert.equal(await readFile(staged[1], 'utf8'), 'signature bytes')
+		await assert.rejects(stageReleaseAssets([], join(directory, 'empty')), /No release artifacts/)
+		await assert.rejects(stageReleaseAssets([source], join(directory, 'invalid')), /regular files/)
+		await assert.rejects(
+			stageReleaseAssets([archive, archive], join(directory, 'duplicates')),
+			/Duplicate release artifact/,
+		)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
+
+test(
+	'publishing exposes successful uploads, keeps latest intact, and stops on upload failure',
+	{
+		skip: process.platform === 'win32',
+	},
+	async () => {
+		const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-publish-'))
+		try {
+			await mkdir(join(directory, 'release-assets'))
+			await writeFile(join(directory, 'release-assets/YMCL.dmg'), 'verified package')
+			const log = join(directory, 'commands.jsonl')
+			await writeFile(
+				join(directory, 'gh'),
+				`#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+fs.appendFileSync(process.env.PUBLISH_TEST_LOG, JSON.stringify(args) + '\\n')
+if (args[1] === 'upload' && process.env.PUBLISH_TEST_FAIL === '1') process.exit(1)
+if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
+`,
+				{ mode: 0o755 },
+			)
+			const {
+				runs: { steps },
+			} = parse(
+				await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
+			)
+			for (const { tag, draft, fail } of [
+				{ tag: 'v1.2.3', draft: true },
+				{ tag: 'v1.2.3-beta.1', draft: true },
+				{ tag: 'v1.2.3', draft: false },
+				{ tag: 'v1.2.3', draft: true, fail: true },
+			]) {
+				await writeFile(log, '')
+				const run = () => {
+					for (const step of steps)
+						execFileSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], {
+							env: {
+								...process.env,
+								PATH: `${directory}:${process.env.PATH}`,
+								RUNNER_TEMP: directory,
+								GITHUB_REF_NAME: tag,
+								PUBLISH_TEST_LOG: log,
+								PUBLISH_TEST_DRAFT: String(draft),
+								PUBLISH_TEST_FAIL: fail ? '1' : '0',
+							},
+							stdio: ['ignore', 'pipe', 'pipe'],
+						})
+				}
+				if (fail) assert.throws(run)
+				else run()
+				const commands = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
+				assert.equal(commands[0][1], 'upload')
+				assert.ok(commands[0].includes(join(directory, 'release-assets/YMCL.dmg')))
+				if (fail || !draft)
+					assert.equal(
+						commands.some((args) => args[1] === 'edit'),
+						false,
+					)
+				else
+					assert.deepEqual(commands.at(-1), [
+						'release',
+						'edit',
+						tag,
+						'--draft=false',
+						tag.includes('-') ? '--prerelease' : '--latest=false',
+					])
+			}
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	},
+)
+
 test('release refuses missing credentials and verifies the key in each production binary', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const secretGuard = release.jobs.preflight.steps.find((step) =>
@@ -162,11 +346,13 @@ test('release refuses missing credentials and verifies the key in each productio
 	]) {
 		assert.equal(secretGuard.env[name], `\${{ secrets.${name} }}`)
 	}
-	assert.equal(release.jobs.build.env.AXOLOTL_REQUIRE_CURSEFORGE_API_KEY, '1')
-	const verification = release.jobs.build.steps.find((step) =>
-		step.run?.includes('verify-embedded-curseforge-key.mjs'),
-	)
-	assert.equal(verification.env.CURSEFORGE_API_KEY, '${{ secrets.CURSEFORGE_API_KEY }}')
+	for (const job of [release.jobs.build, release.jobs['build-macos']]) {
+		assert.equal(job.env.AXOLOTL_REQUIRE_CURSEFORGE_API_KEY, '1')
+		const verification = job.steps.find((step) =>
+			step.run?.includes('verify-embedded-curseforge-key.mjs'),
+		)
+		assert.equal(verification.env.CURSEFORGE_API_KEY, '${{ secrets.CURSEFORGE_API_KEY }}')
+	}
 	const publish = release.jobs['verify-and-publish'].steps.find((step) =>
 		step.run?.includes('publish-ymcl-platforms.mjs'),
 	)

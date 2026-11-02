@@ -46,10 +46,14 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
-          - name: macOS universal
+          - name: macOS Apple Silicon
             runner: macos-15
-            targets: aarch64-apple-darwin x86_64-apple-darwin
-            args: --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+            targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
+          - name: macOS Intel
+            runner: macos-15-intel
+            targets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
@@ -72,6 +76,7 @@ jobs:
           read -ra args <<< "$BUILD_ARGS"
           pnpm --filter @modrinth/app tauri build --no-bundle "${args[@]}" -- --locked --timings
       - name: Warm installer tool downloads without signing or publishing
+        if: runner.os != 'macOS'
         shell: bash
         env:
           BUILD_ARGS: ${{ matrix.args }}
