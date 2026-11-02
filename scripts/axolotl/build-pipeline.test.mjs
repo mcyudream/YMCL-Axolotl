@@ -76,6 +76,19 @@ test('normal frontend builds remain checked and do not refresh remote source dat
 	assert.match(scripts['contributors:sync'], /sync-contributors\.mjs/)
 })
 
+test('release compiles the frontend before drafting a release or starting platform jobs', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const steps = release.jobs.preflight.steps
+	const install = steps.findIndex((step) => step.run?.includes('pnpm install --frozen-lockfile'))
+	const build = steps.findIndex((step) =>
+		step.run?.includes('pnpm turbo run build --filter=@modrinth/app-frontend'),
+	)
+	const draft = steps.findIndex((step) => step.run?.includes('gh release create'))
+	assert.ok(install >= 0 && build > install && draft > build)
+	assert.equal(release.jobs.build.needs, 'preflight')
+	assert.equal(release.jobs['build-macos'].needs, 'preflight')
+})
+
 test('Windows installer variants reuse a binary without weakening release optimization', async () => {
 	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))

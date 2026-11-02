@@ -491,6 +491,11 @@ async function restoreSnapshot() {
 	}
 }
 
+function clearRestoreSelection() {
+	selectedSnapshot.value = null
+	restorePreview.value = null
+}
+
 function disable() {
 	void runAction('disable', async (instanceId, isCurrent) => {
 		await disableBackups(instanceId)
@@ -783,10 +788,7 @@ watch(
 			:disable-close="action !== null"
 			:header="formatMessage(messages.restoreTitle)"
 			max-width="500px"
-			@hide="
-				selectedSnapshot = null
-				restorePreview = null
-			"
+			@hide="clearRestoreSelection"
 		>
 			<Admonition v-if="restorePreview" type="warning">
 				{{

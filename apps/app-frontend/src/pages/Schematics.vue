@@ -9,7 +9,7 @@ import {
 	ProjectCard,
 	ProjectCardList,
 	ProjectCardSkeleton,
-	TextInput,
+	StyledInput,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
@@ -94,7 +94,7 @@ watch(query, (value) => {
 	<div data-onboarding-id="browse-schematics-content" class="flex flex-col gap-4 p-6">
 		<NavTabs :links="tabs" />
 		<form class="flex flex-wrap items-center gap-3" @submit.prevent="submitSearch">
-			<TextInput
+			<StyledInput
 				v-model="search"
 				class="min-w-48 flex-1"
 				:placeholder="formatMessage(messages.search)"

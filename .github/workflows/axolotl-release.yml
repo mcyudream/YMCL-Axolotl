@@ -71,6 +71,9 @@ jobs:
           "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
 
+      - name: Compile production frontend before starting platform jobs
+        run: pnpm turbo run build --filter=@modrinth/app-frontend
+
       - name: Prepare draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -54,10 +54,9 @@
 </template>
 
 <script setup lang="ts">
-import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { ButtonStyled, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-import { handleError } from '@/store/notifications'
 import {
 	cancelContentRefresh,
 	getContentRefresh,
@@ -68,6 +67,7 @@ import {
 
 const props = defineProps<{ instanceId: string }>()
 const { formatMessage } = useVIntl()
+const { handleError } = injectNotificationManager()
 const job = ref<ContentRefreshJob | null>(null)
 const busy = ref(false)
 const active = computed(() => isContentRefreshActive(job.value))

@@ -20,7 +20,6 @@ import {
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
 import TranslatedProjectDescription from '@/components/ui/TranslatedProjectDescription.vue'
 import { list as listInstances } from '@/helpers/instance'
-import { isServerProjectLink } from '@/helpers/instance-project'
 import {
 	getSchematic,
 	getInstalledSchematics,
@@ -51,7 +50,10 @@ const selectedInstanceId = ref(
 const instancesQuery = useQuery({ queryKey: ['schematic-install-targets'], queryFn: listInstances })
 const instances = computed(() =>
 	(instancesQuery.data.value ?? []).filter(
-		(instance) => !isServerProjectLink(instance.link) && instance.install_stage === 'installed',
+		(instance) =>
+			instance.install_stage === 'installed' &&
+			instance.link?.type !== 'server_project' &&
+			instance.link?.type !== 'server_project_modpack',
 	),
 )
 const selectedInstance = computed(

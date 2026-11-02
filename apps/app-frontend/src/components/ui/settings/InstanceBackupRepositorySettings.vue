@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { FolderOpenIcon } from '@modrinth/assets'
-import { defineMessages, NewButton, useFormatBytes, useVIntl } from '@modrinth/ui'
+import {
+	defineMessages,
+	injectNotificationManager,
+	NewButton,
+	useFormatBytes,
+	useVIntl,
+} from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath } from '@tauri-apps/plugin-opener'
@@ -12,9 +18,9 @@ import {
 	listBackupOperations,
 	moveBackupRepository,
 } from '@/helpers/instance-backup'
-import { handleError } from '@/store/notifications'
 
 const { formatMessage } = useVIntl()
+const { handleError } = injectNotificationManager()
 const formatBytes = useFormatBytes()
 const queryClient = useQueryClient()
 const status = useQuery({
