@@ -236,13 +236,6 @@ jobs:
           Copy-Item -Force $nativeInstallers[0].FullName $nativePath
           gh release upload "${{ github.ref_name }}" $nativePath --clobber
 
-          $nativeSignature = "$($nativeInstallers[0].FullName).sig"
-          if (Test-Path $nativeSignature) {
-            $nativeSignaturePath = "$nativePath.sig"
-            Copy-Item -Force $nativeSignature $nativeSignaturePath
-            gh release upload "${{ github.ref_name }}" $nativeSignaturePath --clobber
-          }
-
           # Reuse the binary already built by tauri-action
           $appExe = "target/release/${appName}.exe"
           if (Test-Path $appExe) {

@@ -91,6 +91,17 @@ test('Windows installer variants reuse a binary without weakening release optimi
 	assert.ok(ci.jobs.desktop.steps.some((step) => step.run?.includes('turbo run build')))
 })
 
+test('native Windows installers do not publish stale modern updater signatures', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const native = JSON.parse(await readFile(join(root, 'apps/app/tauri-native.conf.json'), 'utf8'))
+	assert.equal(native.bundle.createUpdaterArtifacts, false)
+	const variants = release.jobs.build.steps.find(
+		(step) => step.name === 'Publish Windows distribution variants',
+	)
+	assert.ok(variants.run.includes('$modernSignaturePath'))
+	assert.doesNotMatch(variants.run, /\$nativeSignature/)
+})
+
 test('release and branch cache warming use the same full-LTO targets and setup', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const warm = parse(
