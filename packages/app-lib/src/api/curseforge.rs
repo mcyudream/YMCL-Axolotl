@@ -5677,8 +5677,9 @@ fn modpack_zip_error(error: zip::result::ZipError) -> crate::Error {
 }
 
 fn safe_archive_relative_path(value: &str) -> crate::Result<String> {
-    let path = Path::new(value);
-    if value.is_empty()
+    let normalized = value.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if normalized.is_empty()
         || path.is_absolute()
         || path
             .components()
@@ -5689,7 +5690,7 @@ fn safe_archive_relative_path(value: &str) -> crate::Result<String> {
         )
         .into());
     }
-    Ok(path.to_string_lossy().replace('\\', "/"))
+    Ok(normalized)
 }
 
 pub(crate) fn loader_family(loader_id: &str) -> &str {
@@ -12468,8 +12469,24 @@ mod tests {
             safe_archive_relative_path("config/example.toml").unwrap(),
             "config/example.toml"
         );
-        assert!(safe_archive_relative_path("../options.txt").is_err());
-        assert!(safe_archive_relative_path("/options.txt").is_err());
+        assert_eq!(
+            safe_archive_relative_path(r"config\example.toml").unwrap(),
+            "config/example.toml"
+        );
+        for path in [
+            "",
+            "../options.txt",
+            "/options.txt",
+            r"..\options.txt",
+            r"config\..\..\options.txt",
+            r"\options.txt",
+            r"\\server\options.txt",
+        ] {
+            assert!(
+                safe_archive_relative_path(path).is_err(),
+                "accepted {path:?}"
+            );
+        }
     }
 
     #[test]

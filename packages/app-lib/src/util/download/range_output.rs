@@ -63,6 +63,37 @@ impl RangeOutput {
         }))
     }
 
+    pub(crate) async fn resume_prefix(
+        path: &Path,
+        size: u64,
+        prefix: u64,
+    ) -> Result<Arc<Self>, IOError> {
+        io::retry_windows_sharing_violation(
+            path,
+            "resuming ranged download output",
+            || async {
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)
+                    .await?;
+                if prefix >= size || file.metadata().await?.len() != prefix {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "invalid ranged download prefix",
+                    ));
+                }
+                file.set_len(size).await
+            },
+        )
+        .await
+        .map_err(|error| io::io_error_with_lock_info(error, path))?;
+        Ok(Arc::new(Self {
+            path: path.to_path_buf(),
+            size,
+        }))
+    }
+
     pub(crate) async fn open_range(
         &self,
         start: u64,

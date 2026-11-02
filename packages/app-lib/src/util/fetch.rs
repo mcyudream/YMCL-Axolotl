@@ -292,8 +292,11 @@ pub struct DownloadRequest {
     /// budget instead of each file multiplying its connections.
     pub allow_segmented_download: bool,
     /// Whether HTTP/1.1 may multiply one file into concurrent Range requests.
-    /// Multi-file batch schedulers disable this while retaining shared H2.
+    /// Batch schedulers disable initial ranges while retaining shared H2;
+    /// slow, hash-verified transfers may recover within the connection budget.
     pub(crate) allow_http1_segmented_download: bool,
+    /// Recover a slow shared HTTP/2 transfer with bounded HTTP/1.1 ranges.
+    recovering_http1: bool,
     /// Explicit shared-connection H2 range stream count for one large file.
     /// This is currently reserved for standalone modpack archive downloads.
     pub(crate) h2_range_concurrency: Option<usize>,
@@ -319,6 +322,7 @@ impl DownloadRequest {
             candidate_urls: Vec::new(),
             allow_segmented_download: true,
             allow_http1_segmented_download: true,
+            recovering_http1: false,
             h2_range_concurrency: None,
             cancellation: None,
             install_tracking: None,
@@ -334,6 +338,12 @@ impl DownloadRequest {
     pub(crate) fn with_http1_segmented_download(mut self, allow: bool) -> Self {
         self.allow_http1_segmented_download = allow;
         self
+    }
+
+    fn supports_range_recovery(&self) -> bool {
+        self.allow_segmented_download
+            && self.resource != ResourceClass::Metadata
+            && self.integrity.has_hash()
     }
 
     pub(crate) fn with_h2_range_concurrency(
@@ -786,15 +796,19 @@ pub(crate) fn mirror_routes_for_family(
         {
             push_mirror(&mut routes, base, path.to_string());
         }
-        ("cdn.modrinth.com" | "cdn-alt.modrinth.com", MirrorKind::BmclapiCompat)
-            if source == DownloadRouteSource::Gateway
-                && path.starts_with("/data/")
-                && path.contains("/versions/") =>
+        (
+            "cdn.modrinth.com" | "cdn-alt.modrinth.com",
+            MirrorKind::BmclapiCompat,
+        ) if source == DownloadRouteSource::Gateway
+            && path.starts_with("/data/")
+            && path.contains("/versions/") =>
         {
             push_mirror(&mut routes, base, path.to_string());
         }
         (
-            "edge.forgecdn.net" | "mediafilez.forgecdn.net" | "media.forgecdn.net",
+            "edge.forgecdn.net"
+            | "mediafilez.forgecdn.net"
+            | "media.forgecdn.net",
             MirrorKind::BmclapiCompat,
         ) if source == DownloadRouteSource::Gateway
             && path.starts_with("/files/") =>
@@ -3251,6 +3265,7 @@ struct SegmentDownloadCompletion {
 struct SegmentCleanupGuard {
     part_path: PathBuf,
     armed: bool,
+    preserved_prefix: u64,
 }
 
 impl SegmentCleanupGuard {
@@ -3258,11 +3273,17 @@ impl SegmentCleanupGuard {
         Self {
             part_path: part_path.to_path_buf(),
             armed: true,
+            preserved_prefix: 0,
         }
     }
 
     fn disarm(&mut self) {
         self.armed = false;
+    }
+
+    fn preserve_prefix(mut self, size: u64) -> Self {
+        self.preserved_prefix = size;
+        self
     }
 }
 
@@ -3271,7 +3292,15 @@ impl Drop for SegmentCleanupGuard {
         if !self.armed {
             return;
         }
-        let _ = std::fs::remove_file(&self.part_path);
+        let preserved = self.preserved_prefix > 0
+            && std::fs::OpenOptions::new()
+                .write(true)
+                .open(&self.part_path)
+                .and_then(|file| file.set_len(self.preserved_prefix))
+                .is_ok();
+        if !preserved {
+            let _ = std::fs::remove_file(&self.part_path);
+        }
         for index in 0..MAX_SEGMENT_CONCURRENCY {
             let _ = std::fs::remove_file(segment_path(&self.part_path, index));
             for candidate in 0..2 {
@@ -4700,10 +4729,34 @@ async fn try_segmented_download(
         max_attempts,
         allow_low_throughput_abort,
     } = context;
+    let resume_prefix = match tokio::fs::metadata(part_path).await {
+        Ok(metadata) if metadata.len() > 0 => {
+            if !request.recovering_http1
+                || !request.supports_range_recovery()
+                || !metadata.is_file()
+                || metadata.len() >= size
+            {
+                return SegmentedDownloadOutcome::FallbackSingle {
+                    disable_range: false,
+                    reason: "resumable partial uses a single stream",
+                };
+            }
+            metadata.len()
+        }
+        Ok(_) => 0,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => {
+            return SegmentedDownloadOutcome::Fatal(
+                IOError::with_path(error, part_path).into(),
+            );
+        }
+    };
+    let remaining_size = size - resume_prefix;
     let configured_limit = configured_semaphore_limit(semaphore);
     let concurrency_cap =
         route_segmented_concurrency_cap(route, configured_limit);
-    let requested_initial_count = initial_segment_count(size, concurrency_cap);
+    let requested_initial_count =
+        initial_segment_count(remaining_size, concurrency_cap);
     if requested_initial_count < 2 {
         tracing::debug!(
             original_url = %sanitize_url_for_log(&route.url),
@@ -4717,15 +4770,6 @@ async fn try_segmented_download(
             reason: "configured connection limit is one",
         };
     }
-    if tokio::fs::metadata(part_path)
-        .await
-        .is_ok_and(|metadata| metadata.len() > 0)
-    {
-        return SegmentedDownloadOutcome::FallbackSingle {
-            disable_range: false,
-            reason: "resumable partial uses a single stream",
-        };
-    }
     let permits = match acquire_initial_segment_permits(
         route,
         semaphore,
@@ -4736,12 +4780,22 @@ async fn try_segmented_download(
         Ok(permits) => permits,
         Err(error) => return SegmentedDownloadOutcome::Fatal(error),
     };
-    let mut cleanup_guard = SegmentCleanupGuard::new(part_path);
-    let output = match crate::util::download::range_output::RangeOutput::create(
-        part_path, size,
-    )
-    .await
-    {
+    let mut cleanup_guard =
+        SegmentCleanupGuard::new(part_path).preserve_prefix(resume_prefix);
+    let output = if resume_prefix > 0 {
+        crate::util::download::range_output::RangeOutput::resume_prefix(
+            part_path,
+            size,
+            resume_prefix,
+        )
+        .await
+    } else {
+        crate::util::download::range_output::RangeOutput::create(
+            part_path, size,
+        )
+        .await
+    };
+    let output = match output {
         Ok(output) => output,
         Err(error) => return SegmentedDownloadOutcome::Fatal(error.into()),
     };
@@ -4755,7 +4809,16 @@ async fn try_segmented_download(
     let hedge_count = AtomicUsize::new(0);
     let hedge_active = AtomicBool::new(false);
     let mut downloads = futures::stream::FuturesUnordered::new();
-    let mut ranges = create_initial_ranges(size, permits.len());
+    let mut ranges = create_initial_ranges(remaining_size, permits.len())
+        .into_iter()
+        .map(|range| {
+            DownloadRange::new(
+                range.index,
+                range.start + resume_prefix,
+                range.end() + resume_prefix,
+            )
+        })
+        .collect::<Vec<_>>();
     for (range, permit) in ranges.iter().cloned().zip(permits) {
         downloads.push(download_segment(
             route,
@@ -4796,10 +4859,10 @@ async fn try_segmented_download(
     let mut expansion_baseline = None;
     let mut expansion_exhausted = false;
     let mut last_block_reason = None;
-    let mut downloaded = 0_u64;
+    let mut downloaded = resume_prefix;
     let mut slow_policy =
         crate::util::download::native_slow::NativeSlowPolicy::new(
-            0,
+            resume_prefix,
             expected_route_speed(route, request.resource),
         );
     let mut alternate_probe: Option<RouteProbeFuture<'_>> = None;
@@ -5365,7 +5428,10 @@ async fn try_xmcl_download(
 
 enum H2AttemptResult {
     Completed(DownloadResult),
-    Fallback { failed_nonofficial: Option<String> },
+    Fallback {
+        failed_nonofficial: Option<String>,
+        recover_ranges: bool,
+    },
 }
 
 async fn try_h2_download(
@@ -5454,13 +5520,17 @@ async fn try_h2_download(
                 remove_if_exists(part_path).await?;
             }
             cleanup_segment_files(part_path, MAX_SEGMENT_CONCURRENCY).await?;
-            Ok(H2AttemptResult::Fallback { failed_nonofficial })
+            Ok(H2AttemptResult::Fallback {
+				failed_nonofficial,
+				recover_ranges: failure
+					== crate::util::download::h2_download::H2DownloadFailure::Slow,
+			})
         }
     }
 }
 
 async fn download_to_path_inner(
-    request: DownloadRequest,
+    mut request: DownloadRequest,
     destination: &Path,
     semaphore: &FetchSemaphore,
     mut progress: Option<&mut FetchProgressFn<'_>>,
@@ -5528,7 +5598,11 @@ async fn download_to_path_inner(
         .await?
         {
             H2AttemptResult::Completed(result) => return Ok(result),
-            H2AttemptResult::Fallback { failed_nonofficial } => {
+            H2AttemptResult::Fallback {
+                failed_nonofficial,
+                recover_ranges,
+            } => {
+                request.recovering_http1 = recover_ranges;
                 failed_nonofficial
             }
         }
@@ -5580,13 +5654,18 @@ async fn try_segmented_native_attempt(
         }
         _ => 0,
     };
-    if request.allow_http1_segmented_download
+    let range_recovery =
+        request.recovering_http1 && request.supports_range_recovery();
+    if (request.allow_http1_segmented_download || range_recovery)
         && !retry_with_single_thread
         && !session.single_thread_routes.contains(&route.url)
         && route.supports_range
         && range_splitting_allowed(route)
         && request.integrity.size.is_some_and(|size| {
-            should_use_segmented_download(size, resumable_part_bytes)
+            (range_recovery
+                && size.saturating_sub(resumable_part_bytes)
+                    >= MIN_SEGMENT_SIZE * 2)
+                || should_use_segmented_download(size, resumable_part_bytes)
         })
     {
         let size = request.integrity.size.unwrap();
@@ -6695,8 +6774,10 @@ mod tests {
     }
 
     #[test]
-    fn resource_gateway_preserves_plugin_prefix_without_adding_builtin_mirrors() {
-        let base = "https://admin.example.com/api/plugins/ymcl-adapter/v1/proxy";
+    fn resource_gateway_preserves_plugin_prefix_without_adding_builtin_mirrors()
+    {
+        let base =
+            "https://admin.example.com/api/plugins/ymcl-adapter/v1/proxy";
         for url in [
             "https://cdn.modrinth.com/data/AABBCCDD/versions/IIJJKKLL/mod%2Btest.jar",
             "https://cdn-alt.modrinth.com/data/AABBCCDD/versions/IIJJKKLL/mod%2Btest.jar",
@@ -8753,6 +8834,170 @@ mod tests {
             0,
             "the preserved partial data should not be discarded"
         );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn small_verified_files_recover_parallel_ranges_after_slow_http2() {
+        let _guard = RANGE_SPLITTING_TEST_LOCK.lock().await;
+        RANGE_SPLITTING_PROTOCOL_FAILURES.lock().clear();
+        RANGE_SPLITTING_SUPPORTED.lock().clear();
+        let data = Arc::new(
+            (0..2 * 1024 * 1024)
+                .map(|index| (index % 251) as u8)
+                .collect::<Vec<_>>(),
+        );
+        let hash = sha1_smol::Sha1::from(&data[..]).hexdigest();
+        let (url, requests, normal_requests, server) =
+            spawn_range_server(data.clone(), Default::default()).await;
+        let mut primary =
+            direct_test_route(url.clone(), DownloadRouteSource::Official);
+        primary.supports_range = true;
+        let directory = tempfile::tempdir().unwrap();
+        let semaphore = FetchSemaphore(Semaphore::new(16));
+        for batch in [false, true] {
+            for recovering in [false, true] {
+                let mut request =
+                    DownloadRequest::new(&url, ResourceClass::Modrinth)
+                        .with_integrity(
+                            Integrity::sha1(hash.clone())
+                                .with_size(data.len() as u64),
+                        )
+                        .with_http1_segmented_download(!batch);
+                request.recovering_http1 = recovering;
+                let destination = directory
+                    .path()
+                    .join(format!("small-{batch}-{recovering}"));
+                let part = suffixed_path(&destination, ".part");
+                tokio::fs::write(&part, &data[..64 * 1024]).await.unwrap();
+                let before = requests.load(Ordering::Relaxed);
+                let result = run_native_download_attempts(
+                    request,
+                    &destination,
+                    &semaphore,
+                    None,
+                    vec![primary.clone()],
+                    part.clone(),
+                    None,
+                )
+                .await
+                .unwrap();
+                let count = requests.load(Ordering::Relaxed) - before;
+                if recovering {
+                    assert!(
+                        count > 1,
+                        "slow fallback must split the remaining bytes"
+                    );
+                } else {
+                    assert_eq!(
+                        count, 1,
+                        "healthy small files should use one stream"
+                    );
+                }
+                assert_eq!(result.size, data.len() as u64);
+                assert_eq!(tokio::fs::read(&destination).await.unwrap(), *data);
+                assert!(!part.exists());
+                assert_eq!(semaphore.0.available_permits(), 16);
+            }
+        }
+        for (name, resource, integrity, allow_ranges) in [
+            (
+                "disabled",
+                ResourceClass::Modrinth,
+                Integrity::sha1(hash.clone()).with_size(data.len() as u64),
+                false,
+            ),
+            (
+                "unverified",
+                ResourceClass::Modrinth,
+                Integrity::default().with_size(data.len() as u64),
+                true,
+            ),
+            (
+                "metadata",
+                ResourceClass::Metadata,
+                Integrity::sha1(hash.clone()).with_size(data.len() as u64),
+                true,
+            ),
+        ] {
+            let mut request = DownloadRequest::new(&url, resource)
+                .with_integrity(integrity)
+                .with_segmented_download(allow_ranges);
+            request.recovering_http1 = true;
+            let destination = directory.path().join(name);
+            let before = requests.load(Ordering::Relaxed);
+            run_native_download_attempts(
+                request,
+                &destination,
+                &semaphore,
+                None,
+                vec![primary.clone()],
+                suffixed_path(&destination, ".part"),
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(requests.load(Ordering::Relaxed) - before, 1, "{name}");
+            assert_eq!(tokio::fs::read(&destination).await.unwrap(), *data);
+            assert_eq!(semaphore.0.available_permits(), 16);
+        }
+        assert_eq!(normal_requests.load(Ordering::Relaxed), 3);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn failed_range_recovery_preserves_the_existing_resume_prefix() {
+        let _guard = RANGE_SPLITTING_TEST_LOCK.lock().await;
+        RANGE_SPLITTING_PROTOCOL_FAILURES.lock().clear();
+        RANGE_SPLITTING_SUPPORTED.lock().clear();
+        let data = Arc::new(vec![42; 2 * 1024 * 1024]);
+        let hash = sha1_smol::Sha1::from(&data[..]).hexdigest();
+        let (url, _, _, server) = spawn_range_server(
+            data.clone(),
+            RangeServerBehavior {
+                wrong_content_range: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let mut primary =
+            direct_test_route(url.clone(), DownloadRouteSource::Official);
+        primary.supports_range = true;
+        let directory = tempfile::tempdir().unwrap();
+        let part = directory.path().join("recovery.part");
+        let prefix = &data[..64 * 1024];
+        tokio::fs::write(&part, prefix).await.unwrap();
+        let mut request = DownloadRequest::new(&url, ResourceClass::Modrinth)
+            .with_integrity(Integrity::sha1(hash).with_size(data.len() as u64));
+        request.recovering_http1 = true;
+        let semaphore = FetchSemaphore(Semaphore::new(4));
+        let outcome = try_segmented_download(
+            SegmentedDownloadContext::new(
+                &request,
+                &primary,
+                &[],
+                data.len() as u64,
+                &part,
+                &semaphore,
+                None,
+                &HTTP1_NO_REDIRECT_REQWEST_CLIENT,
+                &HTTP1_DIRECT_REQWEST_CLIENT,
+                1,
+                3,
+                false,
+            ),
+            None,
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            SegmentedDownloadOutcome::FallbackSingle {
+                disable_range: true,
+                ..
+            }
+        ));
+        assert_eq!(tokio::fs::read(&part).await.unwrap(), prefix);
+        assert_eq!(semaphore.0.available_permits(), 4);
         server.abort();
     }
 

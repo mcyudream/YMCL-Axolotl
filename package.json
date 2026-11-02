@@ -51,7 +51,10 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"typescript": "5.9.3"
+			"typescript": "5.9.3",
+			"follow-redirects": "1.16.2",
+			"glob": "14.0.3",
+			"glob>minimatch": "11.0.3"
 		},
 		"patchedDependencies": {
 			"readable-stream@2.3.8": "patches/readable-stream@2.3.8.patch"

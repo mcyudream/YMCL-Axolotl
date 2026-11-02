@@ -698,15 +698,17 @@ pub(crate) async fn censor_support_text(
 async fn minecraft_tokens(
     pool: &sqlx::SqlitePool,
 ) -> crate::Result<Vec<String>> {
-    let rows =
-        sqlx::query("SELECT access_token, refresh_token FROM minecraft_users")
-            .fetch_all(pool)
-            .await?;
-    let mut tokens = Vec::with_capacity(rows.len() * 2);
+    let rows = sqlx::query(
+		"SELECT access_token, refresh_token, yggdrasil_client_token FROM minecraft_users",
+	)
+	.fetch_all(pool)
+	.await?;
+    let mut tokens = Vec::with_capacity(rows.len() * 3);
 
     for row in rows {
         tokens.push(row.try_get("access_token")?);
         tokens.push(row.try_get("refresh_token")?);
+        tokens.push(row.try_get("yggdrasil_client_token")?);
     }
 
     Ok(tokens)
@@ -747,4 +749,62 @@ fn censor_ip_addresses(text: String) -> String {
             }
         })
         .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn yggdrasil_client_tokens_are_censored_in_logs_and_reports() {
+        let directory = tempfile::tempdir().unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO minecraft_users
+			 (account_id, uuid, username, access_token, refresh_token, expires,
+			  account_type, yggdrasil_client_token)
+			 VALUES ('yggdrasil:test', 'test-uuid', 'TestUser',
+			         'ygg-access', 'ygg-refresh', 0, 'yggdrasil', 'ygg-client-secret'),
+			        ('offline:test', 'offline-uuid', 'OfflineUser', '', '', 0,
+			         'offline', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO modrinth_users (id, active, session_id, expires)
+			 VALUES ('test-user', 0, 'modrinth-secret', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = crate::state::test_state(
+            crate::state::DirectoryInfo {
+                settings_dir: directory.path().join("settings"),
+                config_dir: directory.path().join("config"),
+                app_identifier: "test".to_string(),
+            },
+            pool,
+        )
+        .await
+        .unwrap();
+        let text = "ygg-access ygg-refresh ygg-client-secret modrinth-secret 192.0.2.1 2001:db8::1";
+        let expected = "{MINECRAFT_TOKEN} {MINECRAFT_TOKEN} {MINECRAFT_TOKEN} {MODRINTH_ACCESS_TOKEN} ... :::::::";
+
+        assert_eq!(
+            censor_support_text(text.to_string(), &state).await.unwrap(),
+            expected
+        );
+        assert_eq!(
+            crate::install::censor_shared_text(text.to_string(), &state)
+                .await
+                .unwrap(),
+            expected
+        );
+    }
 }

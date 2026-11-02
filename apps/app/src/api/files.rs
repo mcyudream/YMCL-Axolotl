@@ -13,6 +13,43 @@ use theseus::instance::get_full_path;
 
 const STUDIO_FILES_CHANGED_EVENT: &str = "studio-files-changed";
 
+fn safe_extract_relative_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(name);
+    if name.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            !matches!(component, std::path::Component::Normal(_))
+        })
+    {
+        return None;
+    }
+    Some(path.to_path_buf())
+}
+
+#[cfg(test)]
+mod extraction_path_tests {
+    use super::safe_extract_relative_path;
+
+    #[test]
+    fn zip_entries_reject_traversal_before_creating_directories() {
+        for path in [
+            "",
+            "../outside/file",
+            "nested/../../outside",
+            "/outside/file",
+        ] {
+            assert!(
+                safe_extract_relative_path(path).is_none(),
+                "accepted {path:?}"
+            );
+        }
+        assert_eq!(
+            safe_extract_relative_path("config/example.toml").unwrap(),
+            std::path::PathBuf::from("config/example.toml")
+        );
+    }
+}
+
 pub(crate) fn ensure_browsable<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &std::path::Path,
@@ -521,7 +558,10 @@ pub async fn file_extract_zip(
         let mut conflicting_files = Vec::new();
         let canonical_extract = tokio::fs::canonicalize(&extract_dir).await?;
         for (_, name) in &entries {
-            let target = extract_dir.join(name);
+            let Some(relative) = safe_extract_relative_path(name) else {
+                continue;
+            };
+            let target = extract_dir.join(relative);
             if let Some(parent) = target.parent() {
                 let normalized = parent
                     .canonicalize()
@@ -543,7 +583,10 @@ pub async fn file_extract_zip(
     let canonical_extract_dir = tokio::fs::canonicalize(&extract_dir).await?;
     let mut zip_reader = zip_reader;
     for (index, name) in &entries {
-        let target = extract_dir.join(name);
+        let Some(relative) = safe_extract_relative_path(name) else {
+            continue;
+        };
+        let target = extract_dir.join(relative);
 
         if !override_conflicts && target.exists() {
             continue;
