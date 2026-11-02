@@ -120,9 +120,12 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 	assert.equal(cache.with['cache-workspace-crates'], false)
 	assert.equal(cache.with['cache-on-failure'], true)
 	assert.equal(cache.env?.CARGO_PROFILE_RELEASE_LTO, undefined)
-	assert.match(cache.with['save-if'], /refs\/heads\/main/)
+	const defaultBranch =
+		"github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+	assert.ok(cache.with['save-if'].includes(defaultBranch))
 	assert.match(cache.with['save-if'], /refs\/tags\/v/)
-	assert.deepEqual(warm.on.push.branches, ['main'])
+	assert.equal(warm.on.push.branches, undefined)
+	assert.equal(warm.jobs.warm.if, defaultBranch)
 	assert.equal(warm.permissions.contents, 'read')
 	const preflightCheckout = release.jobs.preflight.steps.find((step) =>
 		step.uses?.startsWith('actions/checkout@'),
