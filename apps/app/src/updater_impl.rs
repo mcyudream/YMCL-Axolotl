@@ -15,10 +15,12 @@ use theseus::{
 use tokio::time::Instant;
 use url::Url;
 
-/// Axolotl Update Server 默认地址（兼容回退）。
-const UPDATE_SERVER_LATEST_URL: &str = "https://update.axlmc.org/latest";
-const UPDATE_SERVER_API: &str = "https://update.axlmc.org/api/versions";
-const UPDATE_SERVER_BASE: &str = "https://update.axlmc.org/";
+/// Default YMCL update platform, independent of the signed-in content domain.
+const UPDATE_SERVER_LATEST_URL: &str =
+    "https://www.yudream.online/api/plugins/ymcl-content/v1/update/manifest";
+const UPDATE_SERVER_API: &str =
+    "https://www.yudream.online/api/plugins/ymcl-content/v1/update/versions";
+const UPDATE_SERVER_BASE: &str = "https://www.yudream.online/";
 
 // The updater plugin builds `Update` with no request timeout, so a stalled
 // connection would hang the download forever. Bound the whole download.
@@ -85,7 +87,7 @@ struct AptDebAsset {
 }
 
 /// YMCL 自有更新平台（yda ymcl-content）API base。
-/// 优先级：invoke 参数 > 运行时 env YMCL_UPDATE_BASE_URL > None（Axolotl 回退）。
+/// 优先级：invoke 参数 > 运行时 env > 最近一次更新平台 > YuDream 默认平台。
 fn resolve_update_base(update_base: Option<String>) -> Option<String> {
     if let Some(value) = update_base {
         let trimmed = value.trim().trim_end_matches('/').to_string();
@@ -106,8 +108,9 @@ fn resolve_update_base(update_base: Option<String>) -> Option<String> {
 }
 
 fn remember_update_base(update_base: Option<String>) {
+    let resolved = resolve_update_base(update_base);
     if let Ok(mut guard) = ACTIVE_UPDATE_BASE.lock() {
-        *guard = resolve_update_base(update_base);
+        *guard = resolved;
     }
 }
 

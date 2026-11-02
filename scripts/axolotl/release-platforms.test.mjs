@@ -1,0 +1,254 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { checkReleaseSecrets, releaseSecrets } from './check-release-secrets.mjs'
+import { verifyEmbeddedCurseForgeKey } from './verify-embedded-curseforge-key.mjs'
+import {
+	downloadArtifact,
+	prepareRelease,
+	publishPlatforms,
+	publishPlatform,
+	updatePlatforms,
+} from './publish-ymcl-platforms.mjs'
+
+const version = '1.9.7-beta.10'
+const tag = `v${version}`
+const signature = Buffer.from('test signature').toString('base64')
+const bytes = Buffer.from('test release binary')
+const sha256 = createHash('sha256').update(bytes).digest('hex')
+const artifacts = [
+	['YMCL_universal.app.tar.gz', ['darwin-aarch64', 'darwin-x86_64']],
+	[`YMCL_${version}_amd64.AppImage.tar.gz`, ['linux-x86_64']],
+	[`YMCL_${version}_aarch64.AppImage.tar.gz`, ['linux-aarch64']],
+	[`YMCL_${version}_x64-setup.nsis.zip`, ['windows-x86_64']],
+].map(([filename, targetPlatforms]) => ({
+	filename,
+	targetPlatforms,
+	kind: 'updater',
+	variant: 'tauri',
+	platform: targetPlatforms[0],
+	architecture: filename.includes('universal') ? 'universal' : 'x86_64',
+	signatureFilename: `${filename}.sig`,
+	signature,
+	size: bytes.length,
+	sha256,
+	downloadUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/download/${tag}/${filename}`,
+}))
+const release = {
+	version,
+	channel: 'beta',
+	title: `YMCL ${version}`,
+	notes: 'Release notes.',
+	publishedAt: '1793577600000',
+	forceUpdate: false,
+	externalUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/tag/${tag}`,
+	artifacts,
+}
+
+test('production secrets fail closed without printing secret values', () => {
+	const environment = Object.fromEntries(releaseSecrets.map((name) => [name, 'test-private-value']))
+	assert.doesNotThrow(() => checkReleaseSecrets(environment))
+	for (const name of releaseSecrets) {
+		assert.throws(() => checkReleaseSecrets({ ...environment, [name]: ' \t' }), new RegExp(name))
+	}
+	assert.throws(
+		() => checkReleaseSecrets({ ...environment, CURSEFORGE_API_KEY: 'key\nsecond line' }),
+		/multiline/,
+	)
+})
+
+test('checks the actual binary for the literal embedded key', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-embedded-key-test-'))
+	try {
+		const binary = join(directory, 'YMCL')
+		await writeFile(binary, 'binary\0$2a$10$fake-key\0suffix')
+		await verifyEmbeddedCurseForgeKey(binary, '$2a$10$fake-key')
+		await assert.rejects(verifyEmbeddedCurseForgeKey(binary, 'absent'), /does not contain/)
+		await assert.rejects(verifyEmbeddedCurseForgeKey(binary, '  '), /missing/)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
+
+test('release preparation requires all signed update targets and trusted download paths', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-metadata-test-'))
+	try {
+		for (const artifact of artifacts)
+			await writeFile(join(directory, artifact.signatureFilename), signature)
+		const metadata = {
+			tag_name: tag,
+			published_at: '2026-11-02T00:00:00Z',
+			body: release.notes,
+			html_url: release.externalUrl,
+		}
+		const catalog = { version, artifacts }
+		const prepared = await prepareRelease(catalog, metadata, tag, directory)
+		assert.equal(prepared.artifacts.length, 4)
+		assert.equal(prepared.channel, 'beta')
+		await assert.rejects(
+			prepareRelease(catalog, { ...metadata, draft: true }, tag, directory),
+			/published/,
+		)
+		await assert.rejects(
+			prepareRelease({ ...catalog, artifacts: artifacts.slice(0, 3) }, metadata, tag, directory),
+			/Missing updater target/,
+		)
+		await assert.rejects(
+			prepareRelease(
+				{
+					...catalog,
+					artifacts: [{ ...artifacts[0], downloadUrl: 'https://untrusted.example/file' }],
+				},
+				metadata,
+				tag,
+				directory,
+			),
+			/download origin/,
+		)
+		await assert.rejects(
+			prepareRelease(
+				{ ...catalog, artifacts: [{ ...artifacts[0], signatureFilename: '../private.sig' }] },
+				metadata,
+				tag,
+				directory,
+			),
+			/signature filename/,
+		)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
+
+function platformMock({ corrupt = false } = {}) {
+	const state = new Map()
+	const requests = []
+	let downloads = 0
+	const fetcher = async (url, options = {}) => {
+		if (url.startsWith('https://github.com/')) {
+			downloads++
+			return new Response(bytes)
+		}
+		const { origin, pathname } = new URL(url)
+		requests.push({ origin, pathname, method: options.method, headers: options.headers })
+		let record = state.get(origin)
+		if (pathname.endsWith('/manifest')) {
+			assert.equal(options.headers['X-API-Key'], undefined)
+			assert.equal(record?.enabled, true)
+			const platforms = {}
+			for (const artifact of record.artifacts)
+				for (const target of artifact.targetPlatforms) {
+					platforms[target] = { signature: artifact.signature, url: artifact.downloadUrl }
+				}
+			return Response.json({ version, platforms })
+		}
+		assert.ok(options.headers['X-API-Key'])
+		if (options.method === 'GET') {
+			return record
+				? Response.json({ code: 200, data: record })
+				: Response.json({}, { status: 404 })
+		}
+		if (options.body instanceof FormData) {
+			assert.equal(record.enabled, false)
+			const body = options.body
+			assert.deepEqual(Buffer.from(await body.get('file').arrayBuffer()), bytes)
+			const uploaded = Object.fromEntries(
+				['id', 'kind', 'variant', 'platform', 'architecture', 'filename', 'signature'].map(
+					(name) => [name, body.get(name)],
+				),
+			)
+			uploaded.targetPlatforms = body.get('targetPlatforms').split(',')
+			Object.assign(uploaded, {
+				size: bytes.length,
+				sha256: corrupt ? '0'.repeat(64) : sha256,
+				hostedLocally: true,
+				fileKey: `files/${uploaded.filename}`,
+			})
+			record.artifacts = [
+				...record.artifacts.filter((artifact) => artifact.filename !== uploaded.filename),
+				uploaded,
+			]
+		} else {
+			const body = JSON.parse(options.body)
+			record = { ...record, ...body, artifacts: body.artifacts ?? record?.artifacts ?? [] }
+			state.set(origin, record)
+		}
+		return Response.json({ code: 200, data: record })
+	}
+	return { fetcher, state, requests, downloads: () => downloads }
+}
+
+test('uploads to both sites, shares verified downloads, and safely reuses published artifacts', async () => {
+	const mock = platformMock()
+	const environment = { YUDREAM_API_KEY: 'test-yudream', SWUSTMC_API_KEY: 'test-swustmc' }
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	for (const platform of updatePlatforms) {
+		const stored = mock.state.get(platform.origin)
+		assert.equal(stored.enabled, true)
+		assert.equal(stored.artifacts.length, artifacts.length)
+		assert.ok(
+			stored.artifacts.every(
+				(artifact) => artifact.fileKey && artifact.downloadUrl.startsWith(`${platform.origin}/`),
+			),
+		)
+	}
+	const writes = mock.requests.filter((request) => request.method === 'POST').length
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	assert.equal(mock.requests.filter((request) => request.method === 'POST').length, writes)
+	await assert.rejects(
+		publishPlatforms({ ...release, notes: 'Changed published notes.' }, environment, mock.fetcher),
+		/refusing to overwrite/,
+	)
+})
+
+test('failed integrity verification leaves the staged release disabled', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-upload-failure-test-'))
+	try {
+		const binary = join(directory, 'test-binary')
+		await writeFile(binary, bytes)
+		const mock = platformMock({ corrupt: true })
+		await assert.rejects(
+			publishPlatform(updatePlatforms[0], 'test-key', release, async () => binary, mock.fetcher),
+			/integrity/,
+		)
+		assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, false)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
+
+test('one missing platform credential does not prevent publishing to the other site', async () => {
+	const mock = platformMock()
+	await assert.rejects(
+		publishPlatforms(release, { YUDREAM_API_KEY: 'test-yudream' }, mock.fetcher),
+		/missing SWUSTMC_API_KEY/,
+	)
+	assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, true)
+	assert.equal(mock.state.has(updatePlatforms[1].origin), false)
+})
+
+test('downloads are rejected when the digest or expected size is wrong', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-download-integrity-test-'))
+	try {
+		const file = await downloadArtifact(artifacts[0], directory, async () => new Response(bytes))
+		assert.deepEqual(await readFile(file), bytes)
+		await assert.rejects(
+			downloadArtifact(
+				{ ...artifacts[0], sha256: '0'.repeat(64) },
+				directory,
+				async () => new Response(bytes),
+			),
+			/mismatch/,
+		)
+		await assert.rejects(
+			downloadArtifact({ ...artifacts[0], size: 1 }, directory, async () => new Response(bytes)),
+			/Oversized/,
+		)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})

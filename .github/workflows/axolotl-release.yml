@@ -33,6 +33,14 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
+      - name: Require production build and publish secrets
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          YUDREAM_API_KEY: ${{ secrets.YUDREAM_API_KEY }}
+          SWUSTMC_API_KEY: ${{ secrets.SWUSTMC_API_KEY }}
+        run: node scripts/axolotl/check-release-secrets.mjs
+
       - name: Read pinned Rust version
         id: rust-version
         run: |
@@ -58,6 +66,9 @@ jobs:
           node scripts/axolotl/check-migrations.mjs --release
           node scripts/axolotl/brand-guard.mjs
           node scripts/axolotl/i18n-check.mjs
+          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs
+          rustc --edition=2024 --test packages/app-lib/build_env.rs -o "${RUNNER_TEMP}/curseforge-build-env-tests"
+          "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
 
       - name: Prepare draft release
@@ -114,6 +125,7 @@ jobs:
       # Cargo.toml keeps release LTO off for local/CI builds. Published
       # binaries retain fat LTO; installer variants reuse the compiled binary.
       CARGO_PROFILE_RELEASE_LTO: 'true'
+      AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -161,6 +173,19 @@ jobs:
           includeUpdaterJson: false
           updaterJsonPreferNsis: true
           retryAttempts: 2
+
+      - name: Verify the production binary contains the CurseForge key
+        shell: bash
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          binary="target/release/YMCL"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            binary="${binary}.exe"
+          elif [[ "${RUNNER_OS}" == "macOS" ]]; then
+            binary="target/universal-apple-darwin/release/YMCL"
+          fi
+          node scripts/axolotl/verify-embedded-curseforge-key.mjs "$binary"
 
       - name: Publish Windows distribution variants
         if: runner.os == 'Windows'
@@ -252,6 +277,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js for publishing
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+
       - name: Download updater signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -303,6 +333,17 @@ jobs:
             "${GITHUB_REF_NAME}" \
             release-check/update-server-catalog.json
           node scripts/axolotl/create-update-server-catalog.test.mjs
+
+      - name: Upload and verify release on both YMCL update platforms
+        env:
+          YUDREAM_API_KEY: ${{ secrets.YUDREAM_API_KEY }}
+          SWUSTMC_API_KEY: ${{ secrets.SWUSTMC_API_KEY }}
+        run: |
+          node scripts/axolotl/publish-ymcl-platforms.mjs \
+            release-check/update-server-catalog.json \
+            release-check/release.json \
+            release-check/signatures \
+            "${GITHUB_REF_NAME}"
 
       - name: Notify Update Server to publish release assets
         if: env.UPDATE_SERVER_URL != ''

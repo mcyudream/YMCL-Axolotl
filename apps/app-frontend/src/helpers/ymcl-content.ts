@@ -137,11 +137,17 @@ function readEnv(raw: unknown): string | null {
 }
 
 function isPluginV1Base(base: string) {
-	return /\/api\/plugins\/ymcl-content\/v1$/i.test(base) || /\/api\/plugins\/ymcl-content\/v1\//i.test(`${base}/`)
+	return (
+		/\/api\/plugins\/ymcl-content\/v1$/i.test(base) ||
+		/\/api\/plugins\/ymcl-content\/v1\//i.test(`${base}/`)
+	)
 }
 
 function isUpdateApiBase(base: string) {
-	return /\/api\/plugins\/ymcl-content\/v1\/update$/i.test(base) || /\/api\/plugins\/ymcl-content\/v1\/update\//i.test(`${base}/`)
+	return (
+		/\/api\/plugins\/ymcl-content\/v1\/update$/i.test(base) ||
+		/\/api\/plugins\/ymcl-content\/v1\/update\//i.test(`${base}/`)
+	)
 }
 
 /** 站点 origin 可能已带 /api（yda 网关前缀），拼接时避免 /api/api/... */
@@ -159,7 +165,7 @@ export function getYmclContentBaseUrl(): string | null {
 
 /**
  * YMCL 更新平台 API base（…/api/plugins/ymcl-content/v1/update）。
- * 优先级：VITE_YMCL_UPDATE_URL > VITE_YMCL_CONTENT_URL 推导 > null
+ * 优先级：VITE_YMCL_UPDATE_URL > VITE_YMCL_CONTENT_URL 推导 > YuDream 默认平台
  */
 export function getYmclUpdateApiBase(): string | null {
 	const explicit = readEnv(import.meta.env.VITE_YMCL_UPDATE_URL)
@@ -169,7 +175,7 @@ export function getYmclUpdateApiBase(): string | null {
 		return `${trimTrailingSlash(explicit)}${pluginPrefixForContentBase(explicit)}${UPDATE_SUFFIX}`
 	}
 	const content = getYmclContentBaseUrl()
-	if (!content) return null
+	if (!content) return `https://www.yudream.online${API_PREFIX}${UPDATE_SUFFIX}`
 	if (isUpdateApiBase(content)) return trimTrailingSlash(content)
 	if (isPluginV1Base(content)) return `${trimTrailingSlash(content)}${UPDATE_SUFFIX}`
 	return `${trimTrailingSlash(content)}${pluginPrefixForContentBase(content)}${UPDATE_SUFFIX}`

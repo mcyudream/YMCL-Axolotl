@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::process::{Command, exit};
 use std::{env, fs};
 
+mod build_env;
+
 /// Build-time opt-in to a private launcher data directory. Read by
 /// `theseus::brand::app_data_dir_identifier`, which appends it to the directory
 /// name.
@@ -34,6 +36,8 @@ fn main() {
         println!("cargo::rerun-if-changed=.env");
     }
     println!("cargo::rerun-if-env-changed=CURSEFORGE_API_KEY");
+    println!("cargo::rerun-if-env-changed=AXOLOTL_REQUIRE_CURSEFORGE_API_KEY");
+    println!("cargo::rerun-if-changed=build_env.rs");
     for (name, _) in MODRINTH_ENV_DEFAULTS {
         println!("cargo::rerun-if-env-changed={name}");
     }
@@ -50,14 +54,23 @@ fn main() {
         );
     }
 
-    set_env();
     build_java_jars();
+    set_env();
 }
 
 fn set_env() {
-    let curseforge_api_key = env::var("CURSEFORGE_API_KEY")
-        .ok()
-        .or_else(|| read_dotenv_literal("CURSEFORGE_API_KEY"));
+    let curseforge_api_key = build_env::curseforge_api_key(
+        env::var("CURSEFORGE_API_KEY").ok(),
+        fs::read_to_string(".env").ok().as_deref(),
+    );
+    if env::var("AXOLOTL_REQUIRE_CURSEFORGE_API_KEY").as_deref() == Ok("1")
+        && curseforge_api_key.is_none()
+    {
+        println!(
+            "cargo::error=Published builds require a nonempty CURSEFORGE_API_KEY"
+        );
+        exit(1);
+    }
 
     let dotenv_values: Vec<(String, String)> = dotenvy::dotenv_iter()
         .into_iter()
@@ -95,10 +108,6 @@ fn set_env() {
         println!("cargo::rustc-env={name}={value}");
     }
 
-    if let Some(curseforge_api_key) = curseforge_api_key {
-        println!("cargo::rustc-env=CURSEFORGE_API_KEY={curseforge_api_key}");
-    }
-
     // Lets a local or test build keep its own data directory, so it cannot write
     // the database an installed launcher is using. Releases leave it unset and
     // resolve to the plain identifier.
@@ -129,30 +138,16 @@ fn set_env() {
 
         println!("cargo::rustc-env={DATA_DIR_SUFFIX_VAR}={data_dir_suffix}");
     }
+
+    println!(
+        "cargo::rustc-env=CURSEFORGE_API_KEY={}",
+        curseforge_api_key.unwrap_or_default()
+    );
 }
 
 fn read_dotenv_literal(name: &str) -> Option<String> {
     let contents = fs::read_to_string(".env").ok()?;
-
-    contents.lines().find_map(|line| {
-        let line = line.trim_start().strip_prefix("export ").unwrap_or(line);
-        let (candidate, value) = line.split_once('=')?;
-        if candidate.trim() != name {
-            return None;
-        }
-
-        let value = value.trim();
-        let value = if value.len() >= 2
-            && ((value.starts_with('\'') && value.ends_with('\''))
-                || (value.starts_with('"') && value.ends_with('"')))
-        {
-            &value[1..value.len() - 1]
-        } else {
-            value
-        };
-
-        (!value.is_empty()).then(|| value.to_string())
-    })
+    build_env::dotenv_literal(&contents, name)
 }
 
 fn build_java_jars() {

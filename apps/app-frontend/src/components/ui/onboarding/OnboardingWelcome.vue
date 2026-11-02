@@ -135,10 +135,10 @@ async function toggleFollowSystem() {
 				<div class="onboarding-welcome-logo">
 					<AxolotlLogo icon-only />
 				</div>
-				<div class="onboarding-welcome-wordmark" aria-label="YMCL (YuDream Launcher)">
-					<span class="onboarding-welcome-wordmark-core" data-wordmark="YMCL"> YMCL </span>
-					<span class="onboarding-welcome-wordmark-suffix" data-wordmark="Launcher">
-						Launcher
+				<div class="onboarding-welcome-wordmark" aria-label="YuDream Minecraft Launcher">
+					<span class="onboarding-welcome-wordmark-core" data-wordmark="YuDream"> YuDream </span>
+					<span class="onboarding-welcome-wordmark-suffix" data-wordmark="Minecraft Launcher">
+						Minecraft Launcher
 					</span>
 				</div>
 			</div>
@@ -253,7 +253,8 @@ async function toggleFollowSystem() {
 
 .onboarding-welcome-wordmark {
 	display: flex;
-	align-items: baseline;
+	flex-direction: column;
+	align-items: flex-start;
 	gap: 0.35em;
 	max-width: 0;
 	overflow: hidden;
@@ -283,6 +284,7 @@ async function toggleFollowSystem() {
 
 .onboarding-welcome-wordmark-suffix {
 	color: var(--color-secondary);
+	font-size: 0.5em;
 	font-weight: 650;
 }
 

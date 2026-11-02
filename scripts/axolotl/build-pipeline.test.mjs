@@ -121,6 +121,7 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 	assert.equal(cache.with['cache-on-failure'], true)
 	assert.equal(cache.env?.CARGO_PROFILE_RELEASE_LTO, undefined)
 	assert.match(cache.with['save-if'], /refs\/heads\/main/)
+	assert.match(cache.with['save-if'], /refs\/tags\/v/)
 	assert.deepEqual(warm.on.push.branches, ['main'])
 	assert.equal(warm.permissions.contents, 'read')
 	const preflightCheckout = release.jobs.preflight.steps.find((step) =>
@@ -132,6 +133,42 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 	assert.ok(
 		release.jobs.build.steps.some((step) => step.with?.args?.includes('--locked --timings')),
 	)
+})
+
+test('release refuses missing credentials and verifies the key in each production binary', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const secretGuard = release.jobs.preflight.steps.find((step) =>
+		step.run?.includes('check-release-secrets.mjs'),
+	)
+	for (const name of [
+		'CURSEFORGE_API_KEY',
+		'TAURI_SIGNING_PRIVATE_KEY',
+		'YUDREAM_API_KEY',
+		'SWUSTMC_API_KEY',
+	]) {
+		assert.equal(secretGuard.env[name], `\${{ secrets.${name} }}`)
+	}
+	assert.equal(release.jobs.build.env.AXOLOTL_REQUIRE_CURSEFORGE_API_KEY, '1')
+	const verification = release.jobs.build.steps.find((step) =>
+		step.run?.includes('verify-embedded-curseforge-key.mjs'),
+	)
+	assert.equal(verification.env.CURSEFORGE_API_KEY, '${{ secrets.CURSEFORGE_API_KEY }}')
+	const publish = release.jobs['verify-and-publish'].steps.find((step) =>
+		step.run?.includes('publish-ymcl-platforms.mjs'),
+	)
+	assert.equal(publish.env.YUDREAM_API_KEY, '${{ secrets.YUDREAM_API_KEY }}')
+	assert.equal(publish.env.SWUSTMC_API_KEY, '${{ secrets.SWUSTMC_API_KEY }}')
+})
+
+test('production update defaults consistently use the YuDream platform', async () => {
+	const production = await readFile(join(root, 'apps/app-frontend/.env.production'), 'utf8')
+	const tauri = JSON.parse(await readFile(join(root, 'apps/app/tauri-release.conf.json'), 'utf8'))
+	const updater = await readFile(join(root, 'apps/app/src/updater_impl.rs'), 'utf8')
+	const base = 'https://www.yudream.online/api/plugins/ymcl-content/v1/update'
+	assert.ok(production.includes(`VITE_YMCL_UPDATE_URL=${base}`))
+	assert.equal(tauri.plugins.updater.endpoints[0], `${base}/latest?channel=beta`)
+	assert.ok(updater.includes(`${base}/manifest`))
+	assert.ok(updater.includes(`${base}/versions`))
 })
 
 test('release restores download and resource caches before preparation', async () => {

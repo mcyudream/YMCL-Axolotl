@@ -20,7 +20,7 @@
 		"updater": {
 			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc0MzEzRTMyQURGOThGREQKUldUZGovbXRNajR4ZEdGdDBqUjRWV1J1VGlVdURXbnFHanExazJLZkNtK05QTzFQd2lYWUwxRzgK",
 			"endpoints": [
-				"https://www.swustmc.cn/api/plugins/ymcl-content/v1/update/latest?channel=beta"
+				"https://www.yudream.online/api/plugins/ymcl-content/v1/update/latest?channel=beta"
 			],
 			"windows": {
 				"installMode": "quiet"

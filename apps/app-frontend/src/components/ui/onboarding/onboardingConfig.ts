@@ -392,7 +392,10 @@ export const onboardingMessages = defineMessages({
 			'Open a local .litematic or .schem file, or choose one from an installed instance. The 3D workspace keeps viewing, measurement, layer controls, materials, and local edits together.',
 	},
 	skip: { id: 'app.onboarding.action.skip', defaultMessage: 'Leave the tour' },
-	mascotAlt: { id: 'app.onboarding.mascot-alt', defaultMessage: 'YMCL guide' },
+	mascotAlt: {
+		id: 'app.onboarding.mascot-alt',
+		defaultMessage: 'YuDream Minecraft Launcher guide',
+	},
 })
 
 const step = (

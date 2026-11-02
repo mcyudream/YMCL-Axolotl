@@ -28,6 +28,34 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.7-beta.10',
+		version: '1.9.7-beta.10',
+		publishedAt: '2026-11-02',
+		title: {
+			'en-US': 'YMCL 1.9.7-beta.10',
+			'zh-CN': 'YMCL 1.9.7-beta.10',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed CurseForge content access in production builds by including the required API key.',
+					'zh-CN': '修复生产包缺失 CurseForge API key 导致无法正常访问 CurseForge 内容的问题。',
+				},
+			],
+			changed: [
+				{
+					'en-US': 'Moved the default update platform to www.yudream.online.',
+					'zh-CN': '默认更新平台切换为 www.yudream.online。',
+				},
+				{
+					'en-US': 'Renamed the onboarding wordmark to YuDream Minecraft Launcher.',
+					'zh-CN': '导览名称调整为 YuDream Minecraft Launcher。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.9',
 		version: '1.9.7-beta.9',
 		publishedAt: '2026-10-26',
