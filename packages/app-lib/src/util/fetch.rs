@@ -646,9 +646,20 @@ fn official_fallback_route(routes: &[DownloadRoute]) -> Option<DownloadRoute> {
         .cloned()
 }
 
-fn url_with_base(original: &Url, base: &str, path: &str) -> Option<String> {
+fn url_with_base(
+    original: &Url,
+    base: &str,
+    path: &str,
+    source: DownloadRouteSource,
+) -> Option<String> {
     let mut target = Url::parse(base).ok()?;
-    target.set_path(path);
+    if source == DownloadRouteSource::Gateway {
+        let prefix = target.path().trim_end_matches('/');
+        let target_path = format!("{prefix}/{}", path.trim_start_matches('/'));
+        target.set_path(&target_path);
+    } else {
+        target.set_path(path);
+    }
     target.set_query(original.query());
     target.set_fragment(None);
     Some(target.into())
@@ -701,7 +712,7 @@ pub(crate) fn mirror_routes_for_family(
     let mut routes = Vec::new();
     let push_mirror =
         |routes: &mut Vec<DownloadRoute>, base: &str, path: String| {
-            if let Some(url) = url_with_base(&parsed, base, &path) {
+            if let Some(url) = url_with_base(&parsed, base, &path, source) {
                 routes.push(route(url, source, true, supports_range));
             }
         };
@@ -772,6 +783,21 @@ pub(crate) fn mirror_routes_for_family(
         }
         ("cdn.modrinth.com" | "cdn-alt.modrinth.com", MirrorKind::Mcim)
             if path.starts_with("/data/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        ("cdn.modrinth.com" | "cdn-alt.modrinth.com", MirrorKind::BmclapiCompat)
+            if source == DownloadRouteSource::Gateway
+                && path.starts_with("/data/")
+                && path.contains("/versions/") =>
+        {
+            push_mirror(&mut routes, base, path.to_string());
+        }
+        (
+            "edge.forgecdn.net" | "mediafilez.forgecdn.net" | "media.forgecdn.net",
+            MirrorKind::BmclapiCompat,
+        ) if source == DownloadRouteSource::Gateway
+            && path.starts_with("/files/") =>
         {
             push_mirror(&mut routes, base, path.to_string());
         }
@@ -6666,6 +6692,41 @@ mod tests {
             sources,
             vec![DownloadRouteSource::Mcim, DownloadRouteSource::Official]
         );
+    }
+
+    #[test]
+    fn resource_gateway_preserves_plugin_prefix_without_adding_builtin_mirrors() {
+        let base = "https://admin.example.com/api/plugins/ymcl-adapter/v1/proxy";
+        for url in [
+            "https://cdn.modrinth.com/data/AABBCCDD/versions/IIJJKKLL/mod%2Btest.jar",
+            "https://cdn-alt.modrinth.com/data/AABBCCDD/versions/IIJJKKLL/mod%2Btest.jar",
+            "https://edge.forgecdn.net/files/1234/567/mod.jar",
+            "https://mediafilez.forgecdn.net/files/1234/567/mod.jar",
+            "https://media.forgecdn.net/files/1234/567/mod.jar",
+        ] {
+            let routes = mirror_routes_for_family(
+                url,
+                ResourceClass::Modrinth,
+                MirrorKind::BmclapiCompat,
+                base,
+                DownloadRouteSource::Gateway,
+            );
+            assert_eq!(routes.len(), 1);
+            let path = Url::parse(url).unwrap().path().to_string();
+            assert_eq!(routes[0].url, format!("{base}{path}"));
+            assert!(!routes[0].allow_sensitive_headers);
+            assert!(routes[0].supports_range);
+            assert!(
+                mirror_routes_for_family(
+                    url,
+                    ResourceClass::Modrinth,
+                    MirrorKind::BmclapiCompat,
+                    BMCLAPI_BASE_URL,
+                    DownloadRouteSource::Bmclapi,
+                )
+                .is_empty()
+            );
+        }
     }
 
     #[test]
