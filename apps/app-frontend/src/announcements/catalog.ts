@@ -28,6 +28,50 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.0.0-beta.1',
+		version: '2.0.0-beta.1',
+		publishedAt: '2026-11-02',
+		title: {
+			'en-US': 'YMCL 2.0.0-beta.1',
+			'zh-CN': 'YMCL 2.0.0-beta.1',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Added Modrinth and CurseForge file downloads through resource cache gateways configured by the active domain.',
+					'zh-CN': '新增通过当前域配置的资源缓存网关下载 Modrinth 和 CurseForge 文件的支持。',
+				},
+			],
+			changed: [
+				{
+					'en-US':
+						'Updated GitHub releases to make platform packages available as soon as each platform finishes building.',
+					'zh-CN': 'GitHub 发布页在各平台构建完成后立即提供对应安装包，无需等待其他平台。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed recovery for slow content downloads while preserving data already downloaded.',
+					'zh-CN': '修复部分内容下载缓慢时无法有效恢复的问题，恢复下载时保留已下载的数据。',
+				},
+			],
+			security: [
+				{
+					'en-US':
+						'Fixed archive extraction to reject paths that could write outside the selected destination.',
+					'zh-CN': '修复压缩包路径检查，阻止恶意文件写入解压目标目录之外。',
+				},
+				{
+					'en-US':
+						'Fixed potential exposure of Xbox tokens and third-party login client tokens in logs and diagnostic exports.',
+					'zh-CN': '修复日志和诊断导出中可能泄露 Xbox 令牌与第三方登录客户端令牌的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7-beta.10',
 		version: '1.9.7-beta.10',
 		publishedAt: '2026-11-02',

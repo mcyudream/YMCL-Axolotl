@@ -6790,7 +6790,7 @@ dependencies = [
 
 [[package]]
 name = "theseus"
-version = "1.9.7-beta.10"
+version = "2.0.0-beta.1"
 dependencies = [
  "async-minecraft-ping",
  "async-recursion",
@@ -8713,7 +8713,7 @@ dependencies = [
 
 [[package]]
 name = "ymcl_gui"
-version = "1.9.7-beta.10"
+version = "2.0.0-beta.1"
 dependencies = [
  "ashpd",
  "async_zip",
