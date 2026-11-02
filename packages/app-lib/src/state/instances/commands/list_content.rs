@@ -399,6 +399,39 @@ pub(crate) async fn list_content_by_paths(
     cache_behaviour: Option<CacheBehaviour>,
     state: &State,
 ) -> crate::Result<Vec<ContentItem>> {
+    list_content_by_paths_internal(
+        instance_id,
+        paths,
+        cache_behaviour,
+        false,
+        state,
+    )
+    .await
+}
+
+pub(crate) async fn refresh_content_by_paths(
+    instance_id: &str,
+    paths: &[String],
+    cache_behaviour: Option<CacheBehaviour>,
+    state: &State,
+) -> crate::Result<Vec<ContentItem>> {
+    list_content_by_paths_internal(
+        instance_id,
+        paths,
+        cache_behaviour,
+        true,
+        state,
+    )
+    .await
+}
+
+async fn list_content_by_paths_internal(
+    instance_id: &str,
+    paths: &[String],
+    cache_behaviour: Option<CacheBehaviour>,
+    refresh: bool,
+    state: &State,
+) -> crate::Result<Vec<ContentItem>> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -424,7 +457,7 @@ pub(crate) async fn list_content_by_paths(
         cache_behaviour,
         state,
         ContentFilter::All,
-        false,
+        refresh,
     )
     .await?
     .into_iter()

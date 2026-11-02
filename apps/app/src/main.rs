@@ -526,13 +526,27 @@ async fn toggle_decorations(b: bool, window: tauri::Window) -> api::Result<()> {
 }
 
 #[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
+async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
+    ensure_no_active_backups().await?;
     app.restart();
 }
 
+async fn ensure_no_active_backups() -> Result<(), String> {
+    if State::get_if_initialized().is_some()
+        && theseus::instance::has_active_backup_operations()
+            .await
+            .map_err(|error| error.to_string())?
+    {
+        return Err("Wait for backup operations to finish before closing or restarting the launcher".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
+async fn exit_app(app: tauri::AppHandle) -> Result<(), String> {
+    ensure_no_active_backups().await?;
     app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -877,6 +891,7 @@ fn main() {
         .plugin(api::system_accent::init())
         .plugin(api::seed_map::init())
         .plugin(api::schematic_preview::init())
+        .plugin(api::schematics::init())
         .plugin(api::shortcuts::init())
         .plugin(api::tags::init())
         .plugin(api::telemetry::init())
@@ -935,6 +950,13 @@ fn main() {
             app.run(|app, event| {
                 #[cfg(not(any(feature = "updater", target_os = "macos")))]
                 let _ = app;
+
+                if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                    if tauri::async_runtime::block_on(ensure_no_active_backups()).is_err() {
+                        api.prevent_exit();
+                        return;
+                    }
+                }
 
                 if matches!(&event, tauri::RunEvent::ExitRequested { .. })
                     && let Err(error) = tauri::async_runtime::block_on(

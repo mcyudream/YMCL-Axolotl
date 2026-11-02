@@ -204,10 +204,8 @@ function toggleSortDirection() {
 
 async function deleteInstance() {
 	if (currentDeleteInstance.value) {
-		instanceComponents.value = instanceComponents.value.filter(
-			(x) => x.instance.id !== currentDeleteInstance.value.id,
-		)
-		await remove(currentDeleteInstance.value.id).catch(handleError)
+		await remove(currentDeleteInstance.value.id)
+		instanceComponents.value = instanceComponents.value.filter((x) => x.instance.id !== currentDeleteInstance.value.id)
 	}
 	batchDeleteCount.value = 0
 }
@@ -366,9 +364,10 @@ function openBatchDelete() {
 }
 
 async function batchDeleteInstances() {
-	for (const id of selectedInstanceIds.value) {
+	for (const id of [...selectedInstanceIds.value]) {
+		await remove(id)
 		instanceComponents.value = instanceComponents.value.filter((x) => x.instance.id !== id)
-		await remove(id).catch(handleError)
+		selectedInstanceIds.value.delete(id)
 	}
 	selectedInstanceIds.value.clear()
 	selectMode.value = false
@@ -576,12 +575,14 @@ function onBatchEditApplied() {
 		ref="confirmModal"
 		:symlink-target="currentDeleteInstance?.symlink_target"
 		:count="batchDeleteCount"
-		@delete="batchDeleteCount > 0 ? batchDeleteInstances() : deleteInstance()"
+		:instance-ids="batchDeleteCount > 0 ? [...selectedInstanceIds] : currentDeleteInstance ? [currentDeleteInstance.id] : []"
+		:on-confirm="batchDeleteCount > 0 ? batchDeleteInstances : deleteInstance"
 	/>
 	<ConfirmDeleteInstanceModal
 		ref="batchDeleteConfirmModal"
 		:count="selectedInstanceIds.size"
-		@delete="batchDeleteInstances"
+		:instance-ids="[...selectedInstanceIds]"
+		:on-confirm="batchDeleteInstances"
 	/>
 	<BatchEditGroupsModal
 		ref="batchEditModal"

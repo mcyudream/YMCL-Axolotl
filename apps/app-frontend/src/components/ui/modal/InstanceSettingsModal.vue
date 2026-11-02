@@ -20,6 +20,7 @@ import type { PlatformTag } from '@modrinth/utils'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref, watch } from 'vue'
 
+import BackupSettings from '@/components/ui/instance_settings/BackupSettings.vue'
 import CoreComponentsSettings from '@/components/ui/instance_settings/CoreComponentsSettings.vue'
 import GeneralSettings from '@/components/ui/instance_settings/GeneralSettings.vue'
 import HooksSettings from '@/components/ui/instance_settings/HooksSettings.vue'
@@ -92,6 +93,11 @@ watch(
 )
 
 const tabs = computed<TabbedModalTab[]>(() => [
+	{
+		name: defineMessage({ id: 'instance.settings.tabs.backups', defaultMessage: 'Backups' }),
+		icon: FileArchiveIcon,
+		content: BackupSettings,
+	},
 	{
 		name: defineMessage({
 			id: 'instance.settings.tabs.general',

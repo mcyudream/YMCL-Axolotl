@@ -82,6 +82,11 @@ async fn run_with_extra_launch_args_inner(
     extra_launch_args: Option<Vec<String>>,
     gc_intent: Option<GcLaunchIntent>,
 ) -> crate::Result<(ProcessMetadata, Option<GcLaunchReport>)> {
+    if super::has_active_instance_operation(instance_id) {
+        return Err(crate::ErrorKind::InputError("Wait for the active backup operation to finish before launching this instance".to_string()).into());
+    }
+    let _maintenance_guard =
+        super::lock_instance_maintenance(instance_id).await;
     let state = State::get().await?;
     let launch_preparation_timeout =
         crate::state::instances::commands::get_instance_launch_context(
@@ -151,6 +156,11 @@ async fn run_credentials(
     gc_intent: Option<GcLaunchIntent>,
     launch_preparation_timeout: u64,
 ) -> crate::Result<(ProcessMetadata, Option<GcLaunchReport>)> {
+    if super::has_active_instance_operation(instance_id) {
+        return Err(crate::ErrorKind::InputError("Wait for the active backup operation to finish before launching this instance".to_string()).into());
+    }
+    let _maintenance_guard =
+        super::lock_instance_maintenance(instance_id).await;
     let state = State::get().await?;
     if let Err(error) =
         crate::api::instance::sync_game_options_before_launch(instance_id).await

@@ -72,6 +72,7 @@ pub mod download;
 pub mod jvm_args;
 pub mod language;
 pub mod local_version;
+pub(crate) mod multimc;
 pub mod optifine;
 pub mod quick_play_version;
 
@@ -1268,24 +1269,35 @@ async fn install_minecraft_with_local_source(
             .await?;
     }
 
-    let mut loader_version = get_loader_version_from_profile(
+    let mmc_profile = multimc::MultiMcProfile::load(
+        &instance_path,
         &content_set.game_version,
         content_set.loader,
         content_set.loader_version.as_deref(),
     )
     .await?;
+    let metadata_loader =
+        mmc_profile.as_ref().map_or(content_set.loader, |profile| {
+            profile.metadata_loader(content_set.loader)
+        });
+    let mut loader_version = get_loader_version_from_profile(
+        &content_set.game_version,
+        metadata_loader,
+        content_set.loader_version.as_deref(),
+    )
+    .await?;
 
     // If no loader version is selected, try to select the stable version!
-    if content_set.loader != ModLoader::Vanilla && loader_version.is_none() {
+    if metadata_loader != ModLoader::Vanilla && loader_version.is_none() {
         let fallback = missing_loader_version_fallback(
-            content_set.loader,
+            metadata_loader,
             &content_set.game_version,
             content_set.loader_version.as_deref(),
         )
         .map_err(crate::ErrorKind::LauncherError)?;
         loader_version = get_loader_version_from_profile(
             &content_set.game_version,
-            content_set.loader,
+            metadata_loader,
             Some(fallback),
         )
         .await?;
@@ -1311,13 +1323,45 @@ async fn install_minecraft_with_local_source(
     let mut version_info = download::download_version_info(
         &state,
         version,
-        content_set.loader,
+        metadata_loader,
         loader_version.as_ref(),
         Some(repairing),
         loading_bar.as_ref(),
         reporter.as_ref(),
     )
     .await?;
+
+    if let Some(profile) = &mmc_profile {
+        let vanilla = if profile.replaces_minecraft()
+            && metadata_loader != ModLoader::Vanilla
+        {
+            Some(
+                download::download_version_info(
+                    &state,
+                    version,
+                    ModLoader::Vanilla,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        profile
+            .apply(
+                &mut version_info,
+                vanilla.as_ref(),
+                &state.directories.libraries_dir(),
+            )
+            .await?;
+    }
+    let version_jar =
+        mmc_profile.as_ref().map_or(version_jar.clone(), |profile| {
+            profile.cache_key(&version_jar)
+        });
 
     let mut key = required_java_major(&version_info);
     let mip_java = mip_java_floor(&instance_path).await;
@@ -1455,10 +1499,27 @@ async fn install_minecraft_with_local_source(
         .await?;
     }
 
-    let client_path = state
+    let mut client_path = state
         .directories
         .version_dir(&version_jar)
         .join(format!("{version_jar}.jar"));
+
+    if let Some(profile) = &mmc_profile {
+        client_path = profile
+            .prepare_runtime(
+                &state,
+                &client_path,
+                java_version
+                    .as_ref()
+                    .map(|java| java.architecture.as_str())
+                    .unwrap_or(std::env::consts::ARCH),
+                minecraft_updated,
+                false,
+            )
+            .await?
+            .assemble(&client_path, &instance_path)
+            .await?;
+    }
 
     let Some(java_version) = java_version else {
         if has_client_processors(version_info.processors.as_deref()) {
@@ -2080,6 +2141,7 @@ pub async fn launch_minecraft(
 
     let cache_behaviour = offline_mode.then_some(CacheBehaviour::CacheOnly);
     let mut linked_libraries = None;
+    let mut mmc_profile = None;
 
     // PCL/PCL-CE expose per-instance launch preferences (Java, memory, custom
     // arguments) in their own config files; load them once for this launch.
@@ -2201,16 +2263,27 @@ pub async fn launch_minecraft(
                 .position(|x| x.id == "22w16a")
                 .unwrap_or(0);
 
+        mmc_profile = multimc::MultiMcProfile::load(
+            &instance_path,
+            &content_set.game_version,
+            content_set.loader,
+            content_set.loader_version.as_deref(),
+        )
+        .await?;
+        let metadata_loader =
+            mmc_profile.as_ref().map_or(content_set.loader, |profile| {
+                profile.metadata_loader(content_set.loader)
+            });
         let loader_version = if offline_mode {
             if let Some(loader_version) = installed_offline_loader_version(
-                content_set.loader,
+                metadata_loader,
                 content_set.loader_version.as_deref(),
             ) {
                 Some(loader_version)
             } else {
                 get_loader_version_from_profile_with_cache(
                     &content_set.game_version,
-                    content_set.loader,
+                    metadata_loader,
                     content_set.loader_version.as_deref(),
                     cache_behaviour,
                 )
@@ -2219,15 +2292,20 @@ pub async fn launch_minecraft(
         } else {
             get_loader_version_from_profile_with_cache(
                 &content_set.game_version,
-                content_set.loader,
+                metadata_loader,
                 content_set.loader_version.as_deref(),
                 cache_behaviour,
             )
             .await?
         };
 
-        if content_set.loader != ModLoader::Vanilla && loader_version.is_none()
-        {
+        if metadata_loader != ModLoader::Vanilla && loader_version.is_none() {
+            missing_loader_version_fallback(
+                metadata_loader,
+                &content_set.game_version,
+                content_set.loader_version.as_deref(),
+            )
+            .map_err(crate::ErrorKind::LauncherError)?;
             return Err(crate::ErrorKind::LauncherError(format!(
                 "No loader version selected for {}",
                 content_set.loader.as_str()
@@ -2244,7 +2322,7 @@ pub async fn launch_minecraft(
             download::load_local_version_info(
                 &state,
                 version,
-                content_set.loader,
+                metadata_loader,
                 loader_version.as_ref(),
             )
             .await?
@@ -2252,7 +2330,7 @@ pub async fn launch_minecraft(
             download::download_version_info(
                 &state,
                 version,
-                content_set.loader,
+                metadata_loader,
                 loader_version.as_ref(),
                 None,
                 None,
@@ -2271,7 +2349,7 @@ pub async fn launch_minecraft(
                 version_info = download::download_version_info(
                     &state,
                     version,
-                    content_set.loader,
+                    metadata_loader,
                     loader_version.as_ref(),
                     Some(true),
                     None,
@@ -2280,6 +2358,46 @@ pub async fn launch_minecraft(
                 .await?;
             }
         }
+
+        if let Some(profile) = &mmc_profile {
+            let vanilla = if profile.replaces_minecraft()
+                && metadata_loader != ModLoader::Vanilla
+            {
+                Some(if offline_mode {
+                    download::load_local_version_info(
+                        &state,
+                        version,
+                        ModLoader::Vanilla,
+                        None,
+                    )
+                    .await?
+                } else {
+                    download::download_version_info(
+                        &state,
+                        version,
+                        ModLoader::Vanilla,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?
+                })
+            } else {
+                None
+            };
+            profile
+                .apply(
+                    &mut version_info,
+                    vanilla.as_ref(),
+                    &state.directories.libraries_dir(),
+                )
+                .await?;
+        }
+        let version_jar =
+            mmc_profile.as_ref().map_or(version_jar.clone(), |profile| {
+                profile.cache_key(&version_jar)
+            });
 
         let quick_play_version =
             QuickPlayVersion::find_version(version_index, &minecraft.versions);
@@ -2494,10 +2612,23 @@ pub async fn launch_minecraft(
         // The game jar lives inside the linked installation.
         direct.client_jar(&version_jar)
     } else {
-        let vanilla_client_path = state
+        let mut vanilla_client_path = state
             .directories
             .version_dir(&version_jar)
             .join(format!("{version_jar}.jar"));
+        if let Some(profile) = &mmc_profile {
+            vanilla_client_path = profile
+                .prepare_runtime(
+                    &state,
+                    &vanilla_client_path,
+                    &java_version.architecture,
+                    minecraft_updated,
+                    offline_mode,
+                )
+                .await?
+                .assemble(&vanilla_client_path, &instance_path)
+                .await?;
+        }
         match crate::api::instance::assemble_for_launch(
             &instance_path,
             &content_set.game_version,
@@ -2842,7 +2973,8 @@ pub async fn launch_minecraft(
         && (!mc_set_options.is_empty()
             || offline_skin_pack.enabled_pack_id.is_some()
             || options_existed
-            || !settings.locale.is_empty())
+            || !settings.locale.is_empty()
+            || !settings.default_game_language.is_empty())
     {
         let (mut options_string, input_encoding) = if options_existed {
             io::read_any_encoding_to_string(&options_path).await?
@@ -2865,6 +2997,7 @@ pub async fn launch_minecraft(
         }
 
         let language_options = language::game_language_options(
+            &settings.default_game_language,
             &settings.locale,
             launch_release_time,
             &options_string,

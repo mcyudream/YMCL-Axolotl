@@ -6,6 +6,7 @@ export interface BrowseProjectTabLabels {
 	maps: string
 	shaders: string
 	servers: string
+	schematics: string
 	favorites: string
 }
 
@@ -21,6 +22,7 @@ export interface BrowseProjectTabOptions {
 	mods?: boolean
 	datapacks?: boolean
 	servers?: boolean
+	schematics?: boolean
 	favorites?: boolean
 }
 
@@ -76,6 +78,7 @@ export function createBrowseProjectTabs(
 		},
 		{ label: labels.maps, href: `/browse/world${suffix}` },
 		{ label: labels.shaders, href: `/browse/shader${suffix}` },
+		{ label: labels.schematics, href: `/browse/schematic${suffix}`, shown: options.schematics ?? true, onboardingId: 'browse-schematics-tab' },
 		{
 			label: labels.servers,
 			href: `/browse/server${suffix}`,

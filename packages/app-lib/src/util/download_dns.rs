@@ -216,6 +216,13 @@ impl DownloadDnsResolver {
         let _ = self.refresh(host).await;
     }
 
+    pub async fn resolve_host(
+        &self,
+        host: &str,
+    ) -> std::io::Result<Vec<IpAddr>> {
+        self.refresh(host).await
+    }
+
     #[cfg(test)]
     fn set_test_addresses(&self, host: &str, addresses: Vec<SocketAddr>) {
         self.test_addresses

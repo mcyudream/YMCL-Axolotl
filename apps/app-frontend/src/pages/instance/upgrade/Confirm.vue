@@ -489,7 +489,7 @@ const strategyLabel = computed(
 
 const contentDataQuery = useQuery({
 	queryKey: computed(() => ['instance-upgrade', 'content-data', flow.instanceId.value]),
-	queryFn: () => loadInstanceContentData(flow.instanceId.value),
+	queryFn: ({ signal }) => loadInstanceContentData(flow.instanceId.value, undefined, undefined, { signal }),
 	staleTime: Number.POSITIVE_INFINITY,
 })
 const snapshotByContentId = computed(() => {

@@ -6,6 +6,7 @@ import {
 	LogInIcon,
 	PlusIcon,
 	RotateCounterClockwiseIcon,
+	SearchIcon,
 	SpinnerIcon,
 } from '@modrinth/assets'
 import {
@@ -30,6 +31,7 @@ import { onBeforeRouteLeave, useRouter } from 'vue-router'
 
 import type AccountsCard from '@/components/ui/AccountsCard.vue'
 import EditSkinModal from '@/components/ui/skin/EditSkinModal.vue'
+import PlayerSkinModal from '@/components/ui/skin/PlayerSkinModal.vue'
 import VirtualSkinSectionList from '@/components/ui/skin/VirtualSkinSectionList.vue'
 import DomainWardrobe from '@/components/ymcl/DomainWardrobe.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
@@ -68,6 +70,10 @@ type VirtualSkinSectionListExpose = {
 const PENDING_SKIN_REFRESH_DELAY_MS = 11_000
 const DEFAULT_SKIN_SECTION_SORT_ORDER = ['Default skins']
 const messages = defineMessages({
+	findPlayerSkin: {
+		id: 'app.skins.player.title',
+		defaultMessage: 'Find player skin',
+	},
 	skinSelectorTitle: {
 		id: 'app.skins.title',
 		defaultMessage: 'Skin selector',
@@ -211,6 +217,7 @@ const messages = defineMessages({
 })
 
 const editSkinModal = useTemplateRef('editSkinModal')
+const playerSkinModal = useTemplateRef('playerSkinModal')
 const addSkinFileInput = useTemplateRef<HTMLInputElement>('addSkinFileInput')
 const skinSectionList = useTemplateRef<VirtualSkinSectionListExpose>('skinSectionList')
 const skinPreviewArea = useTemplateRef<HTMLElement>('skinPreviewArea')
@@ -1036,6 +1043,12 @@ await loadSkins()
 </script>
 
 <template>
+	<PlayerSkinModal
+		ref="playerSkinModal"
+		:read-only="isSkinManagementReadOnly"
+		:saved-skins="savedSkins"
+		@saved="onSkinSaved"
+	/>
 	<EditSkinModal
 		ref="editSkinModal"
 		:capes="capes"
@@ -1174,12 +1187,20 @@ await loadSkins()
 						}
 					"
 				/>
-				<ButtonStyled color="brand">
-					<button @click="router.push('/lab/skin-editor')">
-						<PlusIcon />
-						{{ formatMessage(messages.createSkinButton) }}
-					</button>
-				</ButtonStyled>
+				<div class="flex flex-wrap gap-2">
+					<ButtonStyled>
+						<button data-onboarding-id="player-skin-lookup" @click="playerSkinModal?.show($event)">
+							<SearchIcon />
+							{{ formatMessage(messages.findPlayerSkin) }}
+						</button>
+					</ButtonStyled>
+					<ButtonStyled color="brand">
+						<button @click="router.push('/lab/skin-editor')">
+							<PlusIcon />
+							{{ formatMessage(messages.createSkinButton) }}
+						</button>
+					</ButtonStyled>
+				</div>
 			</div>
 			<VirtualSkinSectionList
 				ref="skinSectionList"

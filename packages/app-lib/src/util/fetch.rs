@@ -1142,7 +1142,7 @@ pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {
     .any(|marker| chain.contains(marker))
 }
 
-fn reqwest_client_builder() -> reqwest::ClientBuilder {
+pub(crate) fn reqwest_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(FILE_TRANSFER_CONNECT_TIMEOUT)
         .read_timeout(FILE_TRANSFER_READ_TIMEOUT)

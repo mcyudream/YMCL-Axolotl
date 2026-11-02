@@ -114,7 +114,7 @@ export const onboardingMessages = defineMessages({
 	skinsPageTitle: { id: 'app.onboarding.skins-page.title', defaultMessage: 'Your skin drawer' },
 	skinsPageDescription: {
 		id: 'app.onboarding.skins-page.description',
-		defaultMessage: 'Add, preview, sort, and apply skins here. No pressure to sign in just yet.',
+		defaultMessage: 'Add, preview, sort, and apply skins here. Import a skin using a player name or UUID, or edit it with automatic draft recovery.',
 	},
 	accountTitle: {
 		id: 'app.onboarding.account.title',
@@ -194,7 +194,7 @@ export const onboardingMessages = defineMessages({
 	defaultsDescription: {
 		id: 'app.onboarding.defaults.description',
 		defaultMessage:
-			'New instances inherit these choices, so you do not have to repeat the homework.',
+			'Choose launch defaults and the default Minecraft language for new instances.',
 	},
 	resourcesTitle: {
 		id: 'app.onboarding.resources.title',
@@ -311,7 +311,7 @@ export const onboardingMessages = defineMessages({
 	},
 	instanceTabsDescription: {
 		id: 'app.onboarding.instance-tabs.description',
-		defaultMessage: 'Use these tabs for content, files, screenshots, worlds, and logs. Tidy chaos.',
+		defaultMessage: 'Content appears as the background scan progresses. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP.',
 	},
 	labTitle: {
 		id: 'app.onboarding.lab.title',
@@ -389,8 +389,21 @@ export const onboardingMessages = defineMessages({
 	labSchematicDescription: {
 		id: 'app.onboarding.lab-schematic.description',
 		defaultMessage:
-			'Open a local .litematic or .schem file, or choose one from an installed instance. The 3D workspace keeps viewing, measurement, layer controls, materials, and local edits together.',
+			'Open a local or installed .litematic or .schem file, or preview one from Discover. The workspace includes layers, measurement, materials, and local editing.',
 	},
+	blueprintsTitle: { id: 'app.onboarding.schematics.title', defaultMessage: 'Find a build to try' },
+	blueprintsDescription: { id: 'app.onboarding.schematics.description', defaultMessage: 'Browse schematics from Reden and BuildSchematics. Open a project to preview a supported file or install it into an instance.' },
+	openSchematics: { id: 'app.onboarding.action.open-schematics', defaultMessage: 'Open Schematics to continue' },
+	bannerTitle: { id: 'app.onboarding.banner.title', defaultMessage: 'Design a banner' },
+	bannerDescription: { id: 'app.onboarding.banner.description', defaultMessage: 'Choose colors, arrange pattern layers, and export commands or pattern data. Designs are saved locally.' },
+	openBanner: { id: 'app.onboarding.action.open-banner', defaultMessage: 'Open Banner designer to continue' },
+	commandTitle: { id: 'app.onboarding.command.title', defaultMessage: 'Build Minecraft commands' },
+	commandDescription: { id: 'app.onboarding.command.description', defaultMessage: 'Choose a game version and command, fill its arguments, then copy the result or save a preset.' },
+	openCommand: { id: 'app.onboarding.action.open-command', defaultMessage: 'Open Command generator to continue' },
+	networkTitle: { id: 'app.onboarding.network.title', defaultMessage: 'Diagnose a connection' },
+	networkDescription: { id: 'app.onboarding.network.description', defaultMessage: 'Test service connectivity, DNS, peer IP, response time, and a short download sample. Copy the report when asking for help.' },
+	backupsTitle: { id: 'app.onboarding.backups.title', defaultMessage: 'Keep instance snapshots' },
+	backupsDescription: { id: 'app.onboarding.backups.description', defaultMessage: 'Enable incremental backups in each instance’s settings. This page shows shared storage usage and lets you move the repository.' },
 	skip: { id: 'app.onboarding.action.skip', defaultMessage: 'Leave the tour' },
 	mascotAlt: {
 		id: 'app.onboarding.mascot-alt',
@@ -458,6 +471,8 @@ const settingsTourSteps: Array<{
 		title: onboardingMessages.resourcesTitle,
 		description: onboardingMessages.resourcesDescription,
 	},
+	{ id: 'settings-network', targetId: 'settings-tab-network', title: onboardingMessages.networkTitle, description: onboardingMessages.networkDescription },
+	{ id: 'settings-backups', targetId: 'settings-tab-storage-backups', title: onboardingMessages.backupsTitle, description: onboardingMessages.backupsDescription },
 ]
 
 export const onboardingTours: Record<OnboardingMode, OnboardingStep[]> = {
@@ -506,6 +521,8 @@ export const onboardingTours: Record<OnboardingMode, OnboardingStep[]> = {
 			onboardingMessages.browseTitle,
 			onboardingMessages.browseDescription,
 		),
+		step('schematics-navigation', 'navigate', copy(onboardingMessages.blueprintsTitle, onboardingMessages.blueprintsDescription, onboardingMessages.openSchematics), control('browse-schematics-tab', '/browse/schematic')),
+		inspect('schematics-content', 'browse-schematics-content', onboardingMessages.blueprintsTitle, onboardingMessages.blueprintsDescription),
 		step(
 			'discover-favorites-navigation',
 			'navigate',
@@ -648,6 +665,12 @@ export const onboardingTours: Record<OnboardingMode, OnboardingStep[]> = {
 			onboardingMessages.labRecipeGeneratorTitle,
 			onboardingMessages.labRecipeGeneratorDescription,
 		),
+		step('lab-return-banner', 'navigate', copy(onboardingMessages.bannerTitle, onboardingMessages.bannerDescription, onboardingMessages.returnToLab), control('nav-lab', '/lab')),
+		step('lab-banner-navigation', 'navigate', copy(onboardingMessages.bannerTitle, onboardingMessages.bannerDescription, onboardingMessages.openBanner), control('lab-banner-designer-card', '/lab/banner-designer')),
+		inspect('lab-banner-workspace', 'banner-designer-workspace', onboardingMessages.bannerTitle, onboardingMessages.bannerDescription),
+		step('lab-return-command', 'navigate', copy(onboardingMessages.commandTitle, onboardingMessages.commandDescription, onboardingMessages.returnToLab), control('nav-lab', '/lab')),
+		step('lab-command-navigation', 'navigate', copy(onboardingMessages.commandTitle, onboardingMessages.commandDescription, onboardingMessages.openCommand), control('lab-command-generator-card', '/lab/command-generator')),
+		inspect('lab-command-workspace', 'command-generator-workspace', onboardingMessages.commandTitle, onboardingMessages.commandDescription),
 		step(
 			'downloads-navigation',
 			'navigate',

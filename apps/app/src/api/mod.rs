@@ -137,3 +137,5 @@ impl_serialize! {
     Http,
     SearchCancelled,
 }
+
+pub mod schematics;

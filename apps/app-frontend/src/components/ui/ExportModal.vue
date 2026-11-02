@@ -3,6 +3,7 @@ import { FolderOpenIcon, XIcon } from '@modrinth/assets'
 import {
 	ButtonStyled,
 	commonMessages,
+	Combobox,
 	defineMessages,
 	FileTreeSelect,
 	injectNotificationManager,
@@ -14,7 +15,7 @@ import {
 import { join } from '@tauri-apps/api/path'
 import { save } from '@tauri-apps/plugin-dialog'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
-import { ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref } from 'vue'
 
 import { PackageIcon } from '@/assets/icons'
 import {
@@ -29,6 +30,13 @@ const popupNotificationManager = injectPopupNotificationManager()
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
+	filesError: { id: 'app.export-modal.files-error', defaultMessage: 'Could not read the instance files.' },
+	retry: { id: 'app.export-modal.retry', defaultMessage: 'Retry' },
+	format: { id: 'app.export-modal.format', defaultMessage: 'Package format' },
+	modrinth: { id: 'app.export-modal.format-modrinth', defaultMessage: 'Modrinth (.mrpack)' },
+	curseforge: { id: 'app.export-modal.format-curseforge', defaultMessage: 'CurseForge (.zip)' },
+	generic: { id: 'app.export-modal.format-generic', defaultMessage: 'Generic ZIP (.zip)' },
+	genericDescription: { id: 'app.export-modal.generic-description', defaultMessage: 'Contains the selected files. The recipient configures Minecraft and the mod loader.' },
 	header: { id: 'app.export-modal.header', defaultMessage: 'Export modpack' },
 	modpackNameLabel: { id: 'app.export-modal.modpack-name-label', defaultMessage: 'Modpack name' },
 	modpackNamePlaceholder: {
@@ -69,11 +77,15 @@ defineExpose({
 	show: () => {
 		resetExportState()
 		exportModal.value.show()
-		void initFiles().catch(handleError)
+		void initFiles()
 	},
 })
 
 const exportModal = ref(null)
+const format = ref('modrinth')
+const exporting = ref(false)
+const filesLoading = ref(false)
+const filesError = ref(false)
 const nameInput = ref(props.instance.name)
 const exportDescription = ref('')
 const versionInput = ref('1.0.0')
@@ -85,65 +97,66 @@ const instanceRoot = ref('')
 const loadedDirectories = ref(new Set())
 
 async function initFiles() {
+	filesLoading.value = true
+	filesError.value = false
 	const loadId = ++filesLoadId.value
-	const [filePaths, root] = await Promise.all([
-		get_pack_export_candidates(props.instance.id),
-		get_full_path(props.instance.id),
-	])
-	if (loadId !== filesLoadId.value) return
-
-	instanceRoot.value = root
-	const exportCandidates = await Promise.all(
-		filePaths.map((path) => buildExportCandidateItem(root, path)),
-	)
-	if (loadId !== filesLoadId.value) return
-
-	files.value = exportCandidates
-	selectedFilePaths.value = files.value
-		.filter((file) => !file.disabled && isDefaultSelectedExportCandidate(file.path))
-		.map((file) => file.path)
+	const instanceId = props.instance.id
+	try {
+		const [filePaths, root] = await Promise.all([
+			get_pack_export_candidates(instanceId),
+			get_full_path(instanceId),
+		])
+		const exportCandidates = await Promise.all(filePaths.map((path) => buildExportCandidateItem(root, path)))
+		if (loadId !== filesLoadId.value || instanceId !== props.instance.id) return
+		instanceRoot.value = root
+		files.value = exportCandidates
+		selectedFilePaths.value = files.value
+			.filter((file) => !file.disabled && isDefaultSelectedExportCandidate(file.path))
+			.map((file) => file.path)
+	} catch (error) {
+		if (loadId === filesLoadId.value) filesError.value = true
+	} finally {
+		if (loadId === filesLoadId.value) filesLoading.value = false
+	}
 }
 
 const exportPack = async () => {
-	const outputPath = await save({
-		defaultPath: `${nameInput.value} ${versionInput.value}.mrpack`,
-		filters: [
-			{
-				name: 'Modrinth Modpack',
-				extensions: ['mrpack'],
-			},
-		],
-	})
-
-	if (outputPath) {
+	if (exporting.value || filesLoading.value || filesError.value) return
+	exporting.value = true
+	try {
+		const extension = format.value === 'modrinth' ? 'mrpack' : 'zip'
+		const outputPath = await save({
+			defaultPath: `${nameInput.value} ${versionInput.value}.${extension}`,
+			filters: [{ name: formatMessage(messages[format.value]), extensions: [extension] }],
+		})
+		if (!outputPath) return
+		await export_instance_mrpack(
+			props.instance.id,
+			outputPath,
+			selectedFilePaths.value,
+			versionInput.value,
+			exportDescription.value,
+			nameInput.value,
+			format.value,
+		)
+		exporting.value = false
+		await nextTick()
 		exportModal.value.hide()
-
-		try {
-			await export_instance_mrpack(
-				props.instance.id,
-				outputPath,
-				selectedFilePaths.value,
-				versionInput.value,
-				exportDescription.value,
-				nameInput.value,
-			)
-
-			const fileName = outputPath.split(/[\\/]/).pop() ?? outputPath
-			popupNotificationManager.addPopupNotification({
-				title: formatMessage(messages.exportComplete),
-				text: formatMessage(messages.exportCompleteDescription, { name: fileName }),
-				type: 'success',
-				buttons: [
-					{
-						label: formatMessage(commonMessages.openInFolderButton),
-						icon: FolderOpenIcon,
-						action: () => highlightInFolder(outputPath).catch(handleError),
-					},
-				],
-			})
-		} catch (error) {
-			handleError(error)
-		}
+		const fileName = outputPath.split(/[\\/]/).pop() ?? outputPath
+		popupNotificationManager.addPopupNotification({
+			title: formatMessage(messages.exportComplete),
+			text: formatMessage(messages.exportCompleteDescription, { name: fileName }),
+			type: 'success',
+			buttons: [{
+				label: formatMessage(commonMessages.openInFolderButton),
+				icon: FolderOpenIcon,
+				action: () => highlightInFolder(outputPath).catch(handleError),
+			}],
+		})
+	} catch (error) {
+		handleError(error)
+	} finally {
+		exporting.value = false
 	}
 }
 
@@ -156,7 +169,10 @@ function resetExportState() {
 	fileTreeKey.value += 1
 	instanceRoot.value = ''
 	loadedDirectories.value = new Set()
+	filesError.value = false
 }
+
+onBeforeUnmount(() => { filesLoadId.value++ })
 
 async function loadExportDirectory(path) {
 	if (!path || !instanceRoot.value || loadedDirectories.value.has(path)) return
@@ -268,10 +284,17 @@ function isExportCandidateDisabled(path) {
 		ref="exportModal"
 		:header="formatMessage(messages.header)"
 		scrollable
+		:disable-close="exporting"
+		@hide="filesLoadId++"
 		width="46rem"
 		max-width="calc(100vw - 2rem)"
 	>
-		<div class="flex flex-col gap-4">
+		<fieldset :disabled="exporting" :inert="exporting" class="m-0 flex min-w-0 flex-col gap-4 border-0 p-0" data-onboarding-id="pack-export-formats">
+			<label class="flex flex-col gap-2 font-semibold text-contrast">
+				{{ formatMessage(messages.format) }}
+				<Combobox v-model="format" :disabled="exporting" :options="['modrinth', 'curseforge', 'generic'].map(value => ({ value, label: formatMessage(messages[value]) }))" />
+			</label>
+			<p v-if="format === 'generic'" class="m-0 text-sm text-secondary">{{ formatMessage(messages.genericDescription) }}</p>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="labeled_input w-full">
 					<p class="text-contrast font-semibold">{{ formatMessage(messages.modpackNameLabel) }}</p>
@@ -307,24 +330,28 @@ function isExportCandidateDisabled(path) {
 					wrapper-class="w-full"
 				/>
 			</div>
-			<FileTreeSelect
+			<div v-if="filesError" role="alert" class="flex items-center gap-3">
+				<span>{{ formatMessage(messages.filesError) }}</span>
+				<ButtonStyled><button type="button" @click="initFiles">{{ formatMessage(messages.retry) }}</button></ButtonStyled>
+			</div>
+			<FileTreeSelect v-else
 				:key="fileTreeKey"
 				v-model="selectedFilePaths"
 				class="min-w-0"
 				:items="files"
 				@navigate="loadExportDirectory"
 			/>
-		</div>
+		</fieldset>
 		<template #actions>
 			<div class="flex items-center justify-end gap-2">
 				<ButtonStyled type="outlined">
-					<button @click="exportModal.hide">
+					<button :disabled="exporting" @click="exportModal.hide">
 						<XIcon />
 						{{ formatMessage(commonMessages.cancelButton) }}
 					</button>
 				</ButtonStyled>
 				<ButtonStyled color="brand">
-					<button @click="exportPack">
+					<button :disabled="exporting || filesLoading || filesError || !nameInput.trim() || !versionInput.trim()" @click="exportPack">
 						<PackageIcon />
 						{{ formatMessage(messages.exportButton) }}
 					</button>

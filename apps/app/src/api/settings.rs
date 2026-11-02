@@ -1,7 +1,18 @@
 use crate::api::Result;
+use dashmap::DashMap;
+use std::sync::LazyLock;
 use tauri::{Emitter, Runtime};
+use theseus::network_diagnostics::{
+    NetworkTestMode, NetworkTestResult, NetworkTestTarget,
+};
 use theseus::prelude::*;
 use theseus::{ProxyConfig, ProxyTestResult};
+use tokio_util::sync::CancellationToken;
+
+static NETWORK_TESTS: LazyLock<DashMap<String, CancellationToken>> =
+    LazyLock::new(DashMap::new);
+static NETWORK_TEST_LIMIT: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(8);
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("settings")
@@ -16,9 +27,54 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             cancel_directory_change,
             proxy_get,
             proxy_set,
-            proxy_test
+            proxy_test,
+            network_test,
+            network_test_cancel
         ])
         .build()
+}
+
+#[tauri::command]
+pub async fn network_test(
+    request_id: String,
+    target: NetworkTestTarget,
+    mode: NetworkTestMode,
+) -> Result<Option<NetworkTestResult>> {
+    uuid::Uuid::parse_str(&request_id).map_err(|_| {
+        theseus::ErrorKind::InputError("Invalid diagnostic request ID".into())
+            .as_error()
+    })?;
+    let _permit = NETWORK_TEST_LIMIT.try_acquire().map_err(|_| {
+        theseus::ErrorKind::InputError("Too many network diagnostics".into())
+            .as_error()
+    })?;
+    let token = CancellationToken::new();
+    match NETWORK_TESTS.entry(request_id.clone()) {
+        dashmap::mapref::entry::Entry::Vacant(entry) => {
+            entry.insert(token.clone());
+        }
+        dashmap::mapref::entry::Entry::Occupied(_) => {
+            return Err(theseus::ErrorKind::InputError(
+                "Duplicate diagnostic request ID".into(),
+            )
+            .as_error()
+            .into());
+        }
+    }
+    let result = tokio::select! {
+        _ = token.cancelled() => Ok(None),
+        result = theseus::network_diagnostics::test_network_connection(target, mode) => result.map(Some),
+    };
+    NETWORK_TESTS.remove(&request_id);
+    Ok(result?)
+}
+
+#[tauri::command]
+pub async fn network_test_cancel(request_id: String) -> Result<()> {
+    if let Some(token) = NETWORK_TESTS.get(&request_id) {
+        token.cancel();
+    }
+    Ok(())
 }
 
 pub(crate) fn log_level_for_channel(channel: &str, log_level: &str) -> String {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isSchematicSource } from '@/helpers/schematics'
 import {
 	ArrowLeftRightIcon,
 	ArrowUpDownIcon,
@@ -1332,6 +1333,7 @@ function openRecent(record: RecentSchematic) {
 
 function formatSource(record: RecentSchematic) {
 	if (record.source.kind === 'external') return record.source.path
+	if (record.source.kind === 'remote') return `${record.source.source} · ${record.source.fileName}`
 	const instance = instances.value.find((item) => item.id === record.source.instanceId)
 	return `${instance?.name ?? record.source.instanceId} · schematics/${record.source.relativePath}`
 }
@@ -1436,6 +1438,10 @@ onMounted(async () => {
 	document.addEventListener('fullscreenchange', onFullscreenChange)
 	await setupNativeDrop().catch(() => undefined)
 
+	if (isSchematicSource(route.query.source) && typeof route.query.project === 'string' && typeof route.query.file === 'string') {
+		await openSource({ kind: 'remote', source: route.query.source, projectId: route.query.project, fileName: route.query.file })
+		return
+	}
 	const instanceId = typeof route.query.instance === 'string' ? route.query.instance : ''
 	const relativePath = typeof route.query.path === 'string' ? route.query.path : ''
 	if (

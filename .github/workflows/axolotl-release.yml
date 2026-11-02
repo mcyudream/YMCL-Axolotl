@@ -90,7 +90,7 @@ jobs:
           release_args=(
             --draft
             --notes-file "$release_notes"
-            --title "Axolotl Launcher ${GITHUB_REF_NAME}"
+            --title "YMCL ${GITHUB_REF_NAME}"
           )
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             release_args+=(--prerelease)
@@ -256,7 +256,7 @@ jobs:
       matrix:
         include:
           - name: macOS Apple Silicon
-            runner: macos-15
+            runner: macos-26
             targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
           - name: macOS Intel
@@ -286,6 +286,7 @@ jobs:
           node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"
           cargo update --workspace --offline
       - name: Compile one native macOS architecture
+        id: compile
         shell: bash
         env:
           BUILD_ARGS: ${{ matrix.args }}
@@ -299,6 +300,7 @@ jobs:
           BUILD_TARGET: ${{ matrix.targets }}
         run: node scripts/axolotl/verify-embedded-curseforge-key.mjs "target/${BUILD_TARGET}/release/YMCL"
       - name: Upload compiled architecture for universal bundling
+        if: ${{ !cancelled() && steps.compile.conclusion == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-${{ matrix.targets }}
@@ -311,7 +313,7 @@ jobs:
   bundle-macos:
     name: Bundle and publish macOS universal
     needs: build-macos
-    runs-on: macos-15
+    runs-on: macos-15-intel
     env:
       SQLX_OFFLINE: true
     steps:
@@ -323,7 +325,7 @@ jobs:
       - name: Prepare bundling tools and resources
         uses: ./.github/actions/setup-release-build
         with:
-          runner: macos-15
+          runner: macos-15-intel
           bundle-only: 'true'
       - name: Set release version
         run: node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"

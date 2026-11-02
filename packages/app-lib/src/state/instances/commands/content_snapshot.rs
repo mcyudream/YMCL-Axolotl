@@ -30,6 +30,29 @@ pub(crate) async fn get_content_snapshot(
     refresh_remote: bool,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
+    get_content_snapshot_inner(instance_id, refresh_remote, false, state).await
+}
+
+pub(crate) async fn finish_content_refresh(
+    instance_id: &str,
+    state: &State,
+) -> crate::Result<()> {
+    let snapshot =
+        get_content_snapshot_inner(instance_id, true, true, state).await?;
+    if let Some(warning) = snapshot.warnings.first() {
+        return Err(
+            crate::ErrorKind::InputError(warning.message.clone()).into()
+        );
+    }
+    Ok(())
+}
+
+async fn get_content_snapshot_inner(
+    instance_id: &str,
+    refresh_remote: bool,
+    progressive: bool,
+    state: &State,
+) -> crate::Result<InstanceContentSnapshot> {
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
         .ok_or_else(|| {
@@ -45,12 +68,9 @@ pub(crate) async fn get_content_snapshot(
             })?;
     let link =
         instance_rows::get_instance_link(instance_id, &state.pool).await?;
-    // Managed instances keep their cached database snapshot on first open.
-    // Directly associated instances have no install pipeline to seed that
-    // snapshot, so their first content-page load must scan the external game
-    // directory. Later loads reuse the populated rows unless explicitly
-    // refreshed.
-    let files = if refresh_remote || instance.is_direct_linked() {
+    // Progressive scans publish committed batches. Cached snapshots never
+    // enumerate the filesystem or wait for the remote metadata pass.
+    let files = if refresh_remote && !progressive {
         sync_instance_content_files(&instance, state).await?
     } else {
         content_rows::get_instance_files(&instance.id, &state.pool).await?
@@ -343,113 +363,42 @@ pub(crate) async fn get_content_snapshot(
         ));
     }
 
-    // Dependency discovery can fetch metadata for every member of a pack.
-    // Even an explicit refresh returns the file snapshot first; the slower
-    // metadata pass publishes one lightweight follow-up snapshot when done.
     if refresh_remote {
-        let instance_id = instance_id.to_string();
-        let entries = entries.clone();
-        let refs_by_entry = refs_by_entry.clone();
-        let content_set = content_set.clone();
-        let local_metadata_by_entry = local_metadata_by_entry.clone();
-        tokio::spawn(async move {
-            let state = match State::get().await {
-                Ok(state) => state,
-                Err(error) => {
-                    tracing::warn!(
-                        "Content dependency backfill skipped: {error}"
-                    );
-                    return;
-                }
-            };
-            let backfill = match backfill_dependency_edges_from_metadata(
+        if progressive {
+            refresh_snapshot_dependencies(
+                instance_id,
                 &entries,
                 &refs_by_entry,
                 &content_set,
                 &local_metadata_by_entry,
-                &state,
+                state,
             )
-            .await
-            {
-                Ok(backfill) => backfill,
-                Err(error) => {
-                    tracing::warn!(
-                        "Content dependency backfill failed: {error}"
-                    );
-                    return;
-                }
-            };
-            if backfill.is_empty() {
-                return;
-            }
-
-            let _instance_lock =
-                state.lock_instance_content(&instance_id).await;
-            let mut tx = match state.pool.begin_with("BEGIN IMMEDIATE").await {
-                Ok(tx) => tx,
-                Err(error) => {
-                    tracing::warn!(
-                        "Content dependency revision update failed: {error}"
-                    );
-                    return;
-                }
-            };
-            for edge in &backfill.edges {
-                if let Err(error) =
-                    content_rows::upsert_content_dependency_edge_in_transaction(
-                        edge, &mut tx,
+            .await?;
+        } else {
+            let instance_id = instance_id.to_string();
+            let entries = entries.clone();
+            let refs_by_entry = refs_by_entry.clone();
+            let content_set = content_set.clone();
+            let local_metadata_by_entry = local_metadata_by_entry.clone();
+            tokio::spawn(async move {
+                let result = async {
+                    let state = State::get().await?;
+                    refresh_snapshot_dependencies(
+                        &instance_id,
+                        &entries,
+                        &refs_by_entry,
+                        &content_set,
+                        &local_metadata_by_entry,
+                        &state,
                     )
                     .await
-                {
-                    tracing::warn!(
-                        "Content dependency backfill write failed: {error}"
-                    );
-                    return;
                 }
-            }
-            for entry_id in &backfill.backfilled_entry_ids {
-                if let Err(error) = content_rows::set_content_entry_dependency_backfilled_in_transaction(
-                    entry_id,
-                    &mut tx,
-                )
-                .await
-                {
-                    tracing::warn!("Content dependency backfill write failed: {error}");
-                    return;
+                .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "Content dependency backfill failed");
                 }
-            }
-            let revision =
-                match content_rows::bump_content_set_revision_in_transaction(
-                    &content_set.id,
-                    &mut tx,
-                )
-                .await
-                {
-                    Ok(revision) => revision,
-                    Err(error) => {
-                        tracing::warn!(
-                            "Content dependency revision update failed: {error}"
-                        );
-                        return;
-                    }
-                };
-            if let Err(error) = tx.commit().await {
-                tracing::warn!(
-                    "Content dependency revision commit failed: {error}"
-                );
-                return;
-            }
-            if let Err(error) = crate::event::emit::emit_instance(
-                &instance_id,
-                crate::event::InstancePayloadType::ContentChanged { revision },
-            )
-            .await
-            {
-                tracing::warn!(
-                    "Content dependency change event failed: {error}"
-                );
-            }
-        });
+            });
+        }
     }
 
     attach_dependency_info(&mut items, &entries, &content_set.id, state)
@@ -462,8 +411,12 @@ pub(crate) async fn get_content_snapshot(
     };
     match list_all_content(
         instance_id,
-        Some(cache_behaviour),
-        refresh_remote,
+        Some(if progressive {
+            CacheBehaviour::CacheOnly
+        } else {
+            cache_behaviour
+        }),
+        refresh_remote && !progressive,
         state,
     )
     .await
@@ -556,6 +509,53 @@ struct CurseForgeReconciliationCandidate {
     missing: bool,
     provider_project_id: Option<String>,
     provider_release_id: Option<String>,
+}
+
+async fn refresh_snapshot_dependencies(
+    instance_id: &str,
+    entries: &[crate::state::instances::ContentEntry],
+    refs_by_entry: &HashMap<String, Vec<ContentProviderRef>>,
+    content_set: &crate::state::instances::ContentSet,
+    local_metadata: &HashMap<String, crate::mod_metadata::LocalModMetadata>,
+    state: &State,
+) -> crate::Result<()> {
+    let backfill = backfill_dependency_edges_from_metadata(
+        entries,
+        refs_by_entry,
+        content_set,
+        local_metadata,
+        state,
+    )
+    .await?;
+    if backfill.is_empty() {
+        return Ok(());
+    }
+    let _instance_lock = state.lock_instance_content(instance_id).await;
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    for edge in &backfill.edges {
+        content_rows::upsert_content_dependency_edge_in_transaction(
+            edge, &mut tx,
+        )
+        .await?;
+    }
+    for entry_id in &backfill.backfilled_entry_ids {
+        content_rows::set_content_entry_dependency_backfilled_in_transaction(
+            entry_id, &mut tx,
+        )
+        .await?;
+    }
+    let revision = content_rows::bump_content_set_revision_in_transaction(
+        &content_set.id,
+        &mut tx,
+    )
+    .await?;
+    tx.commit().await?;
+    crate::event::emit::emit_instance(
+        instance_id,
+        crate::event::InstancePayloadType::ContentChanged { revision },
+    )
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn reconcile_curseforge_members(

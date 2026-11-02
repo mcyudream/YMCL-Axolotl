@@ -10,6 +10,7 @@ and launching Modrinth mod packs
 
 #[macro_use]
 mod util;
+pub use self::util::network_diagnostics;
 
 mod api;
 pub mod brand;

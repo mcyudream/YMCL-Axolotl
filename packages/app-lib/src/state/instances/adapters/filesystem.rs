@@ -123,8 +123,15 @@ fn for_each_content_folder(
         let folder = project_type.get_folder();
         let folder_path = instance_dir.join(folder);
 
-        if !folder_path.exists() {
-            continue;
+        match std::fs::metadata(&folder_path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                continue;
+            }
+            Err(error) => {
+                return Err(IOError::with_path(error, &folder_path).into());
+            }
         }
 
         walk_content_folder(&folder_path, folder, project_type, &mut visit)?;
@@ -145,6 +152,13 @@ fn walk_content_folder(
         .map_err(|err| IOError::with_path(err, folder_path))?
     {
         let path = entry.map_err(IOError::from)?.path();
+        if std::fs::symlink_metadata(&path)
+            .map_err(IOError::from)?
+            .file_type()
+            .is_symlink()
+        {
+            continue;
+        }
         if path.is_dir() {
             // Only schematics may live in nested folders; other content
             // folders are scanned at the top level only.

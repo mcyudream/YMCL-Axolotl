@@ -585,6 +585,25 @@ pub async fn set_instance_information(
     dependencies: &HashMap<PackDependency, String>,
     _ignore_lock: bool,
 ) -> crate::Result<()> {
+    set_instance_information_with_local_loader_versions(
+        instance_id,
+        description,
+        backup_name,
+        pack_version_id,
+        dependencies,
+        &HashMap::new(),
+    )
+    .await
+}
+
+pub(crate) async fn set_instance_information_with_local_loader_versions(
+    instance_id: String,
+    description: &CreatePackDescription,
+    backup_name: &str,
+    pack_version_id: Option<&str>,
+    dependencies: &HashMap<PackDependency, String>,
+    local_loader_versions: &HashMap<PackDependency, String>,
+) -> crate::Result<()> {
     let mut game_version: Option<&String> = None;
     for (key, value) in dependencies {
         if *key == PackDependency::Minecraft {
@@ -632,13 +651,18 @@ pub async fn set_instance_information(
         None,
     )];
     if let Some((dependency, loader)) = primary_dependencies.first() {
-        let version = resolve_pack_loader_version(
-            dependencies,
-            *dependency,
-            *loader,
-            game_version,
-        )
-        .await?;
+        let version =
+            if let Some(version) = local_loader_versions.get(dependency) {
+                version.clone()
+            } else {
+                resolve_pack_loader_version(
+                    dependencies,
+                    *dependency,
+                    *loader,
+                    game_version,
+                )
+                .await?
+            };
         components[0].version = Some(version);
         components[0].provider_metadata = Some(serde_json::json!({
             "source": "pack"

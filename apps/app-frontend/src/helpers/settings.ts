@@ -135,6 +135,8 @@ export function setBrowseDefaultInstanceId(instanceId: string | null) {
 }
 
 export type AppSettings = {
+	default_game_language: string
+	backup_repository_path: string | null
 	max_concurrent_downloads: number
 	max_concurrent_writes: number
 	download_engine: DownloadEngine
@@ -220,6 +222,8 @@ type LegacyMirrorSettings = {
 }
 
 function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings): AppSettings {
+	settings.default_game_language ??= ''
+	settings.backup_repository_path ??= null
 	settings.close_behavior ??= 'ask'
 	settings.log_level ??= 'info'
 	const hasLegacySettings =

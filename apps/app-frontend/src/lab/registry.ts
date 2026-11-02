@@ -1,6 +1,7 @@
 import {
 	BlocksIcon,
 	BoxIcon,
+	CodeIcon,
 	LanguagesIcon,
 	PaletteIcon,
 	PencilIcon,
@@ -18,6 +19,22 @@ export type LabToolDefinition = {
 }
 
 export const labTools: readonly LabToolDefinition[] = [
+	{
+		id: 'banner-designer',
+		category: 'creation',
+		route: '/lab/banner-designer',
+		icon: PaletteIcon,
+		title: 'Banner designer',
+		description: 'Design layered banners and export Minecraft commands or pattern data.',
+	},
+	{
+		id: 'command-generator',
+		category: 'creation',
+		route: '/lab/command-generator',
+		icon: CodeIcon,
+		title: 'Command generator',
+		description: 'Build Minecraft Java Edition commands visually.',
+	},
 	{
 		id: 'skin-editor',
 		category: 'creation',

@@ -3,6 +3,7 @@
 		<template #pending>
 			<LoadingIndicator class="pt-4" />
 		</template>
+		<ContentRefreshStatus :instance-id="props.instance.id" />
 		<CollapsibleAdmonition
 			v-if="postUpgradeNotice?.warnings.length"
 			v-model="postUpgradeNoticeExpanded"
@@ -202,6 +203,7 @@
 </template>
 
 <script setup lang="ts">
+import ContentRefreshStatus from '@/components/ui/instance_content/ContentRefreshStatus.vue'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BookOpenIcon,
@@ -2559,7 +2561,7 @@ async function initProjects(cacheBehaviour?: CacheBehaviour) {
 	debugState('initProjects start', { instanceId, cacheBehaviour, generation })
 	let contentData: InstanceContentData | null
 	try {
-		contentData = await loadInstanceContentData(instanceId, cacheBehaviour)
+		contentData = await loadInstanceContentData(instanceId, cacheBehaviour, undefined, { progressive: true })
 	} catch (error) {
 		if (isCurrentContentRequest(instanceId, generation)) {
 			handleError(error as Error)

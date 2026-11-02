@@ -47,6 +47,10 @@ const toolCoverImages: Record<string, string> = {
 }
 
 const messages = defineMessages({
+	bannerDesignerTitle: { id: 'app.lab.banner-designer.title', defaultMessage: 'Banner designer' },
+	bannerDesignerDescription: { id: 'app.lab.banner-designer.description', defaultMessage: 'Design layered banners and export Minecraft commands or pattern data.' },
+	commandGeneratorTitle: { id: 'app.lab.command-generator.title', defaultMessage: 'Command generator' },
+	commandGeneratorDescription: { id: 'app.lab.command-generator.subtitle', defaultMessage: 'Build Minecraft Java Edition commands visually.' },
 	title: { id: 'app.lab.title', defaultMessage: 'Lab' },
 	toolCount: { id: 'app.lab.tool-count', defaultMessage: '{count} tool' },
 	toolCountPlural: { id: 'app.lab.tool-count-plural', defaultMessage: '{count} tools' },
@@ -166,6 +170,8 @@ const emptyHeading = computed(() => {
 })
 
 function toolTitle(toolId: string, fallback: string) {
+	if (toolId === 'banner-designer') return formatMessage(messages.bannerDesignerTitle)
+	if (toolId === 'command-generator') return formatMessage(messages.commandGeneratorTitle)
 	if (toolId === 'skin-editor') return formatMessage(messages.skinEditorTitle)
 	if (toolId === 'gradient-text') return formatMessage(messages.gradientTextTitle)
 	if (toolId === 'recipe-generator') return formatMessage(messages.recipeGeneratorTitle)
@@ -176,6 +182,8 @@ function toolTitle(toolId: string, fallback: string) {
 }
 
 function toolDescription(toolId: string, fallback: string) {
+	if (toolId === 'banner-designer') return formatMessage(messages.bannerDesignerDescription)
+	if (toolId === 'command-generator') return formatMessage(messages.commandGeneratorDescription)
 	if (toolId === 'skin-editor') return formatMessage(messages.skinEditorDescription)
 	if (toolId === 'gradient-text') return formatMessage(messages.gradientTextDescription)
 	if (toolId === 'recipe-generator') return formatMessage(messages.recipeGeneratorDescription)
@@ -186,7 +194,7 @@ function toolDescription(toolId: string, fallback: string) {
 }
 
 function toolOnboardingId(toolId: string) {
-	return ['gradient-text', 'recipe-generator', 'seed-map', 'schematic-preview'].includes(toolId)
+	return ['gradient-text', 'recipe-generator', 'seed-map', 'schematic-preview', 'banner-designer', 'command-generator'].includes(toolId)
 		? `lab-${toolId}-card`
 		: undefined
 }

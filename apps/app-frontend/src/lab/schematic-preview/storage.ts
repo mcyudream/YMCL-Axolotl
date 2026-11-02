@@ -19,6 +19,7 @@ function safeParse<T>(key: string, fallback: T): T {
 }
 
 function sourceId(source: SchematicPreviewSource) {
+	if (source.kind === 'remote') return `remote:${source.source}:${source.projectId}:${source.fileName}`
 	return source.kind === 'external'
 		? `external:${source.path}`
 		: `${source.kind}:${source.instanceId}:${source.relativePath}`
@@ -34,7 +35,8 @@ export function loadRecentSchematics(): RecentSchematic[] {
 				typeof record.id === 'string' &&
 				typeof record.fileName === 'string' &&
 				typeof record.openedAt === 'number' &&
-				(record.source?.kind === 'external' ||
+				((record.source?.kind === 'remote' && ['reden', 'buildschematics'].includes(record.source.source) && typeof record.source.projectId === 'string' && typeof record.source.fileName === 'string') ||
+				record.source?.kind === 'external' ||
 					record.source?.kind === 'instance' ||
 					record.source?.kind === 'instance_file'),
 		)

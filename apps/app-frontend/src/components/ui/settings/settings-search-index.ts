@@ -18,6 +18,21 @@ const message = (id: string, defaultMessage: string): MessageDescriptor => ({ id
 
 export const settingsSearchEntries: SettingsSearchEntry[] = [
 	{
+		id: 'default-game-language', categoryId: 'launch-defaults', targetId: 'settings-target-default-game-language',
+		label: message('app.settings.defaults.game-language', 'Default game language'),
+		description: message('app.settings.defaults.game-language-description', 'Language for new instances. Existing worlds keep their in-game language.'),
+	},
+	{
+		id: 'instance-backup-repository', categoryId: 'storage-backups', targetId: 'settings-target-instance-backup-repository',
+		label: message('settings.instanceBackups.title', 'Instance backup storage'),
+		description: message('settings.instanceBackups.description', 'Snapshots share identical files to save disk space. Enable backups from each instance’s settings.'),
+	},
+	{
+		id: 'network-tests', categoryId: 'network', targetId: 'settings-target-network-tests',
+		label: message('app.settings.network.title', 'Connection tests'),
+		keywords: [message('app.settings.search.network-diagnostics', 'Network diagnostics DNS proxy service connectivity speed')],
+	},
+	{
 		id: 'appearance-color-theme',
 		categoryId: 'interface',
 		targetId: 'settings-target-appearance-color-theme',
@@ -544,7 +559,7 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 	{
 		id: 'updates-source',
 		categoryId: 'updates',
-		targetId: 'settings-target-updates-source',
+		targetId: 'settings-target-updates-channel',
 		label: message('app.settings.updates.title', 'Update source'),
 	},
 	{

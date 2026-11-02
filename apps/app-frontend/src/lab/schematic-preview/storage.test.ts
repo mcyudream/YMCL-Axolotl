@@ -70,3 +70,23 @@ test('recent schematics retain instance-root file sources', () => {
 	)
 	assert.equal(loadRecentSchematics().length, 2)
 })
+
+test('remote history keeps source identity and rejects unsupported stored sources', () => {
+	const storage = createStorage()
+	Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
+	const reden = { kind: 'remote' as const, source: 'reden' as const, projectId: '123', fileName: 'house.schem' }
+	const build = { ...reden, source: 'buildschematics' as const }
+	recordRecentSchematic(reden, 'Reden house')
+	recordRecentSchematic(build, 'BuildSchematics house')
+	recordRecentSchematic(reden, 'Reden house updated')
+	assert.equal(loadRecentSchematics().length, 2)
+	assert.deepEqual(loadRecentSchematics()[0].source, reden)
+	const key = 'axolotl:lab:schematic-preview:recent:v1'
+	const records = loadRecentSchematics()
+	storage.setItem(key, JSON.stringify([
+		{ ...records[0], source: { ...reden, source: 'unsupported' } },
+		{ ...records[0], source: { ...reden, projectId: null } },
+		...records,
+	]))
+	assert.deepEqual(loadRecentSchematics(), records)
+})

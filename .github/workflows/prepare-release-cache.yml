@@ -47,7 +47,7 @@ jobs:
             runner: windows-2025
             args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
           - name: macOS Apple Silicon
-            runner: macos-15
+            runner: macos-26
             targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
           - name: macOS Intel

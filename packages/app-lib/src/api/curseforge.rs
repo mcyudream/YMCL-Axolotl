@@ -9410,11 +9410,15 @@ impl From<CurseForgeProject> for UnifiedSearchHit {
     }
 }
 
-fn api_key() -> Option<String> {
+pub(crate) fn api_key() -> Option<String> {
     std::env::var("AXOLOTL_CURSEFORGE_API_KEY")
         .ok()
         .filter(|key| !key.trim().is_empty())
-        .or_else(|| option_env!("CURSEFORGE_API_KEY").map(str::to_string))
+        .or_else(|| {
+            // Keep the embedded bytes addressable for release verification under LTO.
+            std::hint::black_box(option_env!("CURSEFORGE_API_KEY"))
+                .map(str::to_string)
+        })
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty())
 }

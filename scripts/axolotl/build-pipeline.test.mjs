@@ -164,7 +164,7 @@ test('macOS compiles architectures on native runners and only bundles the combin
 	assert.deepEqual(
 		compile.strategy.matrix.include.map(({ runner, targets }) => ({ runner, targets })),
 		[
-			{ runner: 'macos-15', targets: 'aarch64-apple-darwin' },
+			{ runner: 'macos-26', targets: 'aarch64-apple-darwin' },
 			{ runner: 'macos-15-intel', targets: 'x86_64-apple-darwin' },
 		],
 	)
@@ -172,8 +172,10 @@ test('macOS compiles architectures on native runners and only bundles the combin
 	const upload = compile.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))
 	assert.equal(upload.with['if-no-files-found'], 'error')
 	assert.equal(upload.with['compression-level'], 0)
+	assert.equal(upload.if, "${{ !cancelled() && steps.compile.conclusion == 'success' }}")
 	const bundle = release.jobs['bundle-macos']
 	assert.equal(bundle.needs, 'build-macos')
+	assert.equal(bundle['runs-on'], 'macos-15-intel')
 	const setup = bundle.steps.find((step) => step.uses === './.github/actions/setup-release-build')
 	assert.equal(setup.with['bundle-only'], 'true')
 	const preparation = parse(
@@ -217,7 +219,8 @@ test('completed platforms publish independently while update manifests require t
 		await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
 	)
 	assert.match(publish.runs.steps[0].run, /gh release upload/)
-	assert.match(publish.runs.steps[1].run, /--draft=false --prerelease/)
+	assert.match(publish.runs.steps[1].run, /--draft=false --prerelease --latest=false/)
+	assert.doesNotMatch(publish.runs.steps[1].run, /exit 0/)
 	assert.match(publish.runs.steps[1].run, /--draft=false --latest=false/)
 	const finalize = release.jobs['verify-and-publish'].steps
 	const upload = finalize.findIndex((step) =>
@@ -290,6 +293,7 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 				{ tag: 'v1.2.3', draft: true },
 				{ tag: 'v1.2.3-beta.1', draft: true },
 				{ tag: 'v1.2.3', draft: false },
+				{ tag: 'v1.2.3-beta.1', draft: false },
 				{ tag: 'v1.2.3', draft: true, fail: true },
 			]) {
 				await writeFile(log, '')
@@ -313,7 +317,7 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 				const commands = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
 				assert.equal(commands[0][1], 'upload')
 				assert.ok(commands[0].includes(join(directory, 'release-assets/YMCL.dmg')))
-				if (fail || !draft)
+				if (fail || (!draft && !tag.includes('-')))
 					assert.equal(
 						commands.some((args) => args[1] === 'edit'),
 						false,
@@ -324,7 +328,8 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 						'edit',
 						tag,
 						'--draft=false',
-						tag.includes('-') ? '--prerelease' : '--latest=false',
+						...(tag.includes('-') ? ['--prerelease'] : []),
+						'--latest=false',
 					])
 			}
 		} finally {

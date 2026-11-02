@@ -10,9 +10,9 @@ import {
 	get_content_snapshot,
 	type InstanceContentSnapshot,
 	type LinkedModpackInfo,
-	refresh_content,
 } from '@/helpers/instance'
 import type { CacheBehaviour } from '@/helpers/types'
+import { getContentRefresh, isContentRefreshActive, startContentRefresh } from '@/helpers/content-refresh'
 
 export type InstanceContentData = {
 	path: string
@@ -43,12 +43,26 @@ export async function loadInstanceContentData(
 	path: string,
 	cacheBehaviour?: CacheBehaviour,
 	onError?: (error: Error) => unknown,
+	options: { progressive?: boolean; signal?: AbortSignal } = {},
 ): Promise<InstanceContentData | null> {
 	try {
-		const snapshot =
-			cacheBehaviour === 'bypass' || cacheBehaviour === 'must_revalidate'
-				? await refresh_content(path)
-				: await get_content_snapshot(path)
+		let refresh = await getContentRefresh(path)
+		if (cacheBehaviour === 'bypass' || cacheBehaviour === 'must_revalidate' || !refresh) {
+			refresh = await startContentRefresh(path)
+		} else if (!options.progressive && ['failed', 'partial', 'cancelled', 'interrupted'].includes(refresh.state)) {
+			refresh = await startContentRefresh(path, refresh.total > 0)
+		}
+		if (!options.progressive) {
+			while (isContentRefreshActive(refresh)) {
+				options.signal?.throwIfAborted()
+				await new Promise((resolve) => setTimeout(resolve, 300))
+				refresh = await getContentRefresh(path)
+			}
+			options.signal?.throwIfAborted()
+			if (refresh && refresh.state !== 'completed') throw new Error(refresh.error || 'The content scan did not complete. Refresh content and try again.')
+		}
+
+		const snapshot = await get_content_snapshot(path)
 		const normalizedItems = snapshot.items.map((item) => {
 			const fileName = item.expectedRelativePath.split('/').pop() ?? item.expectedRelativePath
 			const requiresManualDownload =

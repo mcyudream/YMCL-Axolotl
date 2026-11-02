@@ -302,6 +302,7 @@ fn main() {
                     .commands(&[
                         "get_available_capes",
                         "get_available_skins",
+                        "lookup_player_skin",
                         "add_and_equip_custom_skin",
                         "equip_skin",
                         "remove_custom_skin",
@@ -399,6 +400,22 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "instance_remove",
+                        "instance_has_active_backup_operations",
+                        "instance_get_backup_repository_status",
+                        "instance_move_backup_repository",
+                        "instance_get_backup_config",
+                        "instance_enable_backups",
+                        "instance_normalize_backup_exclusion",
+                        "instance_update_backup_exclusions",
+                        "instance_disable_backups",
+                        "instance_start_backup",
+                        "instance_cancel_backup",
+                        "instance_list_backup_operations",
+                        "instance_list_backups",
+                        "instance_delete_backup",
+                        "instance_get_backup_restore_preview",
+                        "instance_restore_backup",
+                        "instance_get_backup_delete_summary",
                         "instance_create_direct_link",
                         "instance_sync_direct_links",
                         "instance_get",
@@ -410,6 +427,9 @@ fn main() {
                         "instance_get_content_items_by_paths",
                         "instance_get_content_items",
                         "instance_get_content_snapshot",
+                        "instance_get_content_refresh",
+                        "instance_start_content_refresh",
+                        "instance_cancel_content_refresh",
                         "instance_refresh_content",
                         "instance_plan_content_updates",
                         "instance_apply_content_update_plan",
@@ -535,6 +555,8 @@ fn main() {
                         "proxy_get",
                         "proxy_set",
                         "proxy_test",
+                        "network_test",
+                        "network_test_cancel",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -551,6 +573,19 @@ fn main() {
                         "seed_map_biome_at",
                         "seed_map_scan_ores",
                         "seed_map_read_level_dat",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "schematics",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "schematics_list",
+                        "schematics_get",
+                        "schematics_install",
+                        "schematics_installed",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

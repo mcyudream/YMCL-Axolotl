@@ -1,7 +1,7 @@
 [package]
 name = "theseus"
 # The actual version is set by the theseus-build workflow on tagging
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 edition.workspace = true
 
 [dependencies]
@@ -33,6 +33,7 @@ dashmap = { workspace = true, features = ["serde"] }
 data-url = { workspace = true }
 derive_more = { workspace = true, features = ["display"] }
 dirs = { workspace = true }
+dom_query = "0.27.0"
 discord-rich-presence = { workspace = true }
 dunce = { workspace = true }
 either = { workspace = true }

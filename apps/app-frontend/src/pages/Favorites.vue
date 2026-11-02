@@ -127,6 +127,7 @@ const browseReturnSnapshot = consumeBrowseReturnSnapshot<FavoritesReturnState>(r
 if (browseReturnSnapshot) projects.value = browseReturnSnapshot.state.projects
 
 const messages = defineMessages({
+	schematicsProjectType: { id: 'app.browse.schematics-project-type', defaultMessage: 'Schematics' },
 	title: {
 		id: 'app.content-favorites.title',
 		defaultMessage: 'Favorites',
@@ -324,6 +325,7 @@ const projectTabs = computed(() => {
 			maps: formatMessage(messages.maps),
 			shaders: formatMessage(messages.shaders),
 			servers: formatMessage(messages.servers),
+			schematics: formatMessage(messages.schematicsProjectType),
 			favorites: formatMessage(messages.title),
 		},
 		suffix,

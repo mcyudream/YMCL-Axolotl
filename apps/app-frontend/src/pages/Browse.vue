@@ -635,6 +635,7 @@ const {
 const { offline } = useNetworkStatus()
 
 const messages = defineMessages({
+	schematicsProjectType: { id: 'app.browse.schematics-project-type', defaultMessage: 'Schematics' },
 	add: {
 		id: 'app.browse.add',
 		defaultMessage: 'Add',
@@ -1001,6 +1002,7 @@ const selectableProjectTypes = computed(() => {
 			maps: formatMessage(messages.mapsProjectType),
 			shaders: formatMessage(messages.shadersProjectType),
 			servers: formatMessage(messages.serversProjectType),
+			schematics: formatMessage(messages.schematicsProjectType),
 			favorites: formatMessage(messages.favoritesProjectType),
 		},
 		suffix,

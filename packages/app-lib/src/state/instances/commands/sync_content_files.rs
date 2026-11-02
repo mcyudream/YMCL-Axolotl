@@ -71,6 +71,14 @@ pub(crate) async fn sync_instance_content_files(
     instance: &Instance,
     state: &State,
 ) -> crate::Result<Vec<InstanceFile>> {
+    sync_instance_content_files_with_progress(instance, state, None).await
+}
+
+pub(crate) async fn sync_instance_content_files_with_progress(
+    instance: &Instance,
+    state: &State,
+    progress: Option<&super::content_refresh::RefreshContext>,
+) -> crate::Result<Vec<InstanceFile>> {
     // Keep the filesystem snapshot stable until its database rows commit.
     let _instance_lock = state.lock_instance_content(&instance.id).await;
     let content_root = instance_content_root(&state.directories, instance)?;
@@ -87,46 +95,24 @@ pub(crate) async fn sync_instance_content_files(
             .as_deref()
             .map(str::trim)
             .is_some_and(|linked| !linked.is_empty());
-    let instance_files_root = if is_direct_linked {
-        content_root.clone()
-    } else {
-        state.directories.instances_dir().join(&instance.path)
-    };
     let cache_key_path = if is_direct_linked {
         content_root.to_string_lossy().into_owned()
     } else {
         instance.path.clone()
     };
-    let scanned =
-        filesystem::scan_content_files_from(&content_root, &cache_key_path)?;
+    let scan_root = content_root.clone();
+    let scanned = tokio::task::spawn_blocking(move || {
+        filesystem::scan_content_files_from(&scan_root, &cache_key_path)
+    })
+    .await
+    .map_err(|error| crate::ErrorKind::InputError(error.to_string()))??;
     let scanned_paths = scanned
         .iter()
         .map(|file| file.relative_path.clone())
         .collect::<HashSet<_>>();
-    let cache_keys = scanned
-        .iter()
-        .map(|file| file.hash_cache_key.as_str())
-        .collect::<Vec<_>>();
-    let hashes = CachedEntry::get_file_hash_many(
-        &cache_keys,
-        None,
-        &state.pool,
-        &state.api_semaphore,
-    )
-    .await?;
-    let hashes_by_key = hashes
-        .into_iter()
-        .map(|hash| {
-            (
-                format!(
-                    "{}-{}",
-                    hash.size,
-                    hash.path.trim_end_matches(".disabled")
-                ),
-                hash,
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    if let Some(progress) = progress {
+        progress.begin_files(&scanned).await?;
+    }
     let existing_files =
         sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
             .await?;
@@ -159,24 +145,34 @@ pub(crate) async fn sync_instance_content_files(
 
     let now = Utc::now();
     let mut files: Vec<InstanceFile> = Vec::new();
+    let mut synced_files = Vec::new();
     let mut reclaims: HashMap<String, String> = HashMap::new();
     let mut merges: HashMap<String, String> = HashMap::new();
     let mut claimed_reclaim_ids = HashSet::new();
     let mut externally_changed_file_ids = HashSet::new();
 
     for file in scanned {
-        let hash_key = file.hash_cache_key.trim_end_matches(".disabled");
-        let existing_file = existing_files_by_path.get(&file.relative_path);
-        let (scanned_sha1, scanned_size) = if existing_file.is_some() {
-            let path =
-                join_content_path(&instance_files_root, &file.relative_path);
-            let (_, sha1) = fetch::sha1_file_async(&path).await?;
-            (sha1, file.size)
-        } else {
-            let Some(hash) = hashes_by_key.get(hash_key) else {
+        if let Some(progress) = progress {
+            progress.check_cancelled()?;
+            if !progress.includes(&file.relative_path) {
                 continue;
-            };
-            (hash.hash.clone(), hash.size)
+            }
+        }
+        let existing_file = existing_files_by_path.get(&file.relative_path);
+        let path = join_content_path(&content_root, &file.relative_path);
+        let (scanned_sha1, scanned_size) = match fetch::sha1_file_async(&path)
+            .await
+        {
+            Ok((size, sha1)) => (sha1, size),
+            Err(error) => {
+                if let Some(progress) = progress {
+                    progress
+                        .file_failed(&file.relative_path, &error.to_string())
+                        .await?;
+                    continue;
+                }
+                return Err(error);
+            }
         };
         let reclaim_candidate = if existing_file.is_some() {
             None
@@ -237,20 +233,74 @@ pub(crate) async fn sync_instance_content_files(
             missing: false,
             added_at: source_file.map(|file| file.added_at).unwrap_or(now),
             modified_at: now,
-            local_mod_data: source_file.and_then(|f| f.local_mod_data.clone()),
-            icon_path: source_file.and_then(|f| f.icon_path.clone()),
+            local_mod_data: source_file
+                .filter(|f| !externally_changed_file_ids.contains(&f.id))
+                .and_then(|f| f.local_mod_data.clone()),
+            icon_path: source_file
+                .filter(|f| !externally_changed_file_ids.contains(&f.id))
+                .and_then(|f| f.icon_path.clone()),
         });
+        if progress.is_some() && files.len() >= 12 {
+            enrich_local_metadata(&mut files, &content_root, state).await;
+            let batch = commit_scanned_files(
+                instance,
+                &files,
+                &reclaims,
+                &merges,
+                &externally_changed_file_ids,
+                content_set.as_ref(),
+                state,
+            )
+            .await?;
+            if let Some(progress) = progress {
+                progress.local_ready(&batch).await?;
+            }
+            synced_files.extend(batch);
+            files.clear();
+        }
     }
 
-    // Extract local mod metadata (Mod JARs) and cached icons (Mod JARs and
-    // resource packs) for files that don't have them yet. This also backfills
-    // rows created before these features existed; `icon_path` distinguishes
-    // not-attempted (NULL), no-icon (empty string), and cached (path).
-    // `content_root` already resolves the override / linked root consistently
-    // for both managed and directly associated instances.
-    let instance_dir = content_root;
+    enrich_local_metadata(&mut files, &content_root, state).await;
+    let batch = commit_scanned_files(
+        instance,
+        &files,
+        &reclaims,
+        &merges,
+        &externally_changed_file_ids,
+        content_set.as_ref(),
+        state,
+    )
+    .await?;
+    if let Some(progress) = progress {
+        progress.local_ready(&batch).await?;
+        progress.check_cancelled()?;
+    }
+    synced_files.extend(batch);
+    if progress.is_none_or(|progress| !progress.is_retry()) {
+        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlite::content_rows::ensure_instance_exists(&instance.id, &mut tx)
+            .await?;
+        sqlx::query("UPDATE instance_files SET missing = 1 WHERE instance_id = ? AND relative_path NOT IN (SELECT value FROM json_each(?))")
+            .bind(&instance.id).bind(serde_json::to_string(&scanned_paths)?).execute(&mut *tx).await?;
+        if let Some(content_set) = content_set.as_ref() {
+            sqlite::content_rows::bump_content_set_revision_in_transaction(
+                &content_set.id,
+                &mut tx,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+    }
+    Ok(synced_files)
+}
+
+async fn enrich_local_metadata(
+    files: &mut [InstanceFile],
+    content_root: &Path,
+    state: &State,
+) {
     let icon_cache_dir = state.directories.caches_dir().join("icons");
-    for file in &mut files {
+    for file in files {
         let Some(project_type) = project_type_for_file(file) else {
             continue;
         };
@@ -278,7 +328,7 @@ pub(crate) async fn sync_instance_content_files(
             continue;
         }
 
-        let path = join_content_path(&instance_dir, &file.relative_path);
+        let path = join_content_path(content_root, &file.relative_path);
 
         // Resource packs are read entry-wise so large archives are not
         // materialized in memory just to fetch `pack.png`.
@@ -326,15 +376,26 @@ pub(crate) async fn sync_instance_content_files(
             );
         }
     }
+}
 
+async fn commit_scanned_files(
+    instance: &Instance,
+    files: &[InstanceFile],
+    reclaims: &HashMap<String, String>,
+    merges: &HashMap<String, String>,
+    externally_changed_file_ids: &HashSet<String>,
+    content_set: Option<&crate::state::instances::ContentSet>,
+    state: &State,
+) -> crate::Result<Vec<InstanceFile>> {
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlite::content_rows::ensure_instance_exists(&instance.id, &mut tx).await?;
-    sqlite::content_rows::mark_instance_files_missing(&instance.id, &mut tx)
-        .await?;
-    let mut invalidated_provider_identity = false;
-    if let Some(content_set) = content_set.as_ref() {
-        for file_id in &externally_changed_file_ids {
-            invalidated_provider_identity |= sqlite::content_rows::invalidate_exact_provider_refs_for_file_in_transaction(
+    let mut _invalidated_provider_identity = false;
+    if let Some(content_set) = content_set {
+        for file_id in externally_changed_file_ids
+            .iter()
+            .filter(|id| files.iter().any(|file| &file.id == *id))
+        {
+            _invalidated_provider_identity |= sqlite::content_rows::invalidate_exact_provider_refs_for_file_in_transaction(
                 &content_set.id,
                 file_id,
                 &mut tx,
@@ -349,7 +410,7 @@ pub(crate) async fn sync_instance_content_files(
     // reusing a stale id against the moved row would trip the UNIQUE
     // constraint on `instance_files.id` (code 1555).
     let mut synced_files: Vec<InstanceFile> = Vec::with_capacity(files.len());
-    for file in &files {
+    for file in files {
         let synced =
             if let Some(tracked_file_id) = merges.get(&file.relative_path) {
                 sqlite::content_rows::adopt_untracked_file_in_transaction(
@@ -388,9 +449,7 @@ pub(crate) async fn sync_instance_content_files(
         synced_files.push(synced);
     }
 
-    if invalidated_provider_identity
-        && let Some(content_set) = content_set.as_ref()
-    {
+    if let Some(content_set) = content_set {
         sqlite::content_rows::bump_content_set_revision_in_transaction(
             &content_set.id,
             &mut tx,
@@ -752,7 +811,9 @@ mod tests {
                 base_path: minecraft.path().to_path_buf(),
                 instance_folder: "versions/1.12.2-linked".to_string(),
                 instance_path: None,
-                game_dir_mode: None,
+                game_dir_mode: Some(
+                    crate::launcher::ExternalGameDirMode::Shared,
+                ),
             },
             &state,
         )

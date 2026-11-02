@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { defineMessages, StyledInput, Toggle, useVIntl } from '@modrinth/ui'
+import { Combobox, defineMessages, StyledInput, Toggle, useVIntl } from '@modrinth/ui'
 import { platform } from '@tauri-apps/plugin-os'
 import { ref, watch } from 'vue'
 
+import { minecraftLanguageOptions } from '@/helpers/minecraft-languages'
 import { get, set } from '@/helpers/settings.ts'
 
 import LogShareSettings from './LogShareSettings.vue'
@@ -13,6 +14,9 @@ import SharedLogsSettings from './SharedLogsSettings.vue'
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
+	gameLanguage: { id: 'app.settings.defaults.game-language', defaultMessage: 'Default game language' },
+	gameLanguageDescription: { id: 'app.settings.defaults.game-language-description', defaultMessage: 'Language for new instances. Existing worlds keep their in-game language.' },
+	followLauncherLanguage: { id: 'app.settings.defaults.follow-launcher-language', defaultMessage: 'Follow launcher language' },
 	fullscreen: { id: 'app.settings.defaults.fullscreen', defaultMessage: 'Fullscreen' },
 	fullscreenDescription: {
 		id: 'app.settings.defaults.fullscreen-description',
@@ -146,6 +150,13 @@ watch(
 <template>
 	<div class="flex flex-col gap-6">
 		<SettingsSection>
+			<SettingsRow data-onboarding-id="default-game-language" title-id="settings-target-default-game-language">
+				<template #label>{{ formatMessage(messages.gameLanguage) }}</template>
+				<template #description>{{ formatMessage(messages.gameLanguageDescription) }}</template>
+				<template #control>
+					<Combobox v-model="settings.default_game_language" :options="[{ value: '', label: formatMessage(messages.followLauncherLanguage) }, ...minecraftLanguageOptions]" :placeholder="formatMessage(messages.followLauncherLanguage)" />
+				</template>
+			</SettingsRow>
 			<SettingsRow>
 				<template #label>
 					<span id="settings-target-defaults-window" tabindex="-1">

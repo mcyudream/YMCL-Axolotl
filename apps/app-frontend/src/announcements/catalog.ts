@@ -28,6 +28,80 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.0.0-beta.2',
+		version: '2.0.0-beta.2',
+		publishedAt: '2026-11-02',
+		title: {
+			'en-US': 'YMCL 2.0.0-beta.2',
+			'zh-CN': 'YMCL 2.0.0-beta.2',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Added network diagnostics for service connectivity, DNS, connection addresses, proxy access, and download sampling.',
+					'zh-CN': '新增网络诊断，支持检查服务连通性、DNS、连接地址、代理访问及下载采样。',
+				},
+				{
+					'en-US': 'Added skin lookup, preview, and import by Minecraft player name or UUID.',
+					'zh-CN': '新增通过 Minecraft 玩家名或 UUID 查询、预览和导入皮肤。',
+				},
+				{
+					'en-US':
+						'Added automatic skin editor drafts, recovery after unexpected exits, and reminders before leaving unsaved edits.',
+					'zh-CN': '皮肤编辑器新增自动保存草稿、异常退出恢复及离开前未保存提醒。',
+				},
+				{
+					'en-US':
+						'Added incremental instance backups with exclusion rules, deduplicated snapshots, restore previews, and background progress.',
+					'zh-CN': '新增实例增量备份，支持排除规则、快照去重、恢复预览和后台进度。',
+				},
+				{
+					'en-US':
+						'Added a banner designer with layered patterns, color replacement, presets, and Minecraft command export.',
+					'zh-CN': '实验室新增旗帜设计器，支持多层图案、替换颜色、预设和 Minecraft 命令导出。',
+				},
+				{
+					'en-US':
+						'Added a version-aware Minecraft command generator with argument guides, item selection, and NBT editing.',
+					'zh-CN': '实验室新增 Minecraft 命令生成器，支持版本选择、参数说明、物品选择和 NBT 编辑。',
+				},
+				{
+					'en-US':
+						'Added schematic discovery from Reden and BuildSchematics, with previews and installation into instances.',
+					'zh-CN': '新增 Reden 和 BuildSchematics 投影资源浏览，支持预览和安装到实例。',
+				},
+				{
+					'en-US': 'Added a default Minecraft language setting with per-instance overrides.',
+					'zh-CN': '新增 Minecraft 默认语言设置，并支持为单个实例单独指定。',
+				},
+			],
+			changed: [
+				{
+					'en-US':
+						'Expanded MultiMC imports to retain custom patches, replacement game JARs, and JAR mods.',
+					'zh-CN': '扩展 MultiMC 导入，保留自定义补丁、替换游戏 JAR 和 JAR-mod。',
+				},
+				{
+					'en-US':
+						'Expanded modpack export to MRPACK, CurseForge, and generic ZIP, including linked instances.',
+					'zh-CN': '整合包导出扩展为 MRPACK、CurseForge 和通用 ZIP，并支持关联实例。',
+				},
+				{
+					'en-US':
+						'Moved content scanning to persistent background jobs with progressive results, cancellation, and failed-item retries.',
+					'zh-CN': '内容扫描改为持久化后台任务，支持渐进显示结果、取消和重试失败项目。',
+				},
+			],
+			fixed: [
+				{
+					'en-US': 'Fixed beta releases losing their prerelease label when platform packages were published.',
+					'zh-CN': '修复发布平台安装包时测试版可能丢失预发布标记的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.0.0-beta.1',
 		version: '2.0.0-beta.1',
 		publishedAt: '2026-11-02',

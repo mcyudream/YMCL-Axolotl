@@ -41,7 +41,7 @@ import {
 import { getSlotDisplay, type SlotDisplay } from '@/lab/recipe-generator/display'
 import { parseIdentifier } from '@/lab/recipe-generator/identifier'
 import { exportDatapackToWorld } from '@/lab/recipe-generator/instance-export'
-import { resolveRecipeItemName } from '@/lab/recipe-generator/item-names'
+import { resolveRecipeItemName } from '@/lab/shared/minecraft/item-names'
 import { categoryMessages, recipeTypeMessages } from '@/lab/recipe-generator/messages'
 import { getCurrentRecipeName } from '@/lab/recipe-generator/naming'
 import { CRAFTING_GRID_SLOTS, generateJavaRecipe } from '@/lab/recipe-generator/recipe-engine'

@@ -8,14 +8,16 @@ use crate::pack::install_from::{
     EnvType, PackDependency, PackFile, PackFileHash, PackFormat,
 };
 use crate::state::{
-    CacheBehaviour, CachedEntry, ContentProviderRef, InstanceMetadata,
-    ModLoader, ModrinthVersionId, SideType, State,
+    CacheBehaviour, CachedEntry, ContentFile, ContentProviderRef,
+    InstanceMetadata, ModLoader, ModrinthVersionId, SideType, State,
 };
 use crate::util::io::{self, IOError};
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, DeflateOption, ZipEntryBuilder};
 use futures::io::AsyncWriteExt;
 use path_util::SafeRelativeUtf8UnixPathBuf;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tokio::fs::File;
@@ -34,6 +36,50 @@ const PROGRESS_EMIT_CHUNKS: u32 = 64;
 const DEFLATE_OPTION: DeflateOption = DeflateOption::Other(1);
 const COPY_BUFFER_SIZE: usize = 256 * 1024;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    Modrinth,
+    Curseforge,
+    Generic,
+}
+
+pub async fn export_pack(
+    instance_id: &str,
+    export_path: PathBuf,
+    included_export_candidates: Vec<String>,
+    version_id: Option<String>,
+    description: Option<String>,
+    name: Option<String>,
+    format: ExportFormat,
+) -> crate::Result<()> {
+    let export_path = std::path::absolute(&export_path)
+        .map_err(|error| IOError::with_path(error, &export_path))?;
+    let temporary = export_path
+        .with_file_name(format!(".ymcl-export-{}.tmp", uuid::Uuid::new_v4()));
+    let result = write_pack_archive(
+        instance_id,
+        &temporary,
+        included_export_candidates,
+        version_id,
+        description,
+        None,
+        name,
+        format,
+        Some(&export_path),
+    )
+    .await;
+    if let Err(error) = result {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(error);
+    }
+    if let Err(error) = io::atomically_replace_file(&temporary, &export_path) {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(error.into());
+    }
+    Ok(())
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn export_mrpack(
     instance_id: &str,
@@ -41,15 +87,16 @@ pub async fn export_mrpack(
     included_export_candidates: Vec<String>,
     version_id: Option<String>,
     description: Option<String>,
-    _name: Option<String>,
+    name: Option<String>,
 ) -> crate::Result<()> {
-    write_mrpack_archive(
+    export_pack(
         instance_id,
-        &export_path,
+        export_path,
         included_export_candidates,
         version_id,
         description,
-        None,
+        name,
+        ExportFormat::Modrinth,
     )
     .await
 }
@@ -68,58 +115,59 @@ pub async fn build_publish_archive(
     let archive_dir = std::env::temp_dir();
     let archive_path = archive_dir
         .join(format!("ymcl-publish-{}.mrpack", uuid::Uuid::new_v4()));
-    write_mrpack_archive(
+    write_pack_archive(
         instance_id,
         &archive_path,
         included_export_candidates,
         version_id,
         None,
         Some(mip_json),
+        None,
+        ExportFormat::Modrinth,
+        None,
     )
     .await?;
     Ok(archive_path)
 }
 
 #[tracing::instrument(skip_all)]
-async fn write_mrpack_archive(
+async fn write_pack_archive(
     instance_id: &str,
     export_path: &PathBuf,
     included_export_candidates: Vec<String>,
     version_id: Option<String>,
     description: Option<String>,
     mip_json: Option<serde_json::Value>,
+    name: Option<String>,
+    format: ExportFormat,
+    destination: Option<&PathBuf>,
 ) -> crate::Result<()> {
     let state = State::get().await?;
+    // Discovery reconciles content under the instance lock. Finish it before
+    // locking the files for manifest hashing and archive writing.
+    let projects = if format == ExportFormat::Generic {
+        Vec::new()
+    } else {
+        get_projects(instance_id, Some(CacheBehaviour::MustRevalidate))
+            .await?
+            .into_iter()
+            .collect()
+    };
     let _permit: tokio::sync::SemaphorePermit =
         state.io_semaphore.0.acquire().await?;
+    let _content_guard = state.lock_instance_content(instance_id).await;
     let metadata = get(instance_id).await?.ok_or_else(|| {
         crate::ErrorKind::OtherError(format!(
             "Tried to export a nonexistent instance {instance_id}!"
         ))
     })?;
-    // Directly associated instances own no files: everything lives in the
-    // linked launcher's `.minecraft`, so there is nothing exportable here.
-    if metadata.instance.is_direct_linked() {
-        return Err(crate::ErrorKind::InputError(format!(
-            "\"{}\" is directly associated with an external launcher; its \
-             files are managed by that launcher and cannot be exported",
-            metadata.instance.name
-        ))
-        .into());
-    }
     let included_export_candidates = included_export_candidates
         .into_iter()
-        .map(|candidate| candidate.replace('\\', "/"))
-        .filter(|x| {
-            if let Some(f) = PathBuf::from(x).file_name()
-                && f.to_string_lossy().starts_with(".DS_Store")
-            {
-                return false;
-            }
-            true
+        .map(|candidate| {
+            mrpack_relative_path(&candidate)
+                .map(|path| path.as_str().to_string())
         })
-        .collect::<Vec<_>>();
-
+        .collect::<crate::Result<Vec<_>>>()?;
     let instance_base_path = get_full_path(instance_id).await?;
     let mut file = File::create(export_path)
         .await
@@ -136,35 +184,57 @@ async fn write_mrpack_archive(
     )
     .await?;
 
-    let (mut progress, mut packfile) = {
-        let mut metadata_progress = 0.0;
-        let mut on_metadata_progress = |target: f64| {
-            let target = METADATA_PROGRESS_WEIGHT * target.clamp(0.0, 1.0);
-            let delta = target - metadata_progress;
-            metadata_progress = target;
-            let _ = emit_loading(
-                &loading_bar,
-                delta,
-                Some("Preparing modpack metadata"),
-            );
-        };
-        let packfile = create_mrpack_json_inner(
-            &metadata,
-            version_id,
-            description,
-            &mut on_metadata_progress,
-        )
-        .await?;
-        drop(on_metadata_progress);
-        (metadata_progress, packfile)
+    let (manifest_name, manifest, remote_paths) = match format {
+        ExportFormat::Modrinth => {
+            let mut packfile = create_mrpack_json_inner(
+                &metadata,
+                version_id.clone(),
+                description.clone(),
+                projects,
+                &mut |_| {},
+            )
+            .await?;
+            if let Some(name) = name {
+                packfile.name = name;
+            }
+            packfile.files.retain(|file| {
+                is_export_candidate_included(
+                    file.path.as_str(),
+                    &included_export_candidates,
+                )
+            });
+            strip_localized_pack_file_paths(&mut packfile.files);
+            let remote_paths = packfile
+                .files
+                .iter()
+                .map(|file| file.path.as_str().to_string())
+                .collect::<HashSet<_>>();
+            (
+                Some("modrinth.index.json"),
+                Some(serde_json::to_value(packfile)?),
+                remote_paths,
+            )
+        }
+        ExportFormat::Curseforge => {
+            let (manifest, remote_paths) = curseforge_manifest(
+                &metadata,
+                &included_export_candidates,
+                name,
+                version_id,
+                description,
+                projects,
+            )
+            .await?;
+            (Some("manifest.json"), Some(manifest), remote_paths)
+        }
+        ExportFormat::Generic => (None, None, HashSet::new()),
     };
-    packfile.files.retain(|f| {
-        is_export_candidate_included(
-            f.path.as_str(),
-            &included_export_candidates,
-        )
-    });
-    strip_localized_pack_file_paths(&mut packfile.files);
+    let mut progress = METADATA_PROGRESS_WEIGHT;
+    let _ = emit_loading(
+        &loading_bar,
+        progress,
+        Some("Preparing modpack metadata"),
+    );
 
     let mut path_list = Vec::new();
     add_all_recursive_folder_paths(&instance_base_path, &mut path_list).await?;
@@ -191,10 +261,9 @@ async fn write_mrpack_archive(
             continue;
         };
         if !metadata.is_file()
-            || packfile
-                .files
-                .iter()
-                .any(|f| f.path.as_str() == exported_path)
+            || remote_paths.contains(&exported_path)
+            || path == export_path
+            || destination == Some(path)
             || !is_export_candidate_included(
                 relative_path.as_str(),
                 &included_export_candidates,
@@ -225,11 +294,13 @@ async fn write_mrpack_archive(
         } else {
             Compression::Deflate
         };
-        let builder = ZipEntryBuilder::new(
-            format!("overrides/{entry_path}").into(),
-            compression,
-        )
-        .deflate_option(DEFLATE_OPTION);
+        let archive_path = if format == ExportFormat::Generic {
+            entry_path
+        } else {
+            format!("overrides/{entry_path}")
+        };
+        let builder = ZipEntryBuilder::new(archive_path.into(), compression)
+            .deflate_option(DEFLATE_OPTION);
         let mut file = File::open(&path)
             .await
             .map_err(|e| IOError::with_path(e, &path))?;
@@ -278,12 +349,18 @@ async fn write_mrpack_archive(
         }
     }
 
-    let data = serde_json::to_vec_pretty(&packfile)?;
-    let builder = ZipEntryBuilder::new(
-        "modrinth.index.json".to_string().into(),
-        Compression::Deflate,
-    );
-    writer.write_entry_whole(builder, &data).await?;
+    if let (Some(manifest_name), Some(manifest)) = (manifest_name, manifest) {
+        let data = serde_json::to_vec_pretty(&manifest)?;
+        writer
+            .write_entry_whole(
+                ZipEntryBuilder::new(
+                    manifest_name.to_string().into(),
+                    Compression::Deflate,
+                ),
+                &data,
+            )
+            .await?;
+    }
     // MIP 扩展描述（features/policies，MIP §3.5）：随 mrpack 一起入库，
     // 适配器在 ingest 时合并进 manifest。
     if let Some(mip_json) = mip_json {
@@ -304,6 +381,84 @@ async fn write_mrpack_archive(
 
 /// Files in these formats are already compressed, so re-compressing them
 /// with Deflate wastes CPU for little size gain; store them as-is instead.
+async fn curseforge_manifest(
+    metadata: &InstanceMetadata,
+    included: &[String],
+    name: Option<String>,
+    version: String,
+    description: Option<String>,
+    projects: Vec<(String, ContentFile)>,
+) -> crate::Result<(serde_json::Value, HashSet<String>)> {
+    let loader = metadata.applied_content_set.loader;
+    let loaders = if loader == ModLoader::Vanilla {
+        Vec::new()
+    } else {
+        let loader_name = match loader {
+            ModLoader::Forge => "forge",
+            ModLoader::NeoForge => "neoforge",
+            ModLoader::Fabric => "fabric",
+            ModLoader::Quilt => "quilt",
+            _ => return Err(crate::ErrorKind::InputError("This loader cannot be represented by the CurseForge format; use a generic ZIP".into()).into()),
+        };
+        let version = metadata
+            .applied_content_set
+            .loader_version
+            .as_deref()
+            .filter(|version| !version.is_empty())
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError("Loader version is missing".into())
+            })?;
+        vec![json!({"id": format!("{loader_name}-{version}"), "primary": true})]
+    };
+    let root = get_full_path(&metadata.instance.id).await?;
+    let mut files = Vec::new();
+    let mut referenced = HashSet::new();
+    for (path, content) in projects {
+        if !content.enabled
+            || !is_export_candidate_included(path.as_str(), included)
+        {
+            continue;
+        }
+        for reference in &content.provider_refs {
+            if let ContentProviderRef::CurseForge {
+                project_id,
+                file_id: Some(file_id),
+            } = reference
+            {
+                let file = crate::api::curseforge::get_file(
+                    project_id.get(),
+                    file_id.get(),
+                )
+                .await?;
+                let (size, hash) = crate::util::fetch::sha1_file_async(
+                    &root.join(path.as_str()),
+                )
+                .await?;
+                if file.file_length == size
+                    && file.hashes.iter().any(|remote| {
+                        remote.algo == 1
+                            && remote.value.eq_ignore_ascii_case(&hash)
+                    })
+                {
+                    files.push(json!({"projectID": project_id.get(), "fileID": file_id.get(), "required": true}));
+                    referenced
+                        .insert(original_content_relative_path(path.as_str()));
+                    break;
+                }
+            }
+        }
+    }
+    Ok((
+        json!({
+            "minecraft": {"version": metadata.applied_content_set.game_version, "modLoaders": loaders},
+            "manifestType": "minecraftModpack", "manifestVersion": 1,
+            "name": name.unwrap_or_else(|| metadata.instance.name.clone()), "version": version,
+            "summary": description, "author": "", "overrides": "overrides", "files": files
+        }),
+        referenced,
+    ))
+}
+
 fn is_already_compressed(path: &str) -> bool {
     let Some(extension) = path.rsplit('.').next() else {
         return false;
@@ -390,7 +545,11 @@ pub async fn get_pack_export_candidates(
         .map_err(|e| IOError::with_path(e, &instance_base_dir))?
     {
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = tokio::fs::symlink_metadata(&path).await?;
+        if io::is_symlink_or_reparse(&metadata) {
+            continue;
+        }
+        if metadata.is_dir() {
             let mut read_dir = io::read_dir(&path).await?;
             while let Some(entry) = read_dir
                 .next_entry()
@@ -478,8 +637,21 @@ pub async fn create_mrpack_json(
     version_id: String,
     description: Option<String>,
 ) -> crate::Result<PackFormat> {
-    create_mrpack_json_inner(metadata, version_id, description, &mut |_| {})
-        .await
+    let projects = get_projects(
+        &metadata.instance.id,
+        Some(CacheBehaviour::MustRevalidate),
+    )
+    .await?
+    .into_iter()
+    .collect();
+    create_mrpack_json_inner(
+        metadata,
+        version_id,
+        description,
+        projects,
+        &mut |_| {},
+    )
+    .await
 }
 
 #[tracing::instrument(skip_all)]
@@ -487,6 +659,7 @@ async fn create_mrpack_json_inner(
     metadata: &InstanceMetadata,
     version_id: String,
     description: Option<String>,
+    projects: Vec<(String, ContentFile)>,
     on_progress: &mut impl FnMut(f64),
 ) -> crate::Result<PackFormat> {
     let mut dependencies = HashMap::new();
@@ -502,13 +675,6 @@ async fn create_mrpack_json_inner(
     );
 
     let state = State::get().await?;
-    let projects = get_projects(
-        &metadata.instance.id,
-        Some(CacheBehaviour::MustRevalidate),
-    )
-    .await?
-    .into_iter()
-    .collect::<Vec<_>>();
     on_progress(0.2);
     let instance_path = get_full_path(&metadata.instance.id).await?;
     let mut modrinth_version_ids = projects
@@ -700,7 +866,11 @@ async fn add_all_recursive_folder_paths(
         .map_err(|e| IOError::with_path(e, folder))?
     {
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = tokio::fs::symlink_metadata(&path).await?;
+        if io::is_symlink_or_reparse(&metadata) {
+            continue;
+        }
+        if metadata.is_dir() {
             add_all_recursive_folder_paths(&path, output).await?;
         } else {
             output.push(path);
@@ -712,6 +882,7 @@ async fn add_all_recursive_folder_paths(
 
 #[cfg(test)]
 mod tests {
+    use super::ExportFormat;
     use crate::state::ModLoader;
     #[cfg(not(feature = "tauri"))]
     use crate::state::{CreateDirectLinkInstance, State};
@@ -760,6 +931,7 @@ mod tests {
     /// this function.
     #[cfg(not(feature = "tauri"))]
     async fn global_state() -> Arc<State> {
+        crate::EventState::init().await.unwrap();
         if !State::initialized() {
             let root = TempDir::new().unwrap().keep();
             let _ =
@@ -770,7 +942,7 @@ mod tests {
 
     #[cfg(not(feature = "tauri"))]
     #[tokio::test]
-    async fn direct_link_instances_cannot_be_exported() {
+    async fn direct_link_instances_can_export_generic_files() {
         let state = global_state().await;
         let minecraft = TempDir::new().unwrap();
         let version_dir = minecraft.path().join("versions/export-demo");
@@ -801,26 +973,51 @@ mod tests {
         .await
         .unwrap();
 
-        let export_target = minecraft.path().join("out.mrpack");
-        let error = super::export_mrpack(
+        let export_target = version_dir.join("out.zip");
+        std::fs::write(&export_target, b"old archive must not be included")
+            .unwrap();
+        std::fs::write(version_dir.join("options.txt"), b"lang:en_us").unwrap();
+        super::export_pack(
             &instance.id,
-            export_target,
-            Vec::new(),
+            export_target.clone(),
+            vec!["options.txt".to_string(), "out.zip".to_string()],
             None,
             None,
             None,
+            ExportFormat::Generic,
         )
         .await
-        .unwrap_err();
-
-        let message = error.to_string();
-        assert!(
-            message.contains("directly associated"),
-            "expected a friendly rejection, got: {message}"
-        );
-        assert!(
-            !minecraft.path().join("out.mrpack").exists(),
-            "no archive may be written"
-        );
+        .unwrap();
+        let archive = std::fs::File::open(export_target).unwrap();
+        let mut archive = zip::ZipArchive::new(archive).unwrap();
+        assert!(archive.by_name("options.txt").is_ok());
+        assert!(archive.by_name("out.zip").is_err());
+        assert_eq!(archive.len(), 1);
+        for (format, filename, manifest) in [
+            (ExportFormat::Modrinth, "out.mrpack", "modrinth.index.json"),
+            (ExportFormat::Curseforge, "curseforge.zip", "manifest.json"),
+        ] {
+            let target = version_dir.join(filename);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                super::export_pack(
+                    &instance.id,
+                    target.clone(),
+                    vec!["options.txt".into()],
+                    None,
+                    None,
+                    None,
+                    format,
+                ),
+            )
+            .await
+            .expect("export must not reacquire its content lock")
+            .unwrap();
+            let mut archive =
+                zip::ZipArchive::new(std::fs::File::open(target).unwrap())
+                    .unwrap();
+            assert!(archive.by_name(manifest).is_ok());
+            assert!(archive.by_name("overrides/options.txt").is_ok());
+        }
     }
 }

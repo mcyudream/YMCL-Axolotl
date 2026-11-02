@@ -287,8 +287,10 @@ async function removeInstance() {
 		game_version: instance.value.game_version,
 	})
 
-	await router.push({ path: '/' })
-	await remove(path).catch(handleError)
+	try {
+		await remove(path)
+		await router.push({ path: '/' })
+	} finally { removing.value = false }
 }
 
 const messages = defineMessages({
@@ -442,7 +444,8 @@ const messages = defineMessages({
 	<ConfirmDeleteInstanceModal
 		ref="deleteConfirmModal"
 		:symlink-target="instance.symlink_target"
-		@delete="removeInstance"
+		:instance-ids="[instance.id]"
+		:on-confirm="removeInstance"
 	/>
 	<div class="block">
 		<div class="float-end ml-10 relative group w-fit">

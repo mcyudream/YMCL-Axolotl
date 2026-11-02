@@ -1,3 +1,4 @@
+import { confirmAppClose } from '@/helpers/app-close-guards'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 
@@ -154,6 +155,7 @@ export async function highlightModInInstance(instanceId, projectPath) {
 }
 
 export async function restartApp() {
+	if (!(await confirmAppClose())) return
 	return await invoke('restart_app')
 }
 

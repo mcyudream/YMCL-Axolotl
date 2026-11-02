@@ -83,8 +83,8 @@ pub enum MMCManagedPackType {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MMCPack {
-    components: Vec<MMCComponent>,
-    format_version: u32,
+    pub(crate) components: Vec<MMCComponent>,
+    pub(crate) format_version: u32,
 }
 
 // https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/Component.h
@@ -195,6 +195,27 @@ pub(crate) async fn import_mmc_instance_dir(
     let instance_cfg =
         load_instance_cfg(&mmc_instance_path.join("instance.cfg")).await?;
 
+    // Validate custom components before creating the imported runtime. Keep
+    // their metadata and bundled libraries after the ZIP scratch is removed.
+    crate::launcher::multimc::MultiMcProfile::from_root(
+        mmc_instance_path.clone(),
+    )
+    .await?;
+    if !symlink {
+        let destination = crate::api::instance::get_full_path(instance_id)
+            .await?
+            .join(crate::launcher::multimc::PROFILE_DIR);
+        let files = retained_runtime_files(&mmc_instance_path).await?;
+        import::copy_files_with_progress(
+            &destination,
+            files,
+            &State::get().await?.io_semaphore,
+            reporter.clone(),
+            details.clone(),
+        )
+        .await?;
+    }
+
     // Re-cache icon
     let icon = if let Some(icon_key) = instance_cfg.icon_key {
         let mut icon = None;
@@ -226,16 +247,7 @@ pub(crate) async fn import_mmc_instance_dir(
         source_filename: None,
     };
 
-    let mut minecraft_folder = mmc_instance_path.join("minecraft");
-    if !minecraft_folder.is_dir() {
-        minecraft_folder = mmc_instance_path.join(".minecraft");
-        if !minecraft_folder.is_dir() {
-            return Err(crate::ErrorKind::InputError(
-                "Instance is missing Minecraft directory".to_string(),
-            )
-            .into());
-        }
-    }
+    let minecraft_folder = minecraft_directory(&mmc_instance_path).await?;
 
     // Managed pack
     if instance_cfg.managed_pack.unwrap_or(false) {
@@ -277,6 +289,48 @@ pub(crate) async fn import_mmc_instance_dir(
     Ok(())
 }
 
+async fn retained_runtime_files(
+    root: &Path,
+) -> crate::Result<Vec<(PathBuf, PathBuf)>> {
+    let mut files = Vec::new();
+    for name in ["mmc-pack.json", "instance.cfg"] {
+        files.push((root.join(name), PathBuf::from(name)));
+    }
+    for directory in ["patches", "libraries", "jarmods"] {
+        let source = root.join(directory);
+        if source.is_dir() {
+            for file in import::get_all_subfiles(&source, false).await? {
+                let metadata = tokio::fs::symlink_metadata(&file).await?;
+                if io::is_symlink_or_reparse(&metadata) {
+                    continue;
+                }
+                let relative = file
+                    .strip_prefix(root)
+                    .map_err(|_| {
+                        crate::ErrorKind::InputError(
+                            "Invalid MultiMC runtime file path".to_string(),
+                        )
+                    })?
+                    .to_path_buf();
+                files.push((file, relative));
+            }
+        }
+    }
+    Ok(files)
+}
+
+async fn minecraft_directory(root: &Path) -> crate::Result<PathBuf> {
+    let minecraft = root.join("minecraft");
+    if minecraft.is_dir() {
+        return Ok(minecraft);
+    }
+    let minecraft = root.join(".minecraft");
+    // Exports made before the first launch can contain only components and
+    // JAR mods. There is no game data to copy until a game directory exists.
+    io::create_dir_all(&minecraft).await?;
+    Ok(minecraft)
+}
+
 async fn import_mmc_unmanaged(
     instance_id: &str,
     minecraft_folder: PathBuf,
@@ -289,13 +343,25 @@ async fn import_mmc_unmanaged(
 ) -> crate::Result<()> {
     let dependencies = mmc_dependencies(&mmc_pack)?;
 
-    install_from::set_instance_information(
+    let profile = crate::launcher::multimc::MultiMcProfile::from_root(
+        minecraft_folder
+            .parent()
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError(
+                    "MultiMC instance has no root directory".to_string(),
+                )
+            })?
+            .to_path_buf(),
+    )
+    .await?;
+    let local_loader_versions = profile.local_loader_versions()?;
+    install_from::set_instance_information_with_local_loader_versions(
         instance_id.to_string(),
         &description,
         &backup_name,
         None,
         &dependencies,
-        false,
+        &local_loader_versions,
     )
     .await?;
 
@@ -313,23 +379,35 @@ async fn import_mmc_unmanaged(
     Ok(())
 }
 
-fn mmc_dependencies(
+pub(crate) fn mmc_dependencies(
     mmc_pack: &MMCPack,
 ) -> crate::Result<std::collections::HashMap<PackDependency, String>> {
     let mut dependencies = std::collections::HashMap::new();
-    let has_legacy_fabric = mmc_pack.components.iter().any(|component| {
-        component
-            .uid
-            .to_ascii_lowercase()
-            .starts_with("net.legacyfabric")
-    });
-    let has_cleanroom = mmc_pack.components.iter().any(|component| {
-        component
-            .uid
-            .to_ascii_lowercase()
-            .starts_with("com.cleanroommc")
-    });
-    for component in &mmc_pack.components {
+    let has_legacy_fabric = mmc_pack
+        .components
+        .iter()
+        .filter(|component| !component.disabled)
+        .any(|component| {
+            component
+                .uid
+                .to_ascii_lowercase()
+                .starts_with("net.legacyfabric")
+        });
+    let has_cleanroom = mmc_pack
+        .components
+        .iter()
+        .filter(|component| !component.disabled)
+        .any(|component| {
+            component
+                .uid
+                .to_ascii_lowercase()
+                .starts_with("com.cleanroommc")
+        });
+    for component in mmc_pack
+        .components
+        .iter()
+        .filter(|component| !component.disabled)
+    {
         let uid = component.uid.to_ascii_lowercase();
         if uid.contains("labymod") {
             return Err(crate::ErrorKind::InputError(
@@ -386,6 +464,78 @@ fn mmc_dependencies(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn component_only_export_gets_an_empty_game_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = minecraft_directory(root.path()).await.unwrap();
+        assert!(directory.is_dir());
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        std::fs::write(directory.join("options.txt"), b"existing").unwrap();
+        assert_eq!(minecraft_directory(root.path()).await.unwrap(), directory);
+        assert_eq!(
+            std::fs::read(directory.join("options.txt")).unwrap(),
+            b"existing"
+        );
+        std::fs::create_dir(root.path().join("minecraft")).unwrap();
+        assert_eq!(
+            minecraft_directory(root.path()).await.unwrap(),
+            root.path().join("minecraft")
+        );
+    }
+
+    #[tokio::test]
+    async fn retained_runtime_includes_jar_mods_after_source_is_removed() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        for (relative, bytes) in [
+            (
+                "mmc-pack.json",
+                "{\"formatVersion\":1,\"components\":[{\"uid\":\"net.minecraft\",\"version\":\"b1.7.3\"},{\"uid\":\"bta\"}]}",
+            ),
+            ("instance.cfg", "name=BTA"),
+            (
+                "patches/bta.json",
+                "{\"+jarMods\":[{\"name\":\"bta.jar\"}]}",
+            ),
+            ("jarmods/bta.jar", "retained jar mod"),
+            (
+                "jarmods/resources/lang/en_US.lang",
+                "retained directory resource",
+            ),
+            ("libraries/custom.jar", "retained library"),
+            ("minecraft/saves/world/level.dat", "game data"),
+        ] {
+            let path = source.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let game = target.path().join("minecraft");
+        let retained = game.join(crate::launcher::multimc::PROFILE_DIR);
+        let files = retained_runtime_files(source.path()).await.unwrap();
+        assert_eq!(files.len(), 6);
+        for (source, relative) in files {
+            let destination = retained.join(relative);
+            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            std::fs::copy(source, destination).unwrap();
+        }
+        source.close().unwrap();
+        assert_eq!(
+            std::fs::read(retained.join("jarmods/bta.jar")).unwrap(),
+            b"retained jar mod"
+        );
+        assert!(
+            crate::launcher::multimc::MultiMcProfile::load(
+                &game,
+                "b1.7.3",
+                crate::state::ModLoader::Vanilla,
+                None
+            )
+            .await
+            .unwrap()
+            .is_some()
+        );
+    }
+
     fn component(uid: &str, version: &str) -> MMCComponent {
         MMCComponent {
             uid: uid.to_string(),
@@ -436,5 +586,28 @@ mod tests {
         };
 
         assert!(mmc_dependencies(&pack).is_err());
+    }
+
+    #[test]
+    fn dependencies_ignore_disabled_components() {
+        let mut disabled = component("com.cleanroommc.cleanroom", "0.3.0");
+        disabled.disabled = true;
+        let mut disabled_laby = component("net.labymod.LabyMod", "4.4.20");
+        disabled_laby.disabled = true;
+        let pack = MMCPack {
+            format_version: 1,
+            components: vec![
+                component("net.minecraft", "1.12.2"),
+                component("net.minecraftforge", "14.23.5.2860"),
+                disabled,
+                disabled_laby,
+            ],
+        };
+        let dependencies = mmc_dependencies(&pack).unwrap();
+        assert_eq!(
+            dependencies.get(&PackDependency::Forge).map(String::as_str),
+            Some("14.23.5.2860")
+        );
+        assert!(!dependencies.contains_key(&PackDependency::Cleanroom));
     }
 }

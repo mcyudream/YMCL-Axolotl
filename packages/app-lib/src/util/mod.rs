@@ -9,6 +9,7 @@ pub mod io;
 pub mod jre;
 pub mod mojang;
 pub mod network;
+pub mod network_diagnostics;
 pub mod platform;
 pub mod protocol_version;
 pub mod proxy;

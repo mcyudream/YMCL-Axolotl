@@ -200,6 +200,8 @@ type ManifestLoaderVersion = {
 }
 
 type AppSettings = {
+	default_game_language: string
+	backup_repository_path: string | null
 	max_concurrent_downloads: number
 	max_concurrent_writes: number
 

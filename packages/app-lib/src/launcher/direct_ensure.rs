@@ -70,7 +70,7 @@ fn non_empty(value: &str) -> Option<String> {
 
 /// Rejects relative artifact paths that would escape the target directory
 /// (absolute paths, backslashes, or `..`/empty segments).
-fn safe_maven_relative_path(relative: &str) -> bool {
+pub(super) fn safe_maven_relative_path(relative: &str) -> bool {
     !relative.is_empty()
         && !relative.starts_with('/')
         && !relative.contains('\\')

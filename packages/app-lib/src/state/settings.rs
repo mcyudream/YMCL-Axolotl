@@ -130,6 +130,10 @@ pub struct Settings {
     pub theme: Theme,
     pub accent_color: AccentColor,
     pub locale: String,
+    #[serde(default)]
+    pub default_game_language: String,
+    #[serde(default)]
+    pub backup_repository_path: Option<String>,
     pub default_page: DefaultPage,
     pub collapsed_navigation: bool,
     pub hide_nametag_skins_page: bool,
@@ -315,6 +319,16 @@ impl Settings {
         )
         .fetch_one(exec)
         .await?;
+        let default_game_language: String = sqlx::query_scalar(
+            "SELECT default_game_language FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
+        let backup_repository_path: Option<String> = sqlx::query_scalar(
+            "SELECT backup_repository_path FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
         let settings = Self {
             max_concurrent_downloads: res.max_concurrent_downloads as usize,
             max_concurrent_writes: res.max_concurrent_writes as usize,
@@ -343,6 +357,8 @@ impl Settings {
             theme: Theme::from_string(&res.theme),
             accent_color: AccentColor::from_string(&res.accent_color),
             locale: res.locale,
+            default_game_language,
+            backup_repository_path,
             default_page: DefaultPage::from_string(&res.default_page),
             collapsed_navigation: res.collapsed_navigation == 1,
             hide_nametag_skins_page: res.hide_nametag_skins_page == 1,
@@ -621,6 +637,11 @@ impl Settings {
 		.bind(self.enter_lightweight_mode_on_game_launch)
 		.execute(exec)
 		.await?;
+
+        sqlx::query("UPDATE settings SET default_game_language = ?, backup_repository_path = ? WHERE id = 0")
+            .bind(&self.default_game_language)
+            .bind(self.backup_repository_path.as_deref())
+            .execute(exec).await?;
 
         sqlx::query("UPDATE settings SET close_behavior = ? WHERE id = 0")
             .bind(&self.close_behavior)

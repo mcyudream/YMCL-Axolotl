@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { hasActiveBackupOperations } from '@/helpers/instance-backup'
+import { confirmAppClose, registerAppCloseGuard } from '@/helpers/app-close-guards'
+import { useQueryClient } from '@tanstack/vue-query'
 import { AuthFeature, TauriModrinthClient, VerboseLoggingFeature } from '@modrinth/api-client'
 import {
 	ChangeSkinIcon,
@@ -569,6 +572,9 @@ const closeChoiceRemember = ref(false)
 const closeRequestInProgress = ref(false)
 let allowWindowClose = false
 let unlistenCloseRequested: (() => void) | undefined
+const instanceContentQueryClient = useQueryClient()
+let unlistenContentRefresh: (() => void) | undefined
+let unlistenLightweightModeRequest: (() => void) | undefined
 let unlistenLightweightModeError: (() => void) | undefined
 let unlistenSystemAccentColor: (() => void) | undefined
 let maximizedStateTimer: ReturnType<typeof setTimeout> | undefined
@@ -864,6 +870,12 @@ watch(
 )
 
 onMounted(async () => {
+	unlistenContentRefresh = await listen<{ event: string; instance_id: string }>('instance', ({ payload }) => {
+		if (payload.event === 'content_changed') {
+			void instanceContentQueryClient.invalidateQueries({ queryKey: ['instance-upgrade', 'content-data', payload.instance_id] })
+		}
+	})
+	unlistenLightweightModeRequest = await listen('request-lightweight-mode', () => { void enterLightweightModeOnClose() })
 	unlistenLightweightModeError = await listen<string>('lightweight-mode-error', ({ payload }) => {
 		allowWindowClose = false
 		closeRequestInProgress.value = false
@@ -969,6 +981,9 @@ onUnmounted(async () => {
 	window.removeEventListener('wheel', handleShortcutWheel, { capture: true, passive: false })
 	unlistenCloseRequested?.()
 	unlistenLightweightModeError?.()
+	unlistenContentRefresh?.()
+	unlistenLightweightModeRequest?.()
+	unregisterBackupCloseGuard()
 	unlistenSystemAccentColor?.()
 	document.querySelector('body').removeEventListener('click', handleClick)
 	document.querySelector('body').removeEventListener('auxclick', handleAuxClick)
@@ -1067,6 +1082,7 @@ async function onImportFileReceived({
 }
 
 const messages = defineMessages({
+	backupCloseBlocked: { id: 'app.backups.close-blocked', defaultMessage: 'Wait for backup operations to finish before closing or restarting the launcher.' },
 	updateInstalledToastTitle: {
 		id: 'app.update.complete-toast.title',
 		defaultMessage: 'Version {version} was successfully installed!',
@@ -1822,21 +1838,35 @@ async function forceExit() {
 	}
 }
 
-async function closeWindowImmediately() {
-	if (closeRequestInProgress.value) return
+const unregisterBackupCloseGuard = registerAppCloseGuard(async () => {
+	if (!stateInitialized.value) return true
+	if (!(await hasActiveBackupOperations())) return true
+	handleError(new Error(formatMessage(messages.backupCloseBlocked)))
+	return false
+})
+
+async function closeWindowImmediately(guardConfirmed = false) {
+	if (closeRequestInProgress.value) return false
+	if (guardConfirmed !== true && !(await confirmAppClose())) return false
 	closeRequestInProgress.value = true
 	allowWindowClose = true
 	try {
 		await saveWindowState(StateFlags.ALL)
 		await invoke('exit_app')
+		return true
 	} catch (error) {
 		allowWindowClose = false
 		closeRequestInProgress.value = false
 		handleError(error)
+		return false
 	}
 }
 
 async function enterLightweightModeOnClose() {
+	if (!(await confirmAppClose())) {
+		closeRequestInProgress.value = false
+		return
+	}
 	closeRequestInProgress.value = true
 	try {
 		await saveWindowState(StateFlags.ALL)
@@ -1850,6 +1880,7 @@ async function enterLightweightModeOnClose() {
 
 async function applyCloseChoice(choice: 'close' | 'lightweight', remember: boolean) {
 	if (closeRequestInProgress.value) return
+	if (choice === 'close' && !(await confirmAppClose())) return
 	closeRequestInProgress.value = true
 	const previousCloseBehavior = themeStore.closeBehavior
 	let closeBehaviorPersisted = false
@@ -1907,7 +1938,7 @@ async function handleCloseRequested(event: { preventDefault: () => void }) {
 	closeChoiceModal.value?.show()
 }
 
-const handleClose = closeWindowImmediately
+const handleClose = () => closeWindowImmediately()
 
 const loading = setupLoadingStateProvider()
 loading.setEnabled(false)
@@ -2635,19 +2666,18 @@ async function downloadUpdate(versionToDownload) {
 }
 
 async function installUpdate() {
+	if (restarting.value || !(await confirmAppClose())) return
 	restarting.value = true
-
 	try {
 		await backupAppDbForUpdate(availableUpdate.value?.version)
 		await setRestartAfterPendingUpdate(true)
-	} catch (e) {
+		if (!(await closeWindowImmediately(true))) await setRestartAfterPendingUpdate(false)
+	} catch (error) {
+		await setRestartAfterPendingUpdate(false).catch(handleError)
+		handleError(error)
+	} finally {
 		restarting.value = false
-		handleError(e)
-		return
 	}
-	setTimeout(async () => {
-		await handleClose()
-	}, 250)
 }
 
 setAppUpdateActions({

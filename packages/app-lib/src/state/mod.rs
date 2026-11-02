@@ -501,6 +501,19 @@ impl State {
             .get_or_try_init(move || Self::initialize_state(app_identifier))
             .await?;
 
+        instances::commands::content_refresh::recover_content_refreshes(
+            &state.pool,
+        )
+        .await?;
+        crate::api::instance::recover_backup_repository().await?;
+        tokio::spawn(async {
+            if let Err(error) =
+                crate::api::instance::maintain_backup_repository().await
+            {
+                tracing::warn!(%error, "Failed to maintain instance backups");
+            }
+        });
+
         // Failures from earlier sessions were already surfaced when they
         // happened; dismissing them first keeps recovery-produced
         // interruptions (fresh `finished`) as the only startup notifications.

@@ -82,6 +82,18 @@ export default new createRouter({
 			},
 		},
 		{
+			path: '/browse/schematic',
+			name: 'Discover schematics',
+			component: () => import('@/pages/Schematics.vue'),
+			meta: { useContext: true, breadcrumb: [{ name: 'Schematics' }], pageTransitionGroup: 'browse' },
+		},
+		{
+			path: '/project/schematic/:source/:id',
+			name: 'Schematic project',
+			component: () => import('@/pages/project/Schematic.vue'),
+			meta: { useContext: true, breadcrumb: [{ name: 'Schematics', link: '/browse/schematic' }, { name: 'Project' }] },
+		},
+		{
 			path: '/browse/:projectType',
 			name: 'Discover content',
 			component: () => import('@/pages/Browse.vue'),
@@ -132,6 +144,18 @@ export default new createRouter({
 				breadcrumb: [{ name: 'Lab', link: '/lab' }, { name: 'Skin editor' }],
 				discordActivity: 'Editing a skin...',
 			},
+		},
+		{
+			path: '/lab/banner-designer',
+			name: 'Banner designer',
+			component: () => import('@/pages/LabBannerDesigner.vue'),
+			meta: { breadcrumb: [{ name: 'Lab', link: '/lab' }, { name: 'Banner designer' }] },
+		},
+		{
+			path: '/lab/command-generator',
+			name: 'Command generator',
+			component: () => import('@/pages/LabCommandGenerator.vue'),
+			meta: { breadcrumb: [{ name: 'Lab', link: '/lab' }, { name: 'Command generator' }] },
 		},
 		{
 			path: '/lab/gradient-text',

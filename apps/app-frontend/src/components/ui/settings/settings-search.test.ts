@@ -32,8 +32,8 @@ const settingsComponentFiles = {
 	],
 	'content-downloads': ['./AppearanceSettings.vue', './ResourceManagementSettings.vue'],
 	'ymcl-domains': ['../../../pages/ymcl/DomainManage.vue'],
-	network: ['./ResourceManagementSettings.vue', './NetworkSettings.vue'],
-	'storage-backups': ['./ResourceManagementSettings.vue', './StorageSettings.vue'],
+	network: ['./ResourceManagementSettings.vue', './NetworkSettings.vue', './NetworkDiagnosticsSettings.vue'],
+	'storage-backups': ['./ResourceManagementSettings.vue', './StorageSettings.vue', './InstanceBackupRepositorySettings.vue'],
 	'privacy-data': ['./PrivacySettings.vue'],
 	updates: ['./UpdateSettings.vue'],
 	logs: ['./LogsSettings.vue'],
@@ -169,9 +169,11 @@ test('settings navigation groups preserve the intended YMCL information architec
 		'shortcut-settings',
 		'language-translation',
 		'ai',
+		'ymcl-domains',
 	])
 	assert.deepEqual(categoriesForGroup('game'), [
 		'launch-defaults',
+		'instance-sync',
 		'java-performance',
 		'content-downloads',
 		'network',
@@ -194,6 +196,8 @@ test('every settings search result resolves to a category and a scroll target', 
 	assert.deepEqual(validateSettingsSearchMappings(), [])
 
 	const categoryIds = new Set(settingsCategoryDefinitions.map((category) => category.id))
+	const shortcutActions = readFileSync(new URL('../../../helpers/shortcut-actions.ts', import.meta.url), 'utf8')
+	const scrollActionIds = new Set([...shortcutActions.matchAll(/id: '(shortcutScroll[^']+)'/g)].map((match) => match[1]))
 	for (const entry of settingsSearchEntries) {
 		assert.equal(categoryIds.has(entry.categoryId), true)
 
@@ -206,6 +210,9 @@ test('every settings search result resolves to a category and a scroll target', 
 		const template = settingsComponentFiles[entry.categoryId]
 			.map((file) => readFileSync(new URL(file, import.meta.url), 'utf8'))
 			.join('\n')
-		assert.equal(template.includes(`id="${targetId}"`), true)
+		const dynamicShortcut = entry.categoryId === 'shortcut-settings'
+			&& template.includes(':id="`settings-target-${action.id}`"')
+			&& scrollActionIds.has(targetId.replace('settings-target-', ''))
+		assert.equal(template.includes(`id="${targetId}"`) || dynamicShortcut, true, targetId)
 	}
 })

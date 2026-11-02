@@ -379,6 +379,18 @@ impl DirectoryInfo {
                     return Err(crate::ErrorKind::DirectoryMoveError(format!("Cannot move directory to {}: directory is not writable", move_dir.display())).into());
                 }
 
+                if settings.backup_repository_path.is_none() {
+                    if let Some(pending) = crate::api::instance::move_default_repository_for_launcher_directory(
+                        &prev_dir.join("Backups").join("instances"),
+                        &move_dir.join("Backups").join("instances"),
+                    ).await? {
+                        sqlx::query("INSERT OR IGNORE INTO pending_backup_repository_cleanups(path, created_at) VALUES (?, ?)")
+                            .bind(pending.to_string_lossy().as_ref())
+                            .bind(chrono::Utc::now().timestamp_millis())
+                            .execute(exec).await?;
+                    }
+                }
+
                 const MOVE_DIRS: &[&str] = &[
                     CACHES_FOLDER_NAME,
                     INSTANCES_FOLDER_NAME,

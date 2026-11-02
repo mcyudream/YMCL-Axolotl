@@ -15,6 +15,7 @@ const labels = {
 	maps: 'Maps',
 	shaders: 'Shaders',
 	servers: 'Servers',
+	schematics: 'Schematics',
 	favorites: 'Favorites',
 }
 
@@ -23,7 +24,7 @@ test('browse project tabs keep favorites after servers and preserve the route co
 
 	assert.deepEqual(
 		tabs.map((tab) => tab.label),
-		['Modpacks', 'Mods', 'Resource Packs', 'Data Packs', 'Maps', 'Shaders', 'Servers', 'Favorites'],
+		['Modpacks', 'Mods', 'Resource Packs', 'Data Packs', 'Maps', 'Shaders', 'Schematics', 'Servers', 'Favorites'],
 	)
 	assert.equal(tabs.at(-1)?.href, '/browse/favorites?i=instance-id')
 	assert.equal(tabs.at(-1)?.onboardingId, 'browse-favorites-tab')

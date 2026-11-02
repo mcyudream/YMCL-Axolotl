@@ -27,6 +27,22 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("instance")
         .invoke_handler(tauri::generate_handler![
             instance_remove,
+            instance_has_active_backup_operations,
+            instance_get_backup_repository_status,
+            instance_move_backup_repository,
+            instance_get_backup_config,
+            instance_enable_backups,
+            instance_normalize_backup_exclusion,
+            instance_update_backup_exclusions,
+            instance_disable_backups,
+            instance_start_backup,
+            instance_cancel_backup,
+            instance_list_backup_operations,
+            instance_list_backups,
+            instance_delete_backup,
+            instance_get_backup_restore_preview,
+            instance_restore_backup,
+            instance_get_backup_delete_summary,
             instance_create_direct_link,
             instance_sync_direct_links,
             instance_get,
@@ -42,6 +58,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_get_content_items,
             instance_get_content_items_by_paths,
             instance_get_content_snapshot,
+            instance_get_content_refresh,
+            instance_start_content_refresh,
+            instance_cancel_content_refresh,
             instance_refresh_content,
             instance_plan_content_updates,
             instance_apply_content_update_plan,
@@ -1860,14 +1879,16 @@ pub async fn instance_export_mrpack(
     version_id: Option<String>,
     description: Option<String>,
     name: Option<String>,
+    format: Option<theseus::instance::ExportFormat>,
 ) -> Result<()> {
-    theseus::instance::export_mrpack(
+    theseus::instance::export_pack(
         instance_id,
         export_location,
         included_overrides,
         version_id,
         description,
         name,
+        format.unwrap_or(theseus::instance::ExportFormat::Modrinth),
     )
     .await?;
     Ok(())
@@ -1934,4 +1955,149 @@ pub async fn instance_edit_icon(
 ) -> Result<()> {
     theseus::instance::edit_icon(instance_id, icon_path).await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn instance_get_backup_repository_status()
+-> Result<theseus::instance::BackupRepositoryStatus> {
+    Ok(theseus::instance::get_backup_repository_status().await?)
+}
+
+#[tauri::command]
+pub async fn instance_move_backup_repository(
+    destination: PathBuf,
+) -> Result<uuid::Uuid> {
+    Ok(theseus::instance::move_backup_repository(destination).await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_backup_config(
+    instance_id: &str,
+) -> Result<theseus::instance::InstanceBackupConfig> {
+    Ok(theseus::instance::get_backup_config(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_enable_backups(
+    instance_id: &str,
+    excluded_paths: Vec<theseus::instance::BackupExclusion>,
+) -> Result<theseus::instance::InstanceBackupConfig> {
+    Ok(theseus::instance::enable_backups(instance_id, excluded_paths).await?)
+}
+
+#[tauri::command]
+pub async fn instance_normalize_backup_exclusion(
+    instance_id: &str,
+    selected_path: PathBuf,
+    kind: theseus::instance::BackupExclusionKind,
+) -> Result<theseus::instance::BackupExclusion> {
+    Ok(theseus::instance::get_backup_exclusion_from_path(
+        instance_id,
+        selected_path,
+        kind,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn instance_update_backup_exclusions(
+    instance_id: &str,
+    excluded_paths: Vec<theseus::instance::BackupExclusion>,
+) -> Result<theseus::instance::InstanceBackupConfig> {
+    Ok(
+        theseus::instance::update_backup_exclusions(
+            instance_id,
+            excluded_paths,
+        )
+        .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn instance_disable_backups(instance_id: &str) -> Result<()> {
+    Ok(theseus::instance::disable_backups(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_start_backup(instance_id: String) -> Result<uuid::Uuid> {
+    Ok(theseus::instance::start_backup_snapshot(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_cancel_backup(operation_id: uuid::Uuid) -> Result<bool> {
+    Ok(theseus::instance::cancel_backup(operation_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_list_backup_operations(
+    instance_id: Option<String>,
+    active_only: bool,
+) -> Result<Vec<theseus::instance::BackupOperation>> {
+    Ok(theseus::instance::list_backup_operations(
+        instance_id.as_deref(),
+        active_only,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn instance_list_backups(
+    instance_id: &str,
+) -> Result<Vec<theseus::instance::BackupSnapshot>> {
+    Ok(theseus::instance::list_backup_snapshots(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_delete_backup(snapshot_id: &str) -> Result<()> {
+    Ok(theseus::instance::delete_backup_snapshot(snapshot_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_backup_restore_preview(
+    snapshot_id: &str,
+) -> Result<uuid::Uuid> {
+    Ok(theseus::instance::get_backup_restore_preview(snapshot_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_restore_backup(
+    snapshot_id: &str,
+    plan_token: &str,
+) -> Result<uuid::Uuid> {
+    Ok(theseus::instance::restore_snapshot(snapshot_id, plan_token).await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_backup_delete_summary(
+    instance_id: &str,
+) -> Result<theseus::instance::BackupDeleteSummary> {
+    Ok(theseus::instance::get_backup_delete_summary(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_content_refresh(
+    instance_id: &str,
+) -> Result<Option<theseus::instance::ContentRefreshJob>> {
+    Ok(theseus::instance::get_content_refresh(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_start_content_refresh(
+    instance_id: &str,
+    retry_failed: bool,
+) -> Result<theseus::instance::ContentRefreshJob> {
+    Ok(
+        theseus::instance::start_content_refresh(instance_id, retry_failed)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn instance_cancel_content_refresh(instance_id: &str) -> Result<()> {
+    Ok(theseus::instance::cancel_content_refresh(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_has_active_backup_operations() -> Result<bool> {
+    Ok(theseus::instance::has_active_backup_operations().await?)
 }

@@ -25,6 +25,16 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     settings.telemetry = current.telemetry;
     settings.telemetry_consent_version = current.telemetry_consent_version;
     settings.discord_rpc = current.discord_rpc;
+    settings.backup_repository_path = current.backup_repository_path;
+    if settings.custom_dir != current.custom_dir
+        && crate::instance::has_active_backup_operations().await?
+    {
+        return Err(crate::ErrorKind::InputError(
+            "Wait for backup operations to finish before moving launcher data"
+                .into(),
+        )
+        .into());
+    }
     settings.apply_legacy_download_source_settings();
     settings.update(&state.pool).await?;
     state.update_http_client_for_settings(&settings).await?;

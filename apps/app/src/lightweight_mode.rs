@@ -93,7 +93,12 @@ pub struct LightweightMode(Mutex<LightweightModeState>);
 
 impl LightweightMode {
     fn enter(&self, app: &AppHandle) -> Result<(), String> {
-        self.enter_internal(app, true)
+        if app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
+            app.emit("request-lightweight-mode", ())
+                .map_err(|error| error.to_string())
+        } else {
+            self.enter_internal(app, true)
+        }
     }
 
     pub fn enter_for_close(&self, app: &AppHandle) -> Result<(), String> {
