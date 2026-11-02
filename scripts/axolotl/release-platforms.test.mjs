@@ -122,7 +122,7 @@ test('release preparation requires all signed update targets and trusted downloa
 	}
 })
 
-function platformMock({ corrupt = false } = {}) {
+function platformMock({ corrupt = false, stringSizes = false } = {}) {
 	const state = new Map()
 	const requests = []
 	let downloads = 0
@@ -161,7 +161,7 @@ function platformMock({ corrupt = false } = {}) {
 			)
 			uploaded.targetPlatforms = body.get('targetPlatforms').split(',')
 			Object.assign(uploaded, {
-				size: bytes.length,
+				size: stringSizes ? String(bytes.length) : bytes.length,
 				sha256: corrupt ? '0'.repeat(64) : sha256,
 				hostedLocally: true,
 				fileKey: `files/${uploaded.filename}`,
@@ -219,6 +219,25 @@ test('failed integrity verification leaves the staged release disabled', async (
 	} finally {
 		await rm(directory, { recursive: true, force: true })
 	}
+})
+
+test('accepts canonical string sizes from the servers and reuses staged uploads', async () => {
+	const mock = platformMock({ stringSizes: true })
+	const environment = { YUDREAM_API_KEY: 'test-yudream', SWUSTMC_API_KEY: 'test-swustmc' }
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	for (const platform of updatePlatforms) mock.state.get(platform.origin).enabled = false
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	for (const platform of updatePlatforms) {
+		mock.state.get(platform.origin).artifacts[0].size = String(bytes.length + 1)
+	}
+	await assert.rejects(
+		publishPlatforms(release, environment, mock.fetcher),
+		/refusing to overwrite/,
+	)
 })
 
 test('one missing platform credential does not prevent publishing to the other site', async () => {

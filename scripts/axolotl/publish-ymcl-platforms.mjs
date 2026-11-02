@@ -100,7 +100,7 @@ function matchesArtifact(actual, expected) {
 	return (
 		actual?.filename === expected.filename &&
 		actual.sha256 === expected.sha256 &&
-		actual.size === expected.size &&
+		(actual.size === expected.size || actual.size === String(expected.size)) &&
 		actual.kind === expected.kind &&
 		actual.platform === expected.platform &&
 		actual.architecture === expected.architecture &&
