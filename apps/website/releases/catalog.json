@@ -1,6 +1,409 @@
 {
-  "updated_at": "2026-09-13T21:17:55.000Z",
+  "updated_at": "2026-11-03T16:14:07.629Z",
   "announcements": [
+    {
+      "id": "launcher-2.1.0",
+      "version": "2.1.0",
+      "publishedAt": "2026-11-03",
+      "title": {
+        "en-US": "YMCL 2.1.0",
+        "zh-CN": "YMCL 2.1.0"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added domain homepages with administrator-managed background carousels, slide descriptions, and background music.",
+            "zh-CN": "新增域首页，由域管理员统一配置背景轮播、图片介绍和背景音乐。"
+          },
+          {
+            "en-US": "Added domain focus feeds combining MC news and published domain announcements.",
+            "zh-CN": "域焦点新增 MC 新闻和域公告列表，支持分类浏览与查看详情。"
+          },
+          {
+            "en-US": "Added inline server selection, character switching, and modpack downloads, updates, and launches on the domain homepage.",
+            "zh-CN": "域首页新增页内服务器选择、角色切换及整合包下载、更新和快捷启动。"
+          },
+          {
+            "en-US": "Added a domain information page with editable cards, administrator publishing and locking, and page memory during each YMCL session.",
+            "zh-CN": "新增域信息第二页，保留卡片编辑、管理员发布与锁定，并在本次启动期间记住所选页面。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed long domain focus feeds pushing launch controls and download progress outside the homepage.",
+            "zh-CN": "修复域焦点过长时将启动按钮、下载详情和进度条挤出首页的问题。"
+          },
+          {
+            "en-US": "Fixed active modpack downloads losing their progress display after leaving and returning to the homepage.",
+            "zh-CN": "修复离开首页后返回时，正在下载的整合包重新显示下载按钮、丢失进度的问题。"
+          },
+          {
+            "en-US": "Fixed importing Minecraft 1.12.2 modpacks that request an available Cleanroom version missing from the loader list.",
+            "zh-CN": "修复 Minecraft 1.12.2 整合包因 Cleanroom 指定版本未列入元数据而无法安装的问题。"
+          },
+          {
+            "en-US": "Fixed Minecraft downloads lacking an independent official fallback and installation reports blaming overrides extraction for game download failures.",
+            "zh-CN": "为 Minecraft 本体下载增加官方备用地址，并修复游戏下载失败被误报为覆盖文件解压失败的问题。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-2.0.0-beta.3",
+      "version": "2.0.0-beta.3",
+      "publishedAt": "2026-11-02",
+      "title": {
+        "en-US": "YMCL 2.0.0-beta.3",
+        "zh-CN": "YMCL 2.0.0-beta.3"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added network diagnostics for service connectivity, DNS, connection addresses, proxy access, and download sampling.",
+            "zh-CN": "新增网络诊断，支持检查服务连通性、DNS、连接地址、代理访问及下载采样。"
+          },
+          {
+            "en-US": "Added skin lookup, preview, and import by Minecraft player name or UUID.",
+            "zh-CN": "新增通过 Minecraft 玩家名或 UUID 查询、预览和导入皮肤。"
+          },
+          {
+            "en-US": "Added automatic skin editor drafts, recovery after unexpected exits, and reminders before leaving unsaved edits.",
+            "zh-CN": "皮肤编辑器新增自动保存草稿、异常退出恢复及离开前未保存提醒。"
+          },
+          {
+            "en-US": "Added incremental instance backups with exclusion rules, deduplicated snapshots, restore previews, and background progress.",
+            "zh-CN": "新增实例增量备份，支持排除规则、快照去重、恢复预览和后台进度。"
+          },
+          {
+            "en-US": "Added a banner designer with layered patterns, color replacement, presets, and Minecraft command export.",
+            "zh-CN": "实验室新增旗帜设计器，支持多层图案、替换颜色、预设和 Minecraft 命令导出。"
+          },
+          {
+            "en-US": "Added a version-aware Minecraft command generator with argument guides, item selection, and NBT editing.",
+            "zh-CN": "实验室新增 Minecraft 命令生成器，支持版本选择、参数说明、物品选择和 NBT 编辑。"
+          },
+          {
+            "en-US": "Added schematic discovery from Reden and BuildSchematics, with previews and installation into instances.",
+            "zh-CN": "新增 Reden 和 BuildSchematics 投影资源浏览，支持预览和安装到实例。"
+          },
+          {
+            "en-US": "Added a default Minecraft language setting with per-instance overrides.",
+            "zh-CN": "新增 Minecraft 默认语言设置，并支持为单个实例单独指定。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Expanded MultiMC imports to retain custom patches, replacement game JARs, and JAR mods.",
+            "zh-CN": "扩展 MultiMC 导入，保留自定义补丁、替换游戏 JAR 和 JAR-mod。"
+          },
+          {
+            "en-US": "Expanded modpack export to MRPACK, CurseForge, and generic ZIP, including linked instances.",
+            "zh-CN": "整合包导出扩展为 MRPACK、CurseForge 和通用 ZIP，并支持关联实例。"
+          },
+          {
+            "en-US": "Moved content scanning to persistent background jobs with progressive results, cancellation, and failed-item retries.",
+            "zh-CN": "内容扫描改为持久化后台任务，支持渐进显示结果、取消和重试失败项目。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed platform packages failing to build with schematic browsing, instance backups, and content scanning.",
+            "zh-CN": "修复投影资源、实例备份和内容扫描功能导致各平台安装包无法生成的问题。"
+          },
+          {
+            "en-US": "Fixed beta releases losing their prerelease label when platform packages were published.",
+            "zh-CN": "修复发布平台安装包时测试版可能丢失预发布标记的问题。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-2.0.0-beta.2",
+      "version": "2.0.0-beta.2",
+      "publishedAt": "2026-11-02",
+      "title": {
+        "en-US": "YMCL 2.0.0-beta.2",
+        "zh-CN": "YMCL 2.0.0-beta.2"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added network diagnostics for service connectivity, DNS, connection addresses, proxy access, and download sampling.",
+            "zh-CN": "新增网络诊断，支持检查服务连通性、DNS、连接地址、代理访问及下载采样。"
+          },
+          {
+            "en-US": "Added skin lookup, preview, and import by Minecraft player name or UUID.",
+            "zh-CN": "新增通过 Minecraft 玩家名或 UUID 查询、预览和导入皮肤。"
+          },
+          {
+            "en-US": "Added automatic skin editor drafts, recovery after unexpected exits, and reminders before leaving unsaved edits.",
+            "zh-CN": "皮肤编辑器新增自动保存草稿、异常退出恢复及离开前未保存提醒。"
+          },
+          {
+            "en-US": "Added incremental instance backups with exclusion rules, deduplicated snapshots, restore previews, and background progress.",
+            "zh-CN": "新增实例增量备份，支持排除规则、快照去重、恢复预览和后台进度。"
+          },
+          {
+            "en-US": "Added a banner designer with layered patterns, color replacement, presets, and Minecraft command export.",
+            "zh-CN": "实验室新增旗帜设计器，支持多层图案、替换颜色、预设和 Minecraft 命令导出。"
+          },
+          {
+            "en-US": "Added a version-aware Minecraft command generator with argument guides, item selection, and NBT editing.",
+            "zh-CN": "实验室新增 Minecraft 命令生成器，支持版本选择、参数说明、物品选择和 NBT 编辑。"
+          },
+          {
+            "en-US": "Added schematic discovery from Reden and BuildSchematics, with previews and installation into instances.",
+            "zh-CN": "新增 Reden 和 BuildSchematics 投影资源浏览，支持预览和安装到实例。"
+          },
+          {
+            "en-US": "Added a default Minecraft language setting with per-instance overrides.",
+            "zh-CN": "新增 Minecraft 默认语言设置，并支持为单个实例单独指定。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Expanded MultiMC imports to retain custom patches, replacement game JARs, and JAR mods.",
+            "zh-CN": "扩展 MultiMC 导入，保留自定义补丁、替换游戏 JAR 和 JAR-mod。"
+          },
+          {
+            "en-US": "Expanded modpack export to MRPACK, CurseForge, and generic ZIP, including linked instances.",
+            "zh-CN": "整合包导出扩展为 MRPACK、CurseForge 和通用 ZIP，并支持关联实例。"
+          },
+          {
+            "en-US": "Moved content scanning to persistent background jobs with progressive results, cancellation, and failed-item retries.",
+            "zh-CN": "内容扫描改为持久化后台任务，支持渐进显示结果、取消和重试失败项目。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed beta releases losing their prerelease label when platform packages were published.",
+            "zh-CN": "修复发布平台安装包时测试版可能丢失预发布标记的问题。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-2.0.0-beta.1",
+      "version": "2.0.0-beta.1",
+      "publishedAt": "2026-11-02",
+      "title": {
+        "en-US": "YMCL 2.0.0-beta.1",
+        "zh-CN": "YMCL 2.0.0-beta.1"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added Modrinth and CurseForge file downloads through resource cache gateways configured by the active domain.",
+            "zh-CN": "新增通过当前域配置的资源缓存网关下载 Modrinth 和 CurseForge 文件的支持。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Updated GitHub releases to make platform packages available as soon as each platform finishes building.",
+            "zh-CN": "GitHub 发布页在各平台构建完成后立即提供对应安装包，无需等待其他平台。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed recovery for slow content downloads while preserving data already downloaded.",
+            "zh-CN": "修复部分内容下载缓慢时无法有效恢复的问题，恢复下载时保留已下载的数据。"
+          }
+        ],
+        "security": [
+          {
+            "en-US": "Fixed archive extraction to reject paths that could write outside the selected destination.",
+            "zh-CN": "修复压缩包路径检查，阻止恶意文件写入解压目标目录之外。"
+          },
+          {
+            "en-US": "Fixed potential exposure of Xbox tokens and third-party login client tokens in logs and diagnostic exports.",
+            "zh-CN": "修复日志和诊断导出中可能泄露 Xbox 令牌与第三方登录客户端令牌的问题。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.10",
+      "version": "1.9.7-beta.10",
+      "publishedAt": "2026-11-02",
+      "title": {
+        "en-US": "YMCL 1.9.7-beta.10",
+        "zh-CN": "YMCL 1.9.7-beta.10"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "Fixed CurseForge content access in production builds by including the required API key.",
+            "zh-CN": "修复生产包缺失 CurseForge API key 导致无法正常访问 CurseForge 内容的问题。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Moved the default update platform to www.yudream.online.",
+            "zh-CN": "默认更新平台切换为 www.yudream.online。"
+          },
+          {
+            "en-US": "Renamed the onboarding wordmark to YuDream Minecraft Launcher.",
+            "zh-CN": "导览名称调整为 YuDream Minecraft Launcher。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.9",
+      "version": "1.9.7-beta.9",
+      "publishedAt": "2026-10-26",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.9",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.9"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "A second click on one-click install-and-join now reuses the remembered local instance directly — no repeated pack download or reinstall — and falls back to a fresh install only when the instance was deleted.",
+            "zh-CN": "一键安装并进服二次点击直接复用记忆中的本地实例，不再重复下载整合包或重装；实例被删除时才自动回落重新下载安装。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.8",
+      "version": "1.9.7-beta.8",
+      "publishedAt": "2026-10-26",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.8",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.8"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "Repeating one-click install-and-join no longer installs duplicate copies or launches a second game while the pack instance is already running.",
+            "zh-CN": "重复触发一键安装并进服不再装出多份实例，目标实例已在运行时也不再拉起第二个游戏窗口。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "The bundled authlib-injector now ships the authlib-injector-union fork; every third-party launch checks the Nexus mirror for the newest release and updates automatically, falling back to the cached or bundled agent when the mirror is unreachable.",
+            "zh-CN": "内置 authlib-injector 切换为 authlib-injector-union fork：每次第三方登录启动都会检查 Nexus 镜像上的最新版本并自动更新，镜像不可达时回退本地缓存或内置 agent。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.7",
+      "version": "1.9.7-beta.7",
+      "publishedAt": "2026-10-25",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.7",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.7"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "One-click install-and-join no longer crashes at the launch step after installation completes; it now starts the instance returned by the installer.",
+            "zh-CN": "一键安装并进服在安装完成后的启动阶段不再因引用未定义变量而中断，现改用安装返回的实例 ID 正常启动。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.6",
+      "version": "1.9.7-beta.6",
+      "publishedAt": "2026-10-24",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.6",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.6"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Friend-site modpack entries can be installed with one click and join the server directly, with cross-site catalog union detection built in.",
+            "zh-CN": "友站条目支持一键安装整合包并直达进服，内置跨站目录 union 一键检测。"
+          },
+          {
+            "en-US": "The mc-interop v1 cross-site catalog is now integrated; friend-site content is served by the in-domain server-list contribution page.",
+            "zh-CN": "接入 mc-interop v1 跨站目录，友站内容改由域内 server-list 贡献页承载。"
+          },
+          {
+            "en-US": "When the active domain distributes downloads, every download category follows the mirror order published by the site and falls back automatically; local mirror picks are managed by the domain.",
+            "zh-CN": "激活域下发下载分发时，各类下载按站点下发的镜像顺序下载并自动回退，本地镜像选择交由域统一管理。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Session parsing now accepts the refreshToken camelCase alias, fixing the production launcher prompting re-login at every two-hour mark.",
+            "zh-CN": "登录会话解析兼容 refreshToken camelCase 别名，修复生产环境每 2 小时整点必弹重新登录的问题。"
+          },
+          {
+            "en-US": "Domain sessions without a refresh_token or expires_in are stored as persistent sessions instead of being force-expired locally.",
+            "zh-CN": "域主机未下发 refresh_token 或 expires_in 时按持久会话保存，不再被本地强制过期。"
+          },
+          {
+            "en-US": "Linux builds register the mcinterop deep-link protocol at runtime.",
+            "zh-CN": "Linux 运行时正确注册 mcinterop 深链协议。"
+          },
+          {
+            "en-US": "One-click install-and-join reuses compatible instances and surfaces the real failure reason instead of failing silently.",
+            "zh-CN": "一键安装并进服复用兼容实例，失败时暴露真实原因而非静默失败。"
+          },
+          {
+            "en-US": "Interop modpack instances use the entry name instead of the literal pack name.",
+            "zh-CN": "互操作整合包实例名改用条目名而非字面量 pack 名。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Build pipeline overhaul: the seed-map engine moved to a dedicated crate and release CI gained cache warming and leaner installers.",
+            "zh-CN": "构建管线重做：seed-map 引擎抽为独立 crate，发布 CI 增加缓存预热与更精简的安装器产物。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.5",
+      "version": "1.9.7-beta.5",
+      "publishedAt": "2026-10-04",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.5",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.5"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "The update announcement page no longer repeats the release notes as raw Markdown text when structured categories are shown.",
+            "zh-CN": "更新公告页在展示结构化分类时不再把发布说明的 Markdown 原文重复罗列一遍。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "launcher-1.9.7-beta.4",
+      "version": "1.9.7-beta.4",
+      "publishedAt": "2026-09-30",
+      "title": {
+        "en-US": "Axolotl Launcher 1.9.7-beta.4",
+        "zh-CN": "Axolotl Launcher 1.9.7-beta.4"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "Fixed third-party login failing at the final step with a serialization error when the domain host reports token lifetimes as strings.",
+            "zh-CN": "修复第三方登录在最后一步因域主机以字符串下发令牌有效期而报序列化错误的问题。"
+          },
+          {
+            "en-US": "Launcher startup no longer replays every historical download failure as notifications; old failures are cleared and recovered interruptions are shown once.",
+            "zh-CN": "启动器启动不再把历史下载失败全部重弹为通知：旧失败自动清理，强关恢复的中断只提示一次。"
+          },
+          {
+            "en-US": "The minimum Java version selector in the publish dialog now uses the shared dropdown component.",
+            "zh-CN": "发布弹窗的最低 Java 版本选择器改用统一样式的下拉组件。"
+          },
+          {
+            "en-US": "Joining a server no longer fails entirely when the optional vanilla-enhanced pack cannot be resolved; it now falls back to the two-option flow.",
+            "zh-CN": "原版增强包解析失败时进服预览不再整体失败，自动降级为两选一流程。"
+          }
+        ]
+      }
+    },
     {
       "id": "launcher-1.9.7-beta.1",
       "version": "1.9.7-beta.1",
@@ -942,12 +1345,6 @@
           {
             "en-US": "Add support for importing without version isolation enabled.",
             "zh-CN": "新增未开启版本隔离的导入支持。"
-          }
-        ],
-        "changed": [
-          {
-            "en-US": "The official QQ group is now 737601250.",
-            "zh-CN": "官方 QQ 群号变更为 737601250。"
           }
         ]
       }
