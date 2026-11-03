@@ -60,6 +60,27 @@ test('production secrets fail closed without printing secret values', () => {
 	)
 })
 
+test('single-site recovery keeps signing requirements and only requires its selected API key', () => {
+	const environment = {
+		CURSEFORGE_API_KEY: 'test-curseforge',
+		TAURI_SIGNING_PRIVATE_KEY: 'test-signing-key',
+		YUDREAM_API_KEY: 'test-yudream',
+		YMCL_UPDATE_PLATFORMS: 'yudream',
+	}
+	assert.doesNotThrow(() => checkReleaseSecrets(environment))
+	for (const name of ['CURSEFORGE_API_KEY', 'TAURI_SIGNING_PRIVATE_KEY', 'YUDREAM_API_KEY']) {
+		assert.throws(() => checkReleaseSecrets({ ...environment, [name]: '' }), new RegExp(name))
+	}
+	assert.throws(
+		() => checkReleaseSecrets({ ...environment, YUDREAM_API_KEY: 'test\nkey' }),
+		/multiline/,
+	)
+	assert.throws(
+		() => checkReleaseSecrets({ ...environment, YMCL_UPDATE_PLATFORMS: 'unknown' }),
+		/platform selection/,
+	)
+})
+
 test('checks the actual binary for the literal embedded key', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'ymcl-embedded-key-test-'))
 	try {
@@ -248,6 +269,29 @@ test('one missing platform credential does not prevent publishing to the other s
 	)
 	assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, true)
 	assert.equal(mock.state.has(updatePlatforms[1].origin), false)
+})
+
+test('explicit single-site publication never contacts the unselected platform', async () => {
+	const mock = platformMock()
+	const environment = { YUDREAM_API_KEY: 'test-yudream', YMCL_UPDATE_PLATFORMS: 'yudream' }
+	await publishPlatforms(release, environment, mock.fetcher)
+	await publishPlatforms(release, environment, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, true)
+	assert.equal(mock.state.has(updatePlatforms[1].origin), false)
+	assert.ok(mock.requests.every((request) => request.origin === updatePlatforms[0].origin))
+})
+
+test('invalid platform selection fails before sending network requests', async () => {
+	const mock = platformMock()
+	for (const selection of ['', 'swustmc', 'yudream,both', 'unknown']) {
+		await assert.rejects(
+			publishPlatforms(release, { YMCL_UPDATE_PLATFORMS: selection }, mock.fetcher),
+			/platform selection/,
+		)
+	}
+	assert.equal(mock.requests.length, 0)
+	assert.equal(mock.downloads(), 0)
 })
 
 test('downloads are rejected when the digest or expected size is wrong', async () => {

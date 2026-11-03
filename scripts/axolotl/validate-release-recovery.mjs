@@ -9,6 +9,7 @@ const recoveryPaths = new Set([
 	'scripts/axolotl/validate-release-recovery.test.mjs',
 	'scripts/axolotl/publish-ymcl-platforms.mjs',
 	'scripts/axolotl/release-platforms.test.mjs',
+	'scripts/axolotl/check-release-secrets.mjs',
 ])
 
 const requiredJobs = [

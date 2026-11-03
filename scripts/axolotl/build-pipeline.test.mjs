@@ -322,6 +322,15 @@ test('final synchronization skips macOS rebundling and preserves the published m
 	assert.equal(validation.env.PUBLISH_ONLY, "${{ inputs.publish_only && 'true' || 'false' }}")
 })
 
+test('recovery platform selection is explicit and normal releases still require both sites', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const selection = release.on.workflow_dispatch.inputs.update_platforms
+	assert.equal(selection.type, 'choice')
+	assert.equal(selection.default, 'both')
+	assert.deepEqual(selection.options, ['both', 'yudream'])
+	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, "${{ inputs.update_platforms || 'both' }}")
+})
+
 test('staging preserves signed updater bytes across rebundling and keeps universal asset names', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-staging-'))
 	try {

@@ -12,6 +12,13 @@ export const updatePlatforms = [
 	{ origin: 'https://www.swustmc.cn', secret: 'SWUSTMC_API_KEY' },
 ]
 
+export function selectedUpdatePlatforms(environment = process.env) {
+	const selection = environment.YMCL_UPDATE_PLATFORMS ?? 'both'
+	if (selection === 'both') return updatePlatforms
+	if (selection === 'yudream') return [updatePlatforms[0]]
+	throw new Error('Invalid update platform selection: expected both or yudream')
+}
+
 const pluginPath = '/api/plugins/ymcl-content'
 const expectedTargets = [
 	'darwin-aarch64',
@@ -278,6 +285,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 }
 
 export async function publishPlatforms(release, environment = process.env, fetcher = fetch) {
+	const platforms = selectedUpdatePlatforms(environment)
 	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-upload-'))
 	const downloads = new Map()
 	const artifactFile = (artifact) => {
@@ -287,14 +295,14 @@ export async function publishPlatforms(release, environment = process.env, fetch
 	}
 	try {
 		const results = await Promise.allSettled(
-			updatePlatforms.map((platform) =>
+			platforms.map((platform) =>
 				publishPlatform(platform, environment[platform.secret], release, artifactFile, fetcher),
 			),
 		)
 		const errors = results.flatMap((result, index) =>
 			result.status === 'rejected'
 				? [
-						`${updatePlatforms[index].origin}: ${failureDetails(
+						`${platforms[index].origin}: ${failureDetails(
 							result.reason,
 							updatePlatforms.map((platform) => environment[platform.secret]),
 						)}`,
