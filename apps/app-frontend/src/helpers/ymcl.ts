@@ -446,6 +446,40 @@ export interface YmclUpdateCheck {
 	notes?: string | null
 }
 
+export interface YmclJoinFeature {
+	id: string
+	name?: string | null
+	default: boolean
+	conflicts: string[]
+}
+
+export interface YmclJoinPreview {
+	available: boolean
+	reason?: string | null
+	server_id?: string | null
+	server_name?: string | null
+	mc_address?: string | null
+	status?: string | null
+	has_pack: boolean
+	pack_id?: string | null
+	channel?: string | null
+	target_version?: string | null
+	required_version?: string | null
+	season_id?: string | null
+	season_name?: string | null
+	features: YmclJoinFeature[]
+	optional_pack_id?: string | null
+	optional_target_version?: string | null
+	optional_features?: YmclJoinFeature[]
+	installed?: {
+		instance_id: string
+		pack_id: string
+		version?: string | null
+		up_to_date: boolean
+	} | null
+	launch_address?: string | null
+}
+
 export interface YmclUpdateResult {
 	applied: boolean
 	staged_files: number
@@ -543,6 +577,8 @@ export interface YmclPackVersionInfo {
 }
 
 export const ymcl = {
+	joinPreview: (serverId: string | null) =>
+		invoke<YmclJoinPreview>('plugin:ymcl|ymcl_join_preview', { serverId }),
 	preLaunchCheck: (instanceId: string) =>
 		invoke<YmclUpdateCheck>('plugin:ymcl|ymcl_pre_launch_check', { instanceId }),
 	applyPackUpdate: (instanceId: string) =>

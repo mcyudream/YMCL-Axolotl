@@ -879,8 +879,11 @@ fn order_auto_routes(
             left_health.cooldown_until.is_some_and(|until| until > now);
         let right_cooling =
             right_health.cooldown_until.is_some_and(|until| until > now);
-        left_cooling
-            .cmp(&right_cooling)
+        // A pack's PDS entrance remains the first attempt even when a
+        // fallback mirror has faster historical measurements.
+        (!route_policy::is_pds_download_url(&left.url))
+            .cmp(&(!route_policy::is_pds_download_url(&right.url)))
+            .then_with(|| left_cooling.cmp(&right_cooling))
             .then_with(|| {
                 left_health
                     .consecutive_failures
@@ -3768,6 +3771,14 @@ fn build_task_probe_plan(
     routes: &[DownloadRoute],
     semaphore: &FetchSemaphore,
 ) -> Option<TaskProbePlan> {
+    // Do not contact fallback mirrors before trying the advertised PDS
+    // entrance. Normal download failures still advance to those routes.
+    if routes
+        .iter()
+        .any(|route| route_policy::is_pds_download_url(&route.url))
+    {
+        return None;
+    }
     if !matches!(
         source_mode_for_resource(request.resource),
         crate::state::DownloadSourceMode::Auto
@@ -5314,6 +5325,9 @@ fn build_download_routes(
     if routes.is_empty() {
         routes.push(official_route(&request.url, request.resource));
     }
+    // Both download engines consume this list. A PDS candidate supplied
+    // later in a pack index must also precede automatically added mirrors.
+    routes.sort_by_key(|route| !route_policy::is_pds_download_url(&route.url));
     routes
 }
 
@@ -6811,6 +6825,149 @@ mod tests {
     }
 
     #[test]
+    fn pds_candidate_precedes_automatically_added_mirrors() {
+        let pds = format!(
+            "https://pds-priority.example/mip/objects/{}",
+            "a".repeat(128)
+        );
+        let request = DownloadRequest::new(
+            "https://cdn.modrinth.com/data/project/versions/version/mod.jar",
+            ResourceClass::Modpack,
+        )
+        .with_candidate_urls([pds.clone()]);
+        let routes = build_download_routes(
+            &request,
+            crate::state::DownloadSourceMode::Auto,
+        );
+
+        assert_eq!(routes[0].url, pds);
+        assert!(routes[1].is_mirror);
+        assert!(routes.iter().any(|route| route.url == request.url));
+    }
+
+    #[test]
+    fn pds_auto_routes_precede_faster_mirrors_and_official_fallbacks() {
+        let _guard = AUTO_SOURCE_TEST_LOCK.lock().unwrap();
+        let previous_health = std::mem::take(&mut *ROUTE_HEALTH.lock());
+        let proxy =
+            "https://pds-priority.example/api/plugins/ymcl-adapter/v1/proxy";
+        for (pds, official, resource) in [
+            (
+                format!(
+                    "https://pds-priority.example/mip/objects/{}",
+                    "a".repeat(128)
+                ),
+                "https://cdn.modrinth.com/data/project/versions/version/mod.jar",
+                ResourceClass::Modpack,
+            ),
+            (
+                format!(
+                    "{proxy}/data/project/versions/version/mod.jar?key=test"
+                ),
+                "https://cdn.modrinth.com/data/project/versions/version/mod.jar",
+                ResourceClass::Modrinth,
+            ),
+            (
+                format!("{proxy}/files/1234/567/mod.jar?key=test"),
+                "https://edge.forgecdn.net/files/1234/567/mod.jar",
+                ResourceClass::CurseForge,
+            ),
+        ] {
+            let request = DownloadRequest::new(&pds, resource)
+                .with_candidate_urls([official]);
+            let mut routes = build_download_routes(
+                &request,
+                crate::state::DownloadSourceMode::Auto,
+            );
+            for route in routes.iter().filter(|route| route.is_mirror) {
+                let key = route_health_key(route, resource).unwrap();
+                ROUTE_HEALTH.lock().insert(
+                    key,
+                    RouteHealth {
+                        success_samples: 3,
+                        throughput_bps: Some(100_000_000.0),
+                        ..RouteHealth::default()
+                    },
+                );
+            }
+
+            order_auto_routes(&mut routes, resource, true);
+
+            assert_eq!(routes[0].url, pds);
+            assert!(routes[1].is_mirror);
+            assert_eq!(routes.last().unwrap().url, official);
+            assert_eq!(first_h2_route(&routes).unwrap().url, pds);
+        }
+        *ROUTE_HEALTH.lock() = previous_health;
+    }
+
+    #[tokio::test]
+    async fn pds_download_uses_redirect_then_mirror_only_after_failure() {
+        let _guard = RANGE_SPLITTING_TEST_LOCK.lock().await;
+        let data = b"pds mod contents".to_vec();
+        let hash = format!("{:x}", Sha512::digest(&data));
+        for status in ["200 OK", "503 Service Unavailable"] {
+            let (data_url, data_requests, data_server) =
+                spawn_http_fixture(HttpFixture::new(status, data.clone()))
+                    .await;
+            let (gateway, pds_requests, pds_server) =
+                spawn_redirect_server(data_url, Duration::ZERO).await;
+            let pds = format!("{gateway}/mip/objects/{hash}");
+            let (mirror, mirror_requests, mirror_server) =
+                spawn_http_fixture(HttpFixture::new("200 OK", data.clone()))
+                    .await;
+            let (official, official_requests, official_server) =
+                spawn_http_fixture(HttpFixture::new("200 OK", data.clone()))
+                    .await;
+            let request = DownloadRequest::new(&pds, ResourceClass::Modpack)
+                .with_segmented_download(false)
+                .with_integrity(Integrity {
+                    size: Some(data.len() as u64),
+                    sha512: Some(hash.clone()),
+                    ..Integrity::default()
+                });
+            let mut routes = vec![
+                direct_test_route(mirror, DownloadRouteSource::Mcim),
+                direct_test_route(pds.clone(), DownloadRouteSource::Official),
+                direct_test_route(official, DownloadRouteSource::Alternate),
+            ];
+            order_auto_routes(&mut routes, ResourceClass::Modpack, true);
+            let semaphore = FetchSemaphore(Semaphore::new(4));
+            prepare_native_download_routes(&request, &mut routes, &semaphore)
+                .await;
+            let directory = tempfile::tempdir().unwrap();
+            let destination = directory.path().join("mod.jar");
+            let result = run_native_download_attempts(
+                request,
+                &destination,
+                &semaphore,
+                None,
+                routes,
+                suffixed_path(&destination, ".part"),
+                None,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(tokio::fs::read(&destination).await.unwrap(), data);
+            assert!(pds_requests.load(Ordering::Relaxed) > 0);
+            assert!(data_requests.load(Ordering::Relaxed) > 0);
+            assert_eq!(official_requests.load(Ordering::Relaxed), 0);
+            if status == "200 OK" {
+                assert_eq!(mirror_requests.load(Ordering::Relaxed), 0);
+                assert_eq!(result.source, DownloadRouteSource::Official);
+            } else {
+                assert_eq!(mirror_requests.load(Ordering::Relaxed), 1);
+                assert_eq!(result.source, DownloadRouteSource::Mcim);
+            }
+            pds_server.abort();
+            data_server.abort();
+            mirror_server.abort();
+            official_server.abort();
+        }
+    }
+
+    #[test]
     fn mcim_file_routes_are_skipped_for_files_above_its_cache_cap() {
         let build = |size: Option<u64>| {
             let integrity = size
@@ -7076,6 +7233,58 @@ mod tests {
         assert_eq!(fallback_requests.load(Ordering::Relaxed), 1);
         missing_server.abort();
         fallback_server.abort();
+    }
+
+    #[tokio::test]
+    async fn minecraft_client_fallback_survives_a_mirror_redirecting_to_the_failed_origin()
+     {
+        let (primary, primary_requests, primary_server) = spawn_http_fixture(
+            HttpFixture::new("503 Service Unavailable", Vec::new()),
+        )
+        .await;
+        let (mirror, mirror_requests, mirror_server) =
+            spawn_redirect_server(primary.clone(), Duration::ZERO).await;
+        let data = b"verified Minecraft client contents";
+        let hash = sha1_smol::Sha1::from(data.as_slice()).hexdigest();
+        let (alternate, alternate_requests, alternate_server) =
+            spawn_http_fixture(HttpFixture::new("200 OK", data)).await;
+        let primary_route =
+            direct_test_route(primary.clone(), DownloadRouteSource::Official);
+        let mirror_route =
+            direct_test_route(mirror, DownloadRouteSource::Bmclapi);
+        remember_effective_route_authority(&mirror_route, &primary);
+        let routes = vec![
+            primary_route,
+            mirror_route,
+            direct_test_route(alternate, DownloadRouteSource::Alternate),
+        ];
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("client.jar");
+        let request =
+            DownloadRequest::new(primary, ResourceClass::MinecraftLibrary)
+                .with_segmented_download(false)
+                .with_integrity(
+                    Integrity::sha1(hash).with_size(data.len() as u64),
+                );
+        let result = run_native_download_attempts(
+            request,
+            &destination,
+            &FetchSemaphore(Semaphore::new(2)),
+            None,
+            routes,
+            suffixed_path(&destination, ".part"),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(tokio::fs::read(destination).await.unwrap(), data);
+        assert_eq!(result.source, DownloadRouteSource::Alternate);
+        assert_eq!(primary_requests.load(Ordering::Relaxed), 1);
+        assert_eq!(mirror_requests.load(Ordering::Relaxed), 0);
+        assert_eq!(alternate_requests.load(Ordering::Relaxed), 1);
+        primary_server.abort();
+        mirror_server.abort();
+        alternate_server.abort();
     }
 
     #[tokio::test]

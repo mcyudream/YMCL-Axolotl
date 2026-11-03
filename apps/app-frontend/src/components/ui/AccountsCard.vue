@@ -98,7 +98,11 @@
 		</template>
 		<div class="bg-button-bg pt-1 pb-2 border-0 border-t border-solid border-surface-5">
 			<template v-if="visibleAccounts.length > 0">
-				<div v-for="account in visibleAccounts" :key="account.account_id" class="flex gap-1 items-center">
+				<div
+					v-for="account in visibleAccounts"
+					:key="account.account_id"
+					class="flex gap-1 items-center"
+				>
 					<button
 						class="flex items-center flex-shrink flex-grow overflow-clip gap-2 p-2 border-0 bg-transparent cursor-pointer button-base min-w-0"
 						@click="setAccount(account)"
@@ -180,11 +184,7 @@
 						{{ formatMessage(messages.switchProfile) }}
 					</button>
 				</ButtonStyled>
-				<ButtonStyled
-					v-else-if="!ymclStore.isPersonal"
-					color="brand"
-					class="w-full"
-				>
+				<ButtonStyled v-else-if="!ymclStore.isPersonal" color="brand" class="w-full">
 					<button :disabled="loginDisabled" @click="showDomainLogin()">
 						<LogInIcon v-if="!loginDisabled" />
 						<SpinnerIcon v-else class="animate-spin" />
@@ -239,21 +239,26 @@
 				<SpinnerIcon class="animate-spin" />
 				{{ formatMessage(messages.loadingProfiles) }}
 			</p>
-			<p v-else-if="profileSwitchError" class="m-0 text-sm text-red">
+			<p v-if="profileSwitchError" class="m-0 text-sm text-red">
 				{{ profileSwitchError }}
 			</p>
-			<template v-else>
-				<ButtonStyled
-					v-for="profile in switchProfiles"
-					:key="profile.id"
-					class="w-full"
-				>
-					<button @click="switchToProfile(profile.name)">
+			<ButtonStyled v-if="profileSwitchError && !switchProfiles.length">
+				<button :disabled="profileSwitchLoading" @click="showProfileSwitch()">
+					<RefreshCwIcon />{{ formatMessage(commonMessages.retryButton) }}
+				</button>
+			</ButtonStyled>
+			<template v-if="!profileSwitchLoading">
+				<ButtonStyled v-for="profile in switchProfiles" :key="profile.id" class="w-full">
+					<button :disabled="profileSwitchBusy" @click="switchToProfile(profile.name)">
+						<SpinnerIcon
+							v-if="profileSwitchBusy && switchingProfileName === profile.name"
+							class="animate-spin"
+						/>
 						{{ profile.name }}
 					</button>
 				</ButtonStyled>
 				<p
-					v-if="switchProfiles.length === 0"
+					v-if="switchProfiles.length === 0 && !profileSwitchError"
 					class="m-0 text-sm text-secondary"
 				>
 					{{ formatMessage(messages.noProfiles) }}
@@ -470,7 +475,7 @@ import ModalWrapper from '@/components/ui/modal/ModalWrapper.vue'
 import AddDomainModal from '@/components/ymcl/AddDomainModal.vue'
 import DomainLoginModal from '@/components/ymcl/DomainLoginModal.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
-import { compareMinecraftAccounts } from '@/helpers/accounts'
+import { accountsForDomain, compareMinecraftAccounts } from '@/helpers/accounts'
 import { trackEvent } from '@/helpers/analytics'
 import { domainYggdrasilRoots, ymcl, ymclErrorMessage } from '@/helpers/ymcl'
 import {
@@ -743,6 +748,20 @@ defineExpose({
 	setEquippedSkin,
 	setLoginDisabled,
 	loginDisabled,
+	get selectedProfile() {
+		const account = selectedAccount.value
+		return account ? { name: account.profile.name, avatarUrl: avatarUrl.value } : null
+	},
+	get profileSwitchPending() {
+		return profileSwitchBusy.value || profileSwitchLoading.value
+	},
+	get profileSwitchDisabled() {
+		return (
+			offline.value || loginDisabled.value || profileSwitchBusy.value || profileSwitchLoading.value
+		)
+	},
+	showProfileSwitch,
+	showDomainLogin,
 })
 
 await refreshValues()
@@ -757,45 +776,39 @@ watch(offline, async () => {
  * service through either the authlib-injector or the yggc plugin, so the
  * backend-resolved root of every domain is collected alongside both candidate
  * shapes and matching accepts whichever one the account was stored with. */
-const domainYggRoots = ref<string[]>([])
+const domainYggRoots = ref<Record<string, string[]>>({})
 let domainYggRootsGeneration = 0
 
 async function refreshDomainYggRoots() {
 	const generation = ++domainYggRootsGeneration
-	const roots = new Set<string>()
-	for (const domain of ymclStore.domains) {
-		const origin = domain.origin
-		if (domain.is_personal || !origin) continue
-		for (const candidate of domainYggdrasilRoots(origin)) roots.add(candidate)
-		try {
+	const domains = ymclStore.domains.filter((domain) => !domain.is_personal && domain.origin)
+	const roots = Object.fromEntries(
+		domains.map((domain) => [domain.id, domainYggdrasilRoots(domain.origin!)]),
+	)
+	domainYggRoots.value = roots
+	await Promise.allSettled(
+		domains.map(async (domain) => {
 			const resolved = await ymcl.yggRoot(domain.id)
-			if (resolved) roots.add(resolved.replace(/\/+$/, ''))
-		} catch {
-			/* best effort: the candidate shapes already cover both providers */
-		}
-	}
+			if (resolved)
+				roots[domain.id] = [...new Set([...roots[domain.id], resolved.replace(/\/+$/, '')])]
+		}),
+	)
 	if (generation !== domainYggRootsGeneration) return
-	domainYggRoots.value = [...roots]
+	domainYggRoots.value = { ...roots }
 }
 
 watch(() => ymclStore.domains, refreshDomainYggRoots, { immediate: true })
 
-function isDomainAccount(account: MinecraftCredential): boolean {
-	if (account.account_type !== 'yggdrasil' || !account.yggdrasil) return false
-	const apiRoot = account.yggdrasil.api_root.replace(/\/+$/, '')
-	return domainYggRoots.value.includes(apiRoot)
-}
-
 const visibleAccounts = computed(() =>
-	ymclStore.isPersonal
-		? accounts.value.filter((account) => !isDomainAccount(account))
-		: accounts.value.filter((account) => isDomainAccount(account)),
+	accountsForDomain(
+		accounts.value,
+		domainYggRoots.value,
+		ymclStore.isPersonal ? null : ymclStore.activeDomainId,
+	),
 )
 
 const selectedAccount = computed(() =>
-	visibleAccounts.value.find(
-		(account) => account.account_id === defaultUser.value,
-	),
+	visibleAccounts.value.find((account) => account.account_id === defaultUser.value),
 )
 
 /** Remembers the selected account per domain so switching domains switches
@@ -814,10 +827,7 @@ function loadAccountSelections(): Record<string, string> {
 
 function persistAccountSelections() {
 	try {
-		localStorage.setItem(
-			ACCOUNT_SELECTIONS_KEY,
-			JSON.stringify(accountSelections.value),
-		)
+		localStorage.setItem(ACCOUNT_SELECTIONS_KEY, JSON.stringify(accountSelections.value))
 	} catch {
 		/* storage unavailable (private mode etc.) — selection just won't persist */
 	}
@@ -844,18 +854,15 @@ async function applyDefaultUserId(userId: string) {
 // Domain switches (and the account list settling after a refresh) re-apply
 // the remembered selection; accounts outside the active domain never stay
 // selected.
-watch(
-	[visibleAccounts, () => ymclStore.activeDomainId],
-	async ([list, domainId]) => {
-		if (list.some((account) => account.account_id === defaultUser.value)) return
-		const saved = accountSelections.value[domainId]
-		if (saved && list.some((account) => account.account_id === saved)) {
-			await applyDefaultUserId(saved)
-			return
-		}
-		if (list.length > 0) await applyDefaultUserId(list[0].account_id)
-	},
-)
+watch([visibleAccounts, () => ymclStore.activeDomainId], async ([list, domainId]) => {
+	if (list.some((account) => account.account_id === defaultUser.value)) return
+	const saved = accountSelections.value[domainId]
+	if (saved && list.some((account) => account.account_id === saved)) {
+		await applyDefaultUserId(saved)
+		return
+	}
+	if (list.length > 0) await applyDefaultUserId(list[0].account_id)
+})
 
 function notifyAccountChange() {
 	accountChangeRevision.value += 1
@@ -939,10 +946,7 @@ function getAccountAvatarUrl(account: MinecraftCredential) {
 	if (cachedHeadUrl) {
 		return cachedHeadUrl
 	}
-	if (
-		account.account_id === selectedAccount.value?.account_id &&
-		equippedSkin.value?.texture_key
-	) {
+	if (account.account_id === selectedAccount.value?.account_id && equippedSkin.value?.texture_key) {
 		const cachedUrl = headUrlCache.value.get(equippedSkin.value.texture_key)
 		if (cachedUrl) {
 			return cachedUrl
@@ -1047,34 +1051,67 @@ const profileSwitchBusy = ref(false)
 const profileSwitchLoading = ref(false)
 const profileSwitchError = ref<string | null>(null)
 const switchProfiles = ref<{ id: string; name: string }[]>([])
+const switchingProfileName = ref<string | null>(null)
+const profileSwitchContext = computed(() =>
+	JSON.stringify([ymclStore.activeDomainId, ymclStore.session?.session.user_id ?? null]),
+)
+let profileSwitchRequest = 0
+
+watch(profileSwitchContext, () => {
+	profileSwitchRequest++
+	profileSwitchModal.value?.hide()
+	profileSwitchBusy.value = false
+	switchingProfileName.value = null
+	profileSwitchLoading.value = false
+	profileSwitchError.value = null
+	switchProfiles.value = []
+})
 
 async function showProfileSwitch() {
+	if (offline.value || profileSwitchBusy.value || profileSwitchLoading.value) return
+	if (ymclStore.session?.domain_id !== ymclStore.activeDomainId) {
+		showDomainLogin()
+		return
+	}
+	const domainId = ymclStore.activeDomainId
+	const request = ++profileSwitchRequest
 	profileSwitchError.value = null
 	profileSwitchLoading.value = true
 	switchProfiles.value = []
 	profileSwitchModal.value?.show()
 	try {
-		const profiles = await ymcl.yggProfiles(ymclStore.activeDomainId)
+		const profiles = await ymcl.yggProfiles(domainId)
+		if (request !== profileSwitchRequest) return
 		switchProfiles.value = Array.isArray(profiles) ? [...profiles] : []
 	} catch (error) {
-		profileSwitchError.value = ymclErrorMessage(error)
+		if (request === profileSwitchRequest) profileSwitchError.value = ymclErrorMessage(error)
 	} finally {
-		profileSwitchLoading.value = false
+		if (request === profileSwitchRequest) profileSwitchLoading.value = false
 	}
 }
 
 async function switchToProfile(profileName: string) {
+	if (offline.value || profileSwitchBusy.value || profileSwitchLoading.value) return
+	const domainId = ymclStore.activeDomainId
+	if (ymclStore.session?.domain_id !== domainId) return
+	const request = ++profileSwitchRequest
 	profileSwitchError.value = null
 	profileSwitchBusy.value = true
+	switchingProfileName.value = profileName
 	try {
-		const result = await ymcl.yggExchange(ymclStore.activeDomainId, profileName)
+		const result = await ymcl.yggExchange(domainId, profileName)
+		if (request !== profileSwitchRequest) return
 		await setAccount(result.credentials as unknown as MinecraftCredential)
+		if (request !== profileSwitchRequest) return
 		trackEvent('YggdrasilAccountAdd')
 		profileSwitchModal.value?.hide()
 	} catch (error) {
-		profileSwitchError.value = ymclErrorMessage(error)
+		if (request === profileSwitchRequest) profileSwitchError.value = ymclErrorMessage(error)
 	} finally {
-		profileSwitchBusy.value = false
+		if (request === profileSwitchRequest) {
+			profileSwitchBusy.value = false
+			switchingProfileName.value = null
+		}
 	}
 }
 
@@ -1343,7 +1380,7 @@ const messages = defineMessages({
 	},
 	domainSignIn: {
 		id: 'minecraft-account.domain-sign-in',
-		defaultMessage: '登录「{domain}」',
+		defaultMessage: 'Sign in to {domain}',
 	},
 	domainSessionSignedIn: {
 		id: 'minecraft-account.domain-session-signed-in',
@@ -1351,19 +1388,19 @@ const messages = defineMessages({
 	},
 	switchProfile: {
 		id: 'minecraft-account.switch-profile',
-		defaultMessage: '切换角色',
+		defaultMessage: 'Switch profile',
 	},
 	switchProfileTitle: {
 		id: 'minecraft-account.switch-profile.title',
-		defaultMessage: '切换 Minecraft 角色',
+		defaultMessage: 'Switch Minecraft profile',
 	},
 	loadingProfiles: {
 		id: 'minecraft-account.switch-profile.loading',
-		defaultMessage: '正在获取角色…',
+		defaultMessage: 'Loading profiles…',
 	},
 	noProfiles: {
 		id: 'minecraft-account.switch-profile.no-profiles',
-		defaultMessage: '该域账号没有可用的 Minecraft 角色',
+		defaultMessage: 'This domain account has no Minecraft profiles.',
 	},
 	addMicrosoftAccount: {
 		id: 'minecraft-account.add-microsoft-account',

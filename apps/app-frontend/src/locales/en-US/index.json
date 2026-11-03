@@ -2105,17 +2105,35 @@
 	"app.home.instances.view-all": {
 		"message": "View all instances"
 	},
-	"app.home.layout.configure-domain": {
-		"message": "Configure domain home"
+	"app.home.layout.edit-domain-layout": {
+		"message": "Edit domain layout"
 	},
-	"app.home.layout.design-domain": {
-		"message": "Edit domain home"
+	"app.home.layout.publish-domain-layout": {
+		"message": "Publish domain layout"
+	},
+	"app.home.layout.cancel-domain-editing": {
+		"message": "Cancel domain layout editing"
+	},
+	"app.home.layout.lock-domain-layout": {
+		"message": "Lock domain layout to prevent member customization"
+	},
+	"app.home.layout.unlock-domain-layout": {
+		"message": "Unlock domain layout to allow member customization"
+	},
+	"app.home.layout.domain-layout-published": {
+		"message": "Domain layout published for all members"
+	},
+	"app.home.layout.domain-layout-locked": {
+		"message": "Domain layout locked"
+	},
+	"app.home.layout.domain-layout-unlocked": {
+		"message": "Domain layout unlocked"
+	},
+	"app.home.layout.unpublished-widgets": {
+		"message": "{count, plural, one {# device-specific widget was not published.} other {# device-specific widgets were not published.}}"
 	},
 	"app.home.layout.edit-own-home": {
 		"message": "Customize your home"
-	},
-	"app.home.layout.publish-domain": {
-		"message": "Publish domain layout"
 	},
 	"app.home.layout.switch-to-information": {
 		"message": "Switch to Information Home"
@@ -2279,9 +2297,6 @@
 	"app.home.widgets.domain-page-description": {
 		"message": "Add a home shortcut for the domain page ({renderer})."
 	},
-	"app.home.widgets.domain-published": {
-		"message": "Domain home layout published"
-	},
 	"app.home.widgets.domain-servers": {
 		"message": "Servers"
 	},
@@ -2404,9 +2419,6 @@
 	},
 	"app.home.widgets.unavailable": {
 		"message": "Content unavailable"
-	},
-	"app.home.widgets.unmapped-skipped": {
-		"message": "These widgets have no domain card type and were not published: {widgets}"
 	},
 	"app.home.widgets.world": {
 		"message": "Single world"
@@ -9515,6 +9527,87 @@
 	"app.ymcl.join.title": {
 		"message": "Join server"
 	},
+	"app.ymcl.landing.transfer.available": {
+		"message": "Download to start playing"
+	},
+	"app.ymcl.landing.transfer.changed": {
+		"message": "Updated {count} files; removed {deleted} old files."
+	},
+	"app.ymcl.landing.transfer.check": {
+		"message": "Check for updates"
+	},
+	"app.ymcl.landing.transfer.checking": {
+		"message": "Checking for updates"
+	},
+	"app.ymcl.landing.transfer.create": {
+		"message": "Create an instance"
+	},
+	"app.ymcl.landing.transfer.default-features": {
+		"message": "Creates a separate instance with the server’s default components."
+	},
+	"app.ymcl.landing.transfer.domain-changed": {
+		"message": "The active domain changed. Continue from the original domain."
+	},
+	"app.ymcl.landing.transfer.downloading": {
+		"message": "Downloading the server pack"
+	},
+	"app.ymcl.landing.transfer.downloads": {
+		"message": "Download details"
+	},
+	"app.ymcl.landing.transfer.enhanced": {
+		"message": "Download the enhanced vanilla pack"
+	},
+	"app.ymcl.landing.transfer.failed": {
+		"message": "Could not prepare the game"
+	},
+	"app.ymcl.landing.transfer.files": {
+		"message": "{current} / {total} files"
+	},
+	"app.ymcl.landing.transfer.finalizing": {
+		"message": "Saving instance configuration"
+	},
+	"app.ymcl.landing.transfer.installing": {
+		"message": "Installing the game"
+	},
+	"app.ymcl.landing.transfer.instance": {
+		"message": "Game instance"
+	},
+	"app.ymcl.landing.transfer.local-files": {
+		"message": "Local files"
+	},
+	"app.ymcl.landing.transfer.logs": {
+		"message": "Game logs"
+	},
+	"app.ymcl.landing.transfer.notes": {
+		"message": "Update notes"
+	},
+	"app.ymcl.landing.transfer.pending": {
+		"message": "{count} files to update; {deleted} files to remove."
+	},
+	"app.ymcl.landing.transfer.ready": {
+		"message": "Ready to play"
+	},
+	"app.ymcl.landing.transfer.skipped": {
+		"message": "{count} files could not be updated. Their local copies were kept."
+	},
+	"app.ymcl.landing.transfer.update-available": {
+		"message": "An update is available"
+	},
+	"app.ymcl.landing.transfer.updating": {
+		"message": "Updating the server pack"
+	},
+	"app.ymcl.landing.transfer.vanilla": {
+		"message": "Download Minecraft {version}"
+	},
+	"app.ymcl.landing.transfer.version": {
+		"message": "Pack version {version}"
+	},
+	"app.ymcl.landing.transfer.versions": {
+		"message": "Version {current} → {target}"
+	},
+	"app.ymcl.landing.transfer.waiting": {
+		"message": "Some required files need your attention"
+	},
 	"app.ymcl.manage.check-failed": {
 		"message": "Failed to check domain pack status"
 	},
@@ -9560,6 +9653,9 @@
 	"app.ymcl.packs.check-updates": {
 		"message": "Check for updates"
 	},
+	"app.ymcl.packs.context-changed": {
+		"message": "The active domain or account changed. Continue from the original domain."
+	},
 	"app.ymcl.packs.description": {
 		"message": "Server modpacks published in this domain; downloading creates a new local instance with default optional content."
 	},
@@ -9589,6 +9685,9 @@
 	},
 	"app.ymcl.packs.open-instance": {
 		"message": "Open instance"
+	},
+	"app.ymcl.packs.operation-in-progress": {
+		"message": "A task for this server is already running. View its progress in Downloads."
 	},
 	"app.ymcl.packs.title": {
 		"message": "Domain modpacks"
@@ -11446,6 +11545,21 @@
 	},
 	"minecraft-account.copy-uuid": {
 		"message": "Copy UUID"
+	},
+	"minecraft-account.domain-sign-in": {
+		"message": "Sign in to {domain}"
+	},
+	"minecraft-account.switch-profile": {
+		"message": "Switch profile"
+	},
+	"minecraft-account.switch-profile.title": {
+		"message": "Switch Minecraft profile"
+	},
+	"minecraft-account.switch-profile.loading": {
+		"message": "Loading profiles…"
+	},
+	"minecraft-account.switch-profile.no-profiles": {
+		"message": "This domain account has no Minecraft profiles."
 	},
 	"minecraft-account.label": {
 		"message": "Minecraft account"
@@ -17848,5 +17962,281 @@
 	},
 	"instance.backups.retry": {
 		"message": "Retry"
+	},
+	"app.ymcl.landing.adapter-unsupported": {
+		"message": "The domain adapter did not retain the home settings. Update the adapter to support the landing field in chrome/home, then publish again."
+	},
+	"app.ymcl.landing.add-background": {
+		"message": "Add background"
+	},
+	"app.ymcl.landing.address-missing": {
+		"message": "This server has no connection address."
+	},
+	"app.ymcl.landing.autoplay": {
+		"message": "Play music automatically on entering the home"
+	},
+	"app.ymcl.landing.autoplay-hint": {
+		"message": "If automatic playback is blocked, members can click play. Music stops when they leave the home."
+	},
+	"app.ymcl.landing.background-hint": {
+		"message": "Add up to 12 image URLs. Images fill the home and fade between slides. Relative URLs use the domain address."
+	},
+	"app.ymcl.landing.backgrounds": {
+		"message": "Background slideshow"
+	},
+	"app.ymcl.landing.choose-instance": {
+		"message": "Choose a local instance to join"
+	},
+	"app.ymcl.landing.default-volume": {
+		"message": "Default volume"
+	},
+	"app.ymcl.landing.design-load-failed": {
+		"message": "Could not load the home settings. Retry before editing."
+	},
+	"app.ymcl.landing.edit-slide": {
+		"message": "Background {index}"
+	},
+	"app.ymcl.landing.enable": {
+		"message": "Use the immersive domain home"
+	},
+	"app.ymcl.landing.featured-server": {
+		"message": "Default server"
+	},
+	"app.ymcl.landing.first-server": {
+		"message": "First available server"
+	},
+	"app.ymcl.landing.focus-all": {
+		"message": "All"
+	},
+	"app.ymcl.landing.focus-pinned": {
+		"message": "Pinned"
+	},
+	"app.ymcl.landing.focus-refresh": {
+		"message": "Refresh highlights"
+	},
+	"app.ymcl.landing.focus-previous": {
+		"message": "Previous highlights"
+	},
+	"app.ymcl.landing.focus-next": {
+		"message": "Next highlights"
+	},
+	"app.ymcl.landing.focus-page": {
+		"message": "Page {page}"
+	},
+	"app.ymcl.record-detail.header": {
+		"message": "Details"
+	},
+	"app.ymcl.landing.focus": {
+		"message": "Domain highlights"
+	},
+	"app.ymcl.landing.focus-empty": {
+		"message": "No highlights yet."
+	},
+	"app.ymcl.landing.focus-error": {
+		"message": "Could not load highlights."
+	},
+	"app.ymcl.landing.focus-hint": {
+		"message": "Choose domain feeds to gather announcements, activities and other highlights on the home."
+	},
+	"app.ymcl.landing.headline": {
+		"message": "Welcome title"
+	},
+	"app.ymcl.landing.headline-hint": {
+		"message": "Defaults to the domain name"
+	},
+	"app.ymcl.landing.home": {
+		"message": "Domain home"
+	},
+	"app.ymcl.landing.image-url": {
+		"message": "Image URL"
+	},
+	"app.ymcl.landing.install": {
+		"message": "Install the server pack to join"
+	},
+	"app.ymcl.landing.interval": {
+		"message": "Slide interval (seconds)"
+	},
+	"app.ymcl.landing.interval-hint": {
+		"message": "3–60 seconds. Hovering over the slideshow controls pauses it."
+	},
+	"app.ymcl.landing.intro": {
+		"message": "Welcome message"
+	},
+	"app.ymcl.landing.invalid-url": {
+		"message": "Enter an HTTP(S) URL or a path relative to the domain."
+	},
+	"app.ymcl.landing.join": {
+		"message": "Join server"
+	},
+	"app.ymcl.landing.launch": {
+		"message": "Launch and join"
+	},
+	"app.ymcl.landing.launched": {
+		"message": "Game launched"
+	},
+	"app.ymcl.landing.launching": {
+		"message": "Launching…"
+	},
+	"app.ymcl.landing.loading": {
+		"message": "Loading servers…"
+	},
+	"app.ymcl.landing.move-down": {
+		"message": "Move down"
+	},
+	"app.ymcl.landing.move-up": {
+		"message": "Move up"
+	},
+	"app.ymcl.landing.music": {
+		"message": "Background music"
+	},
+	"app.ymcl.landing.music-blocked": {
+		"message": "Click play to enable music"
+	},
+	"app.ymcl.landing.music-error": {
+		"message": "Music unavailable. Click play to retry."
+	},
+	"app.ymcl.landing.music-hint": {
+		"message": "Use a direct MP3, OGG or WAV file URL. Leave empty to turn off music."
+	},
+	"app.ymcl.landing.music-pause": {
+		"message": "Pause music"
+	},
+	"app.ymcl.landing.music-play": {
+		"message": "Play music"
+	},
+	"app.ymcl.landing.music-title": {
+		"message": "Track name"
+	},
+	"app.ymcl.landing.music-url": {
+		"message": "Audio URL"
+	},
+	"app.ymcl.landing.music-volume": {
+		"message": "Music volume"
+	},
+	"app.ymcl.landing.next": {
+		"message": "Next background"
+	},
+	"app.ymcl.landing.no-backgrounds": {
+		"message": "No images yet. The domain theme background will be used, or a default background if none is set."
+	},
+	"app.ymcl.landing.no-servers": {
+		"message": "No servers are available in this domain yet."
+	},
+	"app.ymcl.landing.no-sources": {
+		"message": "This domain has no available data feeds yet."
+	},
+	"app.ymcl.landing.offline": {
+		"message": "Offline"
+	},
+	"app.ymcl.landing.online": {
+		"message": "Online"
+	},
+	"app.ymcl.landing.overlay": {
+		"message": "Background dimming"
+	},
+	"app.ymcl.landing.pause": {
+		"message": "Pause slideshow"
+	},
+	"app.ymcl.landing.players": {
+		"message": "{count} online"
+	},
+	"app.ymcl.landing.preview-note": {
+		"message": "Live preview · changes are not published yet"
+	},
+	"app.ymcl.landing.previous": {
+		"message": "Previous background"
+	},
+	"app.ymcl.landing.publish": {
+		"message": "Publish home"
+	},
+	"app.ymcl.landing.published": {
+		"message": "Domain home published for all members"
+	},
+	"app.ymcl.landing.quick-play": {
+		"message": "Quick play"
+	},
+	"app.ymcl.landing.ready": {
+		"message": "Installed · ready to play"
+	},
+	"app.ymcl.landing.remove-background": {
+		"message": "Remove background"
+	},
+	"app.ymcl.landing.resume": {
+		"message": "Resume slideshow"
+	},
+	"app.ymcl.landing.retry": {
+		"message": "Retry"
+	},
+	"app.ymcl.landing.select-server": {
+		"message": "Choose a server"
+	},
+	"app.ymcl.landing.switch-server": {
+		"message": "Switch server"
+	},
+	"app.ymcl.landing.server-count": {
+		"message": "{count} servers"
+	},
+	"app.ymcl.landing.search-servers": {
+		"message": "Search servers"
+	},
+	"app.ymcl.landing.no-matching-servers": {
+		"message": "No servers match your search."
+	},
+	"app.ymcl.landing.pages.navigation": {
+		"message": "Home pages"
+	},
+	"app.ymcl.landing.pages.landing": {
+		"message": "Home"
+	},
+	"app.ymcl.landing.pages.information": {
+		"message": "Domain information"
+	},
+	"app.ymcl.landing.pages.empty": {
+		"message": "There are no information cards here yet."
+	},
+	"app.ymcl.landing.server": {
+		"message": "Server"
+	},
+	"app.ymcl.landing.server-error": {
+		"message": "Could not load servers."
+	},
+	"app.ymcl.landing.settings-description": {
+		"message": "Publish a shared home with backgrounds, highlights, music and quick play for every member."
+	},
+	"app.ymcl.landing.settings-title": {
+		"message": "Domain home"
+	},
+	"app.ymcl.landing.slide": {
+		"message": "Background {index} of {total}"
+	},
+	"app.ymcl.landing.slide-description": {
+		"message": "Slide description (optional)"
+	},
+	"app.ymcl.landing.slide-title": {
+		"message": "Slide title (optional)"
+	},
+	"app.ymcl.landing.unavailable": {
+		"message": "This server is currently unavailable."
+	},
+	"app.ymcl.landing.unavailable-source": {
+		"message": "Unavailable feed: {id}"
+	},
+	"app.ymcl.landing.untitled": {
+		"message": "Untitled"
+	},
+	"app.ymcl.landing.update": {
+		"message": "Updates will be applied before launch"
+	},
+	"app.ymcl.landing.welcome": {
+		"message": "Welcome to"
+	},
+	"app.ymcl.landing.welcome-player": {
+		"message": "Welcome back, {name}"
+	},
+	"app.ymcl.landing.unavailable-server": {
+		"message": "Unavailable server: {id}"
+	},
+	"app.ymcl.design.description": {
+		"message": "Configure home backgrounds, highlights, music and cards for every member. Publishing makes the changes visible to everyone."
 	}
 }

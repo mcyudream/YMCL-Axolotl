@@ -34,9 +34,21 @@ pub async fn get_home_config() -> crate::Result<serde_json::Value> {
 
 /// Saves the home layout config; the adapter rebuilds its manifest and
 /// notifies members (YAP §6.10 manifest.updated).
-pub async fn put_home_config(config: serde_json::Value) -> crate::Result<()> {
+pub async fn put_home_config(
+    config: serde_json::Value,
+    domain_id: Option<String>,
+) -> crate::Result<()> {
     let state = State::get().await?;
     let active = super::registry::active_domain_id(&state.pool).await?;
+    if domain_id
+        .as_ref()
+        .is_some_and(|expected| *expected != active)
+    {
+        return Err(crate::ErrorKind::OtherError(
+            "The active domain changed before publishing the home".to_string(),
+        )
+        .into());
+    }
     if active == super::registry::PERSONAL_DOMAIN_ID {
         return Err(crate::ErrorKind::OtherError(
             "The home designer requires an active domain".to_string(),

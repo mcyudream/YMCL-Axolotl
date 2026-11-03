@@ -38,6 +38,8 @@ pub struct InstallProgressReporter {
 #[derive(Debug)]
 struct InstallProgressReporterState {
     job: InstallJobState,
+    parallel_context: Option<InstallErrorContext>,
+    parallel_failure: Option<ParallelFailureContext>,
     last_snapshot: Option<InstallJobSnapshot>,
     last_persisted_at: Instant,
     last_persisted_progress: Option<(InstallPhaseId, u64)>,
@@ -52,6 +54,13 @@ struct InstallProgressReporterState {
     /// Paths with a pending stalled-download check task, so at most one
     /// delayed check is scheduled per active download at a time.
     pending_stall_checks: HashSet<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ParallelFailureContext {
+    phase: InstallPhaseId,
+    details: InstallPhaseDetails,
+    context: InstallErrorContext,
 }
 
 #[derive(serde::Serialize)]
@@ -139,6 +148,8 @@ impl InstallProgressReporter {
                     let state =
                         Arc::new(Mutex::new(InstallProgressReporterState {
                             job: state,
+                            parallel_context: None,
+                            parallel_failure: None,
                             last_snapshot: None,
                             last_persisted_at: Instant::now(),
                             last_persisted_progress: None,
@@ -158,6 +169,8 @@ impl InstallProgressReporter {
                 let state =
                     Arc::new(Mutex::new(InstallProgressReporterState {
                         job: state,
+                        parallel_context: None,
+                        parallel_failure: None,
                         last_snapshot: None,
                         last_persisted_at: Instant::now(),
                         last_persisted_progress: None,
@@ -180,9 +193,8 @@ impl InstallProgressReporter {
         }
     }
 
-    /// Returns a reporter clone whose phase updates are routed to the
-    /// parallel track, leaving the main phase untouched. The underlying job
-    /// state is shared, so both tracks still persist to the same job.
+    /// Routes phases and diagnostic context to a separate parallel track.
+    /// The failed track is promoted when its error is returned to the importer.
     pub fn with_parallel_output(mut self) -> Self {
         self.parallel_output = true;
         self
@@ -318,6 +330,10 @@ impl InstallProgressReporter {
         let mut state = self.state.lock().await;
         if let Some(app_state) = &app_state {
             self.sync_latest(&mut state, app_state).await?;
+        }
+        if self.parallel_output {
+            state.parallel_context = context;
+            return Ok(());
         }
         state.job.set_context(context);
 
@@ -483,11 +499,53 @@ impl InstallProgressReporter {
     }
 
     pub async fn persist_failure_context(&self, context: InstallErrorContext) {
+        if self.parallel_output {
+            let mut state = self.state.lock().await;
+            let parallel = state.job.progress.parallel.as_ref();
+            let failure = ParallelFailureContext {
+                phase: parallel
+                    .map_or(InstallPhaseId::DownloadingMinecraft, |track| {
+                        track.phase
+                    }),
+                details: parallel.map_or(InstallPhaseDetails::Empty, |track| {
+                    track.details.clone()
+                }),
+                context,
+            };
+            state.parallel_failure.get_or_insert(failure);
+            return;
+        }
         if let Err(error) = self.update_context(Some(context), true).await {
             tracing::warn!(
                 "Failed to persist install context for failed operation: {error}"
             );
         }
+    }
+
+    /// Restores the failed core operation after the importer has finished its own work.
+    pub(crate) async fn promote_parallel_failure(&self) -> crate::Result<()> {
+        let mut main_reporter = self.clone();
+        main_reporter.parallel_output = false;
+        let (phase, details, context) = {
+            let mut state = self.state.lock().await;
+            if let Some(failure) = state.parallel_failure.take() {
+                (failure.phase, failure.details, Some(failure.context))
+            } else {
+                let parallel = state.job.progress.parallel.as_ref();
+                (
+                    parallel.map_or(
+                        InstallPhaseId::DownloadingMinecraft,
+                        |track| track.phase,
+                    ),
+                    parallel.map_or(InstallPhaseDetails::Empty, |track| {
+                        track.details.clone()
+                    }),
+                    state.parallel_context.clone(),
+                )
+            }
+        };
+        main_reporter.update(phase, None, details).await?;
+        main_reporter.update_context(context, true).await
     }
 
     pub async fn record_download_metrics(
@@ -1161,6 +1219,109 @@ mod tests {
             .unwrap();
         let reporter = InstallProgressReporter::new(job_id, job);
         (app_state, job_id, reporter)
+    }
+
+    #[cfg(not(feature = "tauri"))]
+    #[tokio::test]
+    async fn parallel_core_failure_keeps_its_file_after_overrides() {
+        let (app_state, job_id, reporter) =
+            stored_minecraft_progress_job(0, 100).await;
+        let parallel = reporter.clone().with_parallel_output();
+        parallel
+            .update(
+                InstallPhaseId::DownloadingMinecraft,
+                Some(minecraft_progress(12, 100)),
+                minecraft_details(),
+            )
+            .await
+            .unwrap();
+        let client_context =
+            InstallErrorContext::new("download Minecraft client")
+                .target_path("meta/versions/1.12.2/1.12.2.jar")
+                .urls(vec![
+                    "https://piston-data.mojang.com/v1/objects/hash/client.jar"
+                        .to_string(),
+                ])
+                .build();
+        parallel.persist_failure_context(client_context).await;
+        reporter
+            .update(
+                InstallPhaseId::ExtractingOverrides,
+                None,
+                InstallPhaseDetails::Empty,
+            )
+            .await
+            .unwrap();
+        reporter
+            .set_transient_context(
+                InstallErrorContext::new("extract modpack override")
+                    .entry_path("overrides/servers.dat")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        parallel
+            .set_transient_context(
+                InstallErrorContext::new("download another asset").build(),
+            )
+            .await
+            .unwrap();
+        parallel.promote_parallel_failure().await.unwrap();
+        let job = reporter.current_state().await.unwrap();
+        assert_eq!(job.progress.phase, InstallPhaseId::DownloadingMinecraft);
+        let context = job.context.unwrap();
+        assert_eq!(context.operation, "download Minecraft client");
+        assert_eq!(
+            context.target_path.as_deref(),
+            Some("meta/versions/1.12.2/1.12.2.jar")
+        );
+        assert!(context.entry_path.is_none());
+        assert_eq!(context.urls.len(), 1);
+        let persisted = store::get_required(job_id, &app_state).await.unwrap();
+        assert_eq!(
+            persisted.state.progress.phase,
+            InstallPhaseId::DownloadingMinecraft
+        );
+        assert_eq!(
+            persisted.state.context.unwrap().operation,
+            "download Minecraft client"
+        );
+        InstallProgressReporter::reset_job(job_id);
+    }
+
+    #[cfg(not(feature = "tauri"))]
+    #[tokio::test]
+    async fn parallel_core_context_cannot_overwrite_a_content_failure() {
+        let (_app_state, job_id, reporter) =
+            stored_minecraft_progress_job(0, 100).await;
+        reporter
+            .set_context(
+                InstallErrorContext::new("extract modpack override")
+                    .entry_path("overrides/servers.dat")
+                    .build(),
+            )
+            .await
+            .unwrap();
+        let parallel = reporter.clone().with_parallel_output();
+        parallel
+            .set_context(
+                InstallErrorContext::new("download Minecraft client").build(),
+            )
+            .await
+            .unwrap();
+        parallel
+            .persist_failure_context(
+                InstallErrorContext::new("download Minecraft client").build(),
+            )
+            .await;
+        parallel.clear_context().await.unwrap();
+        let context = reporter.current_state().await.unwrap().context.unwrap();
+        assert_eq!(context.operation, "extract modpack override");
+        assert_eq!(
+            context.entry_path.as_deref(),
+            Some("overrides/servers.dat")
+        );
+        InstallProgressReporter::reset_job(job_id);
     }
 
     #[test]

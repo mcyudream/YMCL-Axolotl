@@ -6,6 +6,27 @@ export type MinecraftAccountSortable = {
 	}
 }
 
+/** A domain sees only its own service's profiles; personal mode excludes joined domains. */
+export function accountsForDomain<
+	T extends {
+		account_type?: string
+		yggdrasil?: { api_root: string } | null
+	},
+>(
+	accounts: readonly T[],
+	domainRoots: Readonly<Record<string, readonly string[]>>,
+	domainId: string | null,
+): T[] {
+	return accounts.filter((account) => {
+		const apiRoot =
+			account.account_type === 'yggdrasil'
+				? account.yggdrasil?.api_root.replace(/\/+$/, '')
+				: undefined
+		if (domainId !== null) return !!apiRoot && !!domainRoots[domainId]?.includes(apiRoot)
+		return !apiRoot || !Object.values(domainRoots).some((roots) => roots.includes(apiRoot))
+	})
+}
+
 const ACCOUNT_TYPE_ORDER: Record<string, number> = {
 	microsoft: 0,
 	yggdrasil: 1,

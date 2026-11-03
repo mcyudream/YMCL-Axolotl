@@ -42,7 +42,7 @@ const { formatMessage } = useVIntl()
 const busy = ref(false)
 
 const messages = defineMessages({
-	header: { id: 'app.ymcl.record-detail.header', defaultMessage: '活动详情' },
+	header: { id: 'app.ymcl.record-detail.header', defaultMessage: 'Details' },
 	untitled: { id: 'app.ymcl.record-detail.untitled', defaultMessage: '未命名' },
 	meta: { id: 'app.ymcl.record-detail.meta', defaultMessage: '信息' },
 	actions: { id: 'app.ymcl.record-detail.actions', defaultMessage: '操作' },
@@ -178,7 +178,7 @@ async function run(action: YmclAction) {
 <template>
 	<NewModal
 		ref="modal"
-		:header="formatMessage(messages.header)"
+		:header="pageTitle?.trim() || formatMessage(messages.header)"
 		max-width="min(36rem, calc(95vw - 10rem))"
 		scrollable
 		max-content-height="70vh"

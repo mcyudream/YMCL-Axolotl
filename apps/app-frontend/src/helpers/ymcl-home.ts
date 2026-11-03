@@ -1,7 +1,7 @@
 // YAP home card layout mapping (YAP §6.5 home capability): converts the
 // domain's ThemeProfile-style home config into the launcher's existing
 // HomeDashboardConfig so the real dashboard renders it. Shared by the
-// domain-home store getter and the /ymcl/design designer preview.
+// domain-home store getter and the home dashboard.
 
 import {
 	HOME_DASHBOARD_VERSION,
@@ -16,6 +16,7 @@ import {
 	type HomeWidgetSize,
 	normalizeHomeDashboard,
 } from '../components/home/home-dashboard.ts'
+import type { DomainHomeLanding } from '../components/ymcl/home/domain-home.ts'
 
 export interface YmclHomeCard {
 	id: string
@@ -38,6 +39,8 @@ export interface YmclHomeProfile {
 	/** Launcher extension (protocol v1 default is grid): free widget layout. */
 	layout?: HomeWidgetLayout
 	cards?: YmclHomeCard[]
+	/** Immersive domain home, published by administrators through chrome/home. */
+	landing?: DomainHomeLanding
 }
 
 /** Card types the launcher natively renders; unknown types are dropped. */
@@ -198,7 +201,10 @@ function resolveCardSize(
 	kind: HomeWidgetKind,
 	fallback?: HomeWidgetSize,
 ): HomeWidgetSize {
-	if (typeof size === 'string' && (HOME_WIDGET_SIZE_OPTIONS[kind] as readonly string[]).includes(size)) {
+	if (
+		typeof size === 'string' &&
+		(HOME_WIDGET_SIZE_OPTIONS[kind] as readonly string[]).includes(size)
+	) {
 		return size as HomeWidgetSize
 	}
 	return fallback ?? HOME_WIDGET_DEFAULT_SIZE[kind]
@@ -263,9 +269,7 @@ export function mapHomeProfileToDashboard(
 					...((card.title && card.title !== sourceId) || resolved.title
 						? {
 								title:
-									card.title && card.title !== sourceId
-										? card.title
-										: (resolved.title as string),
+									card.title && card.title !== sourceId ? card.title : (resolved.title as string),
 							}
 						: {}),
 				},
@@ -314,8 +318,8 @@ function isFreePosition(position: YmclHomeCard['position']): position is HomeWid
 
 /**
  * Reverse of mapHomeProfileToDashboard for in-place domain home editing:
- * cards that still exist keep their original payload and get their sort
- * reassigned by dashboard order, new widgets become fresh cards, widgets
+ * cards keep extension fields while editable values and sort are updated
+ * from the dashboard, new widgets become fresh cards, widgets
  * without a domain card type are skipped (reported via skippedWidgets), and
  * original protocol cards the launcher cannot render are preserved at the
  * end so a republish never silently deletes them.
@@ -344,42 +348,45 @@ export function mapDashboardToHomeProfile(
 			continue
 		}
 		const existing = untouched.get(widget.id)
-		let card: YmclHomeCard
-		if (existing) {
-			untouched.delete(widget.id)
-			card = { ...existing, sort: cards.length }
-		} else if (widget.kind === 'page-shortcut' && widget.shortcut) {
-			card = {
-				id: widget.id,
-				type,
-				sort: cards.length,
-				...(widget.shortcut.title ? { title: widget.shortcut.title } : {}),
-				params: { target: widget.shortcut.target },
-			}
-		} else if (widget.kind === 'data-card' && widget.dataSource) {
-			card = {
-				id: widget.id,
-				type,
-				sort: cards.length,
-				...(widget.dataSource.title ? { title: widget.dataSource.title } : {}),
-				params: {
-					dataSource: widget.dataSource.id,
-					...(widget.dataSource.variant ? { variant: widget.dataSource.variant } : {}),
-				},
-			}
-		} else if (widget.kind !== 'page-shortcut' && widget.kind !== 'data-card') {
-			card = { id: widget.id, type, sort: cards.length }
-			// 问候语定制文案随卡片发布，成员端原样渲染。
-			if (widget.kind === 'greeting' && widget.options) {
-				card.params = { ...widget.options }
-			}
-			// 最近实例的展示数量同样是卡片配置，随 params 往返。
-			if (widget.kind === 'recent' && widget.options?.recentLimit) {
-				card.params = { recentLimit: widget.options.recentLimit }
-			}
-		} else {
+		if (
+			(widget.kind === 'page-shortcut' && !widget.shortcut) ||
+			(widget.kind === 'data-card' && !widget.dataSource)
+		) {
 			noteSkip(widget.kind)
 			continue
+		}
+		untouched.delete(widget.id)
+		const card: YmclHomeCard = {
+			...(existing?.type === type ? existing : {}),
+			id: widget.id,
+			type,
+			sort: cards.length,
+		}
+		if (widget.kind === 'page-shortcut' && widget.shortcut) {
+			card.params = { ...card.params, target: widget.shortcut.target }
+			if (widget.shortcut.title) card.title = widget.shortcut.title
+			else delete card.title
+		} else if (widget.kind === 'data-card' && widget.dataSource) {
+			card.params = { ...card.params, dataSource: widget.dataSource.id }
+			if (widget.dataSource.variant) card.params.variant = widget.dataSource.variant
+			else delete card.params.variant
+			if (widget.dataSource.title) card.title = widget.dataSource.title
+			else delete card.title
+		} else if (widget.kind === 'greeting') {
+			card.params = { ...card.params }
+			for (const key of [
+				'greetingMode',
+				'greetingText',
+				'greetingFont',
+				'greetingFontSize',
+			] as const) {
+				delete card.params[key]
+				if (widget.options?.[key] !== undefined) card.params[key] = widget.options[key]
+			}
+		} else if (widget.kind === 'recent') {
+			card.params = { ...card.params }
+			delete card.params.recentLimit
+			if (widget.options?.recentLimit) card.params.recentLimit = widget.options.recentLimit
 		}
 		// 尺寸随卡片持久化（网格布局同样按它还原跨度）；自由坐标只在自由布局
 		// 下保留，切回网格时清掉避免残留复活。
@@ -402,6 +409,7 @@ export function mapDashboardToHomeProfile(
 	}
 	return {
 		profile: {
+			...original,
 			schemaVersion: original?.schemaVersion,
 			locked: original?.locked,
 			columns: original?.columns,

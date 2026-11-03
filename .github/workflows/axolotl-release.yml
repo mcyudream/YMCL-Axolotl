@@ -145,22 +145,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Windows x64
+            runner: windows-2025
+            args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
           - name: Linux x64
             runner: ubuntu-24.04
             args: --config tauri-release.conf.json --config tauri-updater.conf.json
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             args: --config tauri-release.conf.json --config tauri-updater.conf.json
-          - name: Windows x64
-            runner: windows-2025
-            args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
       CARGO_INCREMENTAL: '0'
-      # Cargo.toml keeps release LTO off for local/CI builds. Published
-      # binaries retain fat LTO; installer variants reuse the compiled binary.
-      CARGO_PROFILE_RELEASE_LTO: 'true'
+      # ThinLTO parallelizes Windows optimization; all installer variants reuse it.
+      CARGO_PROFILE_RELEASE_LTO: ${{ runner.os == 'Windows' && 'thin' || 'true' }}
       AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
     steps:
       - name: Check out source
@@ -174,13 +173,13 @@ jobs:
         with:
           runner: ${{ matrix.runner }}
 
-      - name: Require full LTO for published binaries
+      - name: Require LTO for published binaries
         shell: bash
         run: |
-          if [ "${CARGO_PROFILE_RELEASE_LTO}" != "true" ]; then
-            echo "Release builds require full LTO" >&2
-            exit 1
-          fi
+          case "${CARGO_PROFILE_RELEASE_LTO}" in
+            true|thin) ;;
+            *) echo "Release builds require LTO" >&2; exit 1 ;;
+          esac
 
       - name: Set release version
         shell: bash
@@ -221,18 +220,12 @@ jobs:
           ARTIFACT_PATHS: ${{ steps.package.outputs.artifactPaths }}
         run: node scripts/axolotl/stage-release-assets.mjs "${RUNNER_TEMP}/release-assets"
 
-      - name: Prepare Windows distribution variants
+      - name: Name the signed Windows modern installer
         if: runner.os == 'Windows'
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          $appName = "YMCL"
           $outDir = "target/release/bundle/nsis"
-          $buildDir = "target/portable-build"
           $publishDir = Join-Path $env:RUNNER_TEMP "release-assets"
 
           New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
@@ -253,6 +246,26 @@ jobs:
             Copy-Item -Force $modernSignature $modernSignaturePath
             Remove-Item (Join-Path $publishDir "$($modernInstallers[0].Name).sig")
           }
+
+      - name: Publish Windows installer and updater immediately
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/publish-release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Windows distribution variants
+        if: runner.os == 'Windows'
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $appName = "YMCL"
+          $outDir = "target/release/bundle/nsis"
+          $buildDir = "target/portable-build"
+          $publishDir = Join-Path $env:RUNNER_TEMP "release-assets"
 
           pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
           if ($LASTEXITCODE -ne 0) { throw "Native NSIS bundling failed" }
@@ -520,7 +533,10 @@ jobs:
         if: ${{ !contains(env.RELEASE_TAG, '-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          git fetch origin "${DEFAULT_BRANCH}"
+          git switch --create release-website-metadata "origin/${DEFAULT_BRANCH}"
           node scripts/axolotl/create-website-release-metadata.mjs \
             release-check/release.json \
             apps/website/releases/latest.json
@@ -534,7 +550,7 @@ jobs:
             echo "Website metadata is unchanged"
           else
             git commit -m "chore(website): update download metadata to ${RELEASE_TAG} [skip ci]"
-            git push origin main
+            git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
 
       - name: Mirror published release to CNB

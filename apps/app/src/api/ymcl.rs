@@ -509,8 +509,11 @@ pub async fn ymcl_chrome_home_get() -> Result<serde_json::Value> {
 // Save the domain's home layout config; members are notified by the adapter
 // invoke('plugin:ymcl|ymcl_chrome_home_put', { config })
 #[tauri::command]
-pub async fn ymcl_chrome_home_put(config: serde_json::Value) -> Result<()> {
-    Ok(theseus::ymcl::chrome::put_home_config(config).await?)
+pub async fn ymcl_chrome_home_put(
+    config: serde_json::Value,
+    domain_id: Option<String>,
+) -> Result<()> {
+    Ok(theseus::ymcl::chrome::put_home_config(config, domain_id).await?)
 }
 
 // Ensure a page's extension bundle is downloaded+verified; return entry path

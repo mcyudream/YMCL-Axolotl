@@ -698,13 +698,42 @@ pub async fn get_loader_version_from_profile_with_cache(
         )
         .await?;
 
-    if let Some(loaders) =
-        loader_versions_for_game_version(&versions, game_version)
-    {
-        Ok(select_loader_version(loaders, loader_version).cloned())
-    } else {
-        Ok(None)
+    let selected = loader_versions_for_game_version(&versions, game_version)
+        .and_then(|loaders| select_loader_version(loaders, loader_version))
+        .cloned();
+    if selected.is_some() {
+        return Ok(selected);
     }
+
+    if let Some(version) = missing_cleanroom_version_to_verify(
+        loader,
+        game_version,
+        loader_version,
+        cache_behaviour,
+    ) {
+        let state = State::get().await?;
+        return crate::api::loader_metadata::resolve_exact_cleanroom_version(
+            version,
+            &state.api_semaphore,
+        )
+        .await;
+    }
+    Ok(None)
+}
+
+fn missing_cleanroom_version_to_verify<'a>(
+    loader: ModLoader,
+    game_version: &str,
+    requested: Option<&'a str>,
+    cache_behaviour: Option<CacheBehaviour>,
+) -> Option<&'a str> {
+    if loader != ModLoader::Cleanroom
+        || game_version != "1.12.2"
+        || cache_behaviour == Some(CacheBehaviour::CacheOnly)
+    {
+        return None;
+    }
+    explicit_loader_version(requested)
 }
 
 fn select_loader_version<'a>(
@@ -3222,6 +3251,66 @@ mod loader_resolution_tests {
             profile_source: Default::default(),
             fallback_url: None,
         }
+    }
+
+    #[test]
+    fn missing_cleanroom_version_verification_is_exact_and_online_only() {
+        assert_eq!(
+            missing_cleanroom_version_to_verify(
+                ModLoader::Cleanroom,
+                "1.12.2",
+                Some("0.4.0"),
+                None,
+            ),
+            Some("0.4.0")
+        );
+        assert_eq!(
+            missing_cleanroom_version_to_verify(
+                ModLoader::Cleanroom,
+                "1.12.2",
+                Some("0.4.0"),
+                Some(CacheBehaviour::Bypass),
+            ),
+            Some("0.4.0")
+        );
+        for requested in [None, Some("latest"), Some("stable"), Some("")] {
+            assert!(
+                missing_cleanroom_version_to_verify(
+                    ModLoader::Cleanroom,
+                    "1.12.2",
+                    requested,
+                    None,
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            missing_cleanroom_version_to_verify(
+                ModLoader::Cleanroom,
+                "1.12.2",
+                Some("0.4.0"),
+                Some(CacheBehaviour::CacheOnly),
+            )
+            .is_none()
+        );
+        assert!(
+            missing_cleanroom_version_to_verify(
+                ModLoader::Cleanroom,
+                "1.20.1",
+                Some("0.4.0"),
+                None,
+            )
+            .is_none()
+        );
+        assert!(
+            missing_cleanroom_version_to_verify(
+                ModLoader::Forge,
+                "1.12.2",
+                Some("0.4.0"),
+                None,
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -28,6 +28,53 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.1.0',
+		version: '2.1.0',
+		publishedAt: '2026-11-03',
+		title: {
+			'en-US': 'YMCL 2.1.0',
+			'zh-CN': 'YMCL 2.1.0',
+		},
+		changes: {
+			added: [
+				{
+					'en-US': 'Added domain homepages with administrator-managed background carousels, slide descriptions, and background music.',
+					'zh-CN': '新增域首页，由域管理员统一配置背景轮播、图片介绍和背景音乐。',
+				},
+				{
+					'en-US': 'Added domain focus feeds combining MC news and published domain announcements.',
+					'zh-CN': '域焦点新增 MC 新闻和域公告列表，支持分类浏览与查看详情。',
+				},
+				{
+					'en-US': 'Added inline server selection, character switching, and modpack downloads, updates, and launches on the domain homepage.',
+					'zh-CN': '域首页新增页内服务器选择、角色切换及整合包下载、更新和快捷启动。',
+				},
+				{
+					'en-US': 'Added a domain information page with editable cards, administrator publishing and locking, and page memory during each YMCL session.',
+					'zh-CN': '新增域信息第二页，保留卡片编辑、管理员发布与锁定，并在本次启动期间记住所选页面。',
+				},
+			],
+			fixed: [
+				{
+					'en-US': 'Fixed long domain focus feeds pushing launch controls and download progress outside the homepage.',
+					'zh-CN': '修复域焦点过长时将启动按钮、下载详情和进度条挤出首页的问题。',
+				},
+				{
+					'en-US': 'Fixed active modpack downloads losing their progress display after leaving and returning to the homepage.',
+					'zh-CN': '修复离开首页后返回时，正在下载的整合包重新显示下载按钮、丢失进度的问题。',
+				},
+				{
+					'en-US': 'Fixed importing Minecraft 1.12.2 modpacks that request an available Cleanroom version missing from the loader list.',
+					'zh-CN': '修复 Minecraft 1.12.2 整合包因 Cleanroom 指定版本未列入元数据而无法安装的问题。',
+				},
+				{
+					'en-US': 'Fixed Minecraft downloads lacking an independent official fallback and installation reports blaming overrides extraction for game download failures.',
+					'zh-CN': '为 Minecraft 本体下载增加官方备用地址，并修复游戏下载失败被误报为覆盖文件解压失败的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.0.0-beta.3',
 		version: '2.0.0-beta.3',
 		publishedAt: '2026-11-02',

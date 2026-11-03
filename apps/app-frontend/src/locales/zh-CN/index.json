@@ -2105,17 +2105,35 @@
 	"app.home.instances.view-all": {
 		"message": "查看全部实例"
 	},
-	"app.home.layout.configure-domain": {
-		"message": "配置域首页"
+	"app.home.layout.edit-domain-layout": {
+		"message": "编辑域布局"
 	},
-	"app.home.layout.design-domain": {
-		"message": "编辑域首页"
+	"app.home.layout.publish-domain-layout": {
+		"message": "发布域布局"
+	},
+	"app.home.layout.cancel-domain-editing": {
+		"message": "取消编辑域布局"
+	},
+	"app.home.layout.lock-domain-layout": {
+		"message": "锁定域布局，禁止成员自定义"
+	},
+	"app.home.layout.unlock-domain-layout": {
+		"message": "解锁域布局，允许成员自定义"
+	},
+	"app.home.layout.domain-layout-published": {
+		"message": "域布局已发布，对所有成员生效"
+	},
+	"app.home.layout.domain-layout-locked": {
+		"message": "域布局已锁定"
+	},
+	"app.home.layout.domain-layout-unlocked": {
+		"message": "域布局已解锁"
+	},
+	"app.home.layout.unpublished-widgets": {
+		"message": "{count} 个绑定本机资源的小组件未包含在域发布中。"
 	},
 	"app.home.layout.edit-own-home": {
 		"message": "自定义我的首页"
-	},
-	"app.home.layout.publish-domain": {
-		"message": "发布到域"
 	},
 	"app.home.layout.switch-to-information": {
 		"message": "切换到信息主页"
@@ -2279,9 +2297,6 @@
 	"app.home.widgets.domain-page-description": {
 		"message": "为域页面创建首页快捷入口（{renderer}）。"
 	},
-	"app.home.widgets.domain-published": {
-		"message": "域首页布局已发布"
-	},
 	"app.home.widgets.domain-servers": {
 		"message": "服务器"
 	},
@@ -2404,9 +2419,6 @@
 	},
 	"app.home.widgets.unavailable": {
 		"message": "内容已不可用"
-	},
-	"app.home.widgets.unmapped-skipped": {
-		"message": "这些小组件没有对应的域卡片类型，未包含在发布：{widgets}"
 	},
 	"app.home.widgets.world": {
 		"message": "单个世界入口"
@@ -9532,6 +9544,87 @@
 	"app.ymcl.join.title": {
 		"message": "加入服务器"
 	},
+	"app.ymcl.landing.transfer.available": {
+		"message": "下载后即可开始"
+	},
+	"app.ymcl.landing.transfer.changed": {
+		"message": "已更新 {count} 个文件，移除 {deleted} 个旧文件。"
+	},
+	"app.ymcl.landing.transfer.check": {
+		"message": "检查更新"
+	},
+	"app.ymcl.landing.transfer.checking": {
+		"message": "正在检查更新"
+	},
+	"app.ymcl.landing.transfer.create": {
+		"message": "创建实例"
+	},
+	"app.ymcl.landing.transfer.default-features": {
+		"message": "使用服务器的默认组件创建独立实例。"
+	},
+	"app.ymcl.landing.transfer.domain-changed": {
+		"message": "当前域已切换，请回到原域继续操作。"
+	},
+	"app.ymcl.landing.transfer.downloading": {
+		"message": "正在下载服务器整合包"
+	},
+	"app.ymcl.landing.transfer.downloads": {
+		"message": "下载详情"
+	},
+	"app.ymcl.landing.transfer.enhanced": {
+		"message": "下载原版增强整合包"
+	},
+	"app.ymcl.landing.transfer.failed": {
+		"message": "准备游戏失败"
+	},
+	"app.ymcl.landing.transfer.files": {
+		"message": "{current} / {total} 个文件"
+	},
+	"app.ymcl.landing.transfer.finalizing": {
+		"message": "正在保存实例配置"
+	},
+	"app.ymcl.landing.transfer.installing": {
+		"message": "正在安装游戏"
+	},
+	"app.ymcl.landing.transfer.instance": {
+		"message": "游戏实例"
+	},
+	"app.ymcl.landing.transfer.local-files": {
+		"message": "本地文件"
+	},
+	"app.ymcl.landing.transfer.logs": {
+		"message": "运行日志"
+	},
+	"app.ymcl.landing.transfer.notes": {
+		"message": "更新说明"
+	},
+	"app.ymcl.landing.transfer.pending": {
+		"message": "待更新 {count} 个文件，待移除 {deleted} 个文件。"
+	},
+	"app.ymcl.landing.transfer.ready": {
+		"message": "已准备就绪"
+	},
+	"app.ymcl.landing.transfer.skipped": {
+		"message": "{count} 个文件未能更新，已保留对应的本地文件。"
+	},
+	"app.ymcl.landing.transfer.update-available": {
+		"message": "发现可用更新"
+	},
+	"app.ymcl.landing.transfer.updating": {
+		"message": "正在更新服务器整合包"
+	},
+	"app.ymcl.landing.transfer.vanilla": {
+		"message": "下载 Minecraft {version}"
+	},
+	"app.ymcl.landing.transfer.version": {
+		"message": "整合包版本 {version}"
+	},
+	"app.ymcl.landing.transfer.versions": {
+		"message": "版本 {current} → {target}"
+	},
+	"app.ymcl.landing.transfer.waiting": {
+		"message": "部分必需文件需要你处理"
+	},
 	"app.ymcl.manage.check-failed": {
 		"message": "域整合包状态检查失败"
 	},
@@ -9577,6 +9670,9 @@
 	"app.ymcl.packs.check-updates": {
 		"message": "检查更新"
 	},
+	"app.ymcl.packs.context-changed": {
+		"message": "域或登录账户已切换，请回到原域继续操作。"
+	},
 	"app.ymcl.packs.description": {
 		"message": "域内发布的服务器整合包；下载会创建一个新的本地实例，可选内容按默认勾选。"
 	},
@@ -9606,6 +9702,9 @@
 	},
 	"app.ymcl.packs.open-instance": {
 		"message": "打开实例"
+	},
+	"app.ymcl.packs.operation-in-progress": {
+		"message": "该服务器已有任务正在进行，请在下载页面查看进度。"
 	},
 	"app.ymcl.packs.title": {
 		"message": "域整合包"
@@ -11463,6 +11562,21 @@
 	},
 	"minecraft-account.copy-uuid": {
 		"message": "复制 UUID"
+	},
+	"minecraft-account.domain-sign-in": {
+		"message": "登录「{domain}」"
+	},
+	"minecraft-account.switch-profile": {
+		"message": "切换角色"
+	},
+	"minecraft-account.switch-profile.title": {
+		"message": "切换 Minecraft 角色"
+	},
+	"minecraft-account.switch-profile.loading": {
+		"message": "正在获取角色…"
+	},
+	"minecraft-account.switch-profile.no-profiles": {
+		"message": "该域账号没有可用的 Minecraft 角色"
 	},
 	"minecraft-account.label": {
 		"message": "Minecraft 账户"
@@ -17850,5 +17964,281 @@
 	},
 	"instance.backups.retry": {
 		"message": "重试"
+	},
+	"app.ymcl.landing.adapter-unsupported": {
+		"message": "域适配器未保留首页配置。请更新适配器，使 chrome/home 支持 landing 字段后重新发布。"
+	},
+	"app.ymcl.landing.add-background": {
+		"message": "添加背景图"
+	},
+	"app.ymcl.landing.address-missing": {
+		"message": "该服务器没有可用的连接地址。"
+	},
+	"app.ymcl.landing.autoplay": {
+		"message": "进入首页时自动播放音乐"
+	},
+	"app.ymcl.landing.autoplay-hint": {
+		"message": "若自动播放受限，成员可点击播放。离开首页后音乐会停止。"
+	},
+	"app.ymcl.landing.background-hint": {
+		"message": "最多添加 12 张背景图。图片铺满首页并淡入切换；相对地址会使用当前域的地址。"
+	},
+	"app.ymcl.landing.backgrounds": {
+		"message": "背景轮播"
+	},
+	"app.ymcl.landing.choose-instance": {
+		"message": "选择本地实例后即可加入"
+	},
+	"app.ymcl.landing.default-volume": {
+		"message": "默认音量"
+	},
+	"app.ymcl.landing.design-load-failed": {
+		"message": "无法加载首页配置，请重试后再编辑。"
+	},
+	"app.ymcl.landing.edit-slide": {
+		"message": "背景图 {index}"
+	},
+	"app.ymcl.landing.enable": {
+		"message": "启用沉浸式域首页"
+	},
+	"app.ymcl.landing.featured-server": {
+		"message": "默认服务器"
+	},
+	"app.ymcl.landing.first-server": {
+		"message": "首个可用服务器"
+	},
+	"app.ymcl.landing.focus-all": {
+		"message": "全部"
+	},
+	"app.ymcl.landing.focus-pinned": {
+		"message": "置顶"
+	},
+	"app.ymcl.landing.focus-refresh": {
+		"message": "刷新域焦点"
+	},
+	"app.ymcl.landing.focus-previous": {
+		"message": "上一页域焦点"
+	},
+	"app.ymcl.landing.focus-next": {
+		"message": "下一页域焦点"
+	},
+	"app.ymcl.landing.focus-page": {
+		"message": "第 {page} 页"
+	},
+	"app.ymcl.record-detail.header": {
+		"message": "详情"
+	},
+	"app.ymcl.landing.focus": {
+		"message": "域焦点"
+	},
+	"app.ymcl.landing.focus-empty": {
+		"message": "暂无域焦点。"
+	},
+	"app.ymcl.landing.focus-error": {
+		"message": "域焦点加载失败。"
+	},
+	"app.ymcl.landing.focus-hint": {
+		"message": "选择域提供的数据源，在首页聚集公告、活动等焦点内容。"
+	},
+	"app.ymcl.landing.headline": {
+		"message": "欢迎标题"
+	},
+	"app.ymcl.landing.headline-hint": {
+		"message": "留空使用域名称"
+	},
+	"app.ymcl.landing.home": {
+		"message": "域首页"
+	},
+	"app.ymcl.landing.image-url": {
+		"message": "图片地址"
+	},
+	"app.ymcl.landing.install": {
+		"message": "安装服务器整合包后即可加入"
+	},
+	"app.ymcl.landing.interval": {
+		"message": "轮播间隔（秒）"
+	},
+	"app.ymcl.landing.interval-hint": {
+		"message": "3–60 秒。鼠标停留在轮播控件上时暂停切换。"
+	},
+	"app.ymcl.landing.intro": {
+		"message": "欢迎说明"
+	},
+	"app.ymcl.landing.invalid-url": {
+		"message": "请输入 HTTP(S) 地址或相对于当前域的资源路径。"
+	},
+	"app.ymcl.landing.join": {
+		"message": "加入服务器"
+	},
+	"app.ymcl.landing.launch": {
+		"message": "启动并加入"
+	},
+	"app.ymcl.landing.launched": {
+		"message": "游戏已启动"
+	},
+	"app.ymcl.landing.launching": {
+		"message": "正在启动…"
+	},
+	"app.ymcl.landing.loading": {
+		"message": "正在加载服务器…"
+	},
+	"app.ymcl.landing.move-down": {
+		"message": "下移"
+	},
+	"app.ymcl.landing.move-up": {
+		"message": "上移"
+	},
+	"app.ymcl.landing.music": {
+		"message": "背景音乐"
+	},
+	"app.ymcl.landing.music-blocked": {
+		"message": "点击播放以开启音乐"
+	},
+	"app.ymcl.landing.music-error": {
+		"message": "音乐暂不可用，点击播放重试。"
+	},
+	"app.ymcl.landing.music-hint": {
+		"message": "使用 MP3、OGG 或 WAV 音频文件的直链；留空则关闭音乐。"
+	},
+	"app.ymcl.landing.music-pause": {
+		"message": "暂停音乐"
+	},
+	"app.ymcl.landing.music-play": {
+		"message": "播放音乐"
+	},
+	"app.ymcl.landing.music-title": {
+		"message": "曲目名称"
+	},
+	"app.ymcl.landing.music-url": {
+		"message": "音频地址"
+	},
+	"app.ymcl.landing.music-volume": {
+		"message": "音乐音量"
+	},
+	"app.ymcl.landing.next": {
+		"message": "下一张背景图"
+	},
+	"app.ymcl.landing.no-backgrounds": {
+		"message": "尚未添加图片，将使用域主题背景；未设置域主题背景时显示默认背景。"
+	},
+	"app.ymcl.landing.no-servers": {
+		"message": "当前域还没有可加入的服务器。"
+	},
+	"app.ymcl.landing.no-sources": {
+		"message": "当前域暂无可用的数据源。"
+	},
+	"app.ymcl.landing.offline": {
+		"message": "离线"
+	},
+	"app.ymcl.landing.online": {
+		"message": "在线"
+	},
+	"app.ymcl.landing.overlay": {
+		"message": "背景压暗"
+	},
+	"app.ymcl.landing.pause": {
+		"message": "暂停轮播"
+	},
+	"app.ymcl.landing.players": {
+		"message": "{count} 人在线"
+	},
+	"app.ymcl.landing.preview-note": {
+		"message": "实时预览 · 修改尚未发布"
+	},
+	"app.ymcl.landing.previous": {
+		"message": "上一张背景图"
+	},
+	"app.ymcl.landing.publish": {
+		"message": "发布首页"
+	},
+	"app.ymcl.landing.published": {
+		"message": "域首页已发布给全体成员"
+	},
+	"app.ymcl.landing.quick-play": {
+		"message": "快捷进服"
+	},
+	"app.ymcl.landing.ready": {
+		"message": "已安装 · 随时出发"
+	},
+	"app.ymcl.landing.remove-background": {
+		"message": "移除背景图"
+	},
+	"app.ymcl.landing.resume": {
+		"message": "继续轮播"
+	},
+	"app.ymcl.landing.retry": {
+		"message": "重试"
+	},
+	"app.ymcl.landing.select-server": {
+		"message": "选择服务器"
+	},
+	"app.ymcl.landing.switch-server": {
+		"message": "切换服务器"
+	},
+	"app.ymcl.landing.server-count": {
+		"message": "{count} 个服务器"
+	},
+	"app.ymcl.landing.search-servers": {
+		"message": "搜索服务器"
+	},
+	"app.ymcl.landing.no-matching-servers": {
+		"message": "没有匹配的服务器。"
+	},
+	"app.ymcl.landing.pages.navigation": {
+		"message": "首页分页"
+	},
+	"app.ymcl.landing.pages.landing": {
+		"message": "首页"
+	},
+	"app.ymcl.landing.pages.information": {
+		"message": "域信息"
+	},
+	"app.ymcl.landing.pages.empty": {
+		"message": "这里还没有信息卡片。"
+	},
+	"app.ymcl.landing.server": {
+		"message": "服务器"
+	},
+	"app.ymcl.landing.server-error": {
+		"message": "服务器列表加载失败。"
+	},
+	"app.ymcl.landing.settings-description": {
+		"message": "为域内全体成员统一配置背景轮播、域焦点、背景音乐和快捷进服。"
+	},
+	"app.ymcl.landing.settings-title": {
+		"message": "域首页"
+	},
+	"app.ymcl.landing.slide": {
+		"message": "背景图 {index}，共 {total} 张"
+	},
+	"app.ymcl.landing.slide-description": {
+		"message": "本张说明（可选）"
+	},
+	"app.ymcl.landing.slide-title": {
+		"message": "本张标题（可选）"
+	},
+	"app.ymcl.landing.unavailable": {
+		"message": "该服务器暂不可用。"
+	},
+	"app.ymcl.landing.unavailable-source": {
+		"message": "已不可用的数据源：{id}"
+	},
+	"app.ymcl.landing.untitled": {
+		"message": "未命名"
+	},
+	"app.ymcl.landing.update": {
+		"message": "启动前将自动更新"
+	},
+	"app.ymcl.landing.welcome": {
+		"message": "欢迎来到"
+	},
+	"app.ymcl.landing.welcome-player": {
+		"message": "欢迎回来，{name}"
+	},
+	"app.ymcl.landing.unavailable-server": {
+		"message": "服务器暂不可用：{id}"
+	},
+	"app.ymcl.design.description": {
+		"message": "为域内所有成员配置首页背景、焦点、音乐和卡片。发布后对全体成员生效。"
 	}
 }

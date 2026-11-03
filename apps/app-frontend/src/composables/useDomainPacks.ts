@@ -4,18 +4,23 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import {
 	install_create_modpack_instance,
+	install_job_get,
+	install_job_retry,
 	install_pack_to_existing_instance,
+	installJobInstanceId,
 	wait_for_install_job,
 } from '@/helpers/install'
 import { list } from '@/helpers/instance'
 import {
-	catchUpPackUpdate,
 	PERSONAL_DOMAIN_ID,
 	ymcl,
 	ymclErrorMessage,
 	type YmclMrpackDownload,
+	type YmclUpdateResult,
 } from '@/helpers/ymcl'
 import { useYmclStore } from '@/store/ymcl'
+
+import { useDomainPackOperations } from './domain-pack-operations'
 
 /**
  * Shared player-side view of the domain's published modpacks (MIP appendix
@@ -41,6 +46,33 @@ export interface DomainPackInstall {
 	instanceName: string
 	currentVersion: string
 }
+
+export interface DomainPackOperationProgress {
+	stage: 'downloading' | 'installing' | 'finalizing' | 'updating'
+	packId: string
+	instanceId?: string
+	jobId?: string
+}
+
+export interface DomainPackOperationOptions {
+	notify?: boolean
+	instanceId?: string
+	selectedFeatures?: string[]
+	onProgress?: (progress: DomainPackOperationProgress) => void
+}
+
+export type DomainPackOperationResult =
+	| { ok: true; instanceId: string; version: string; warning?: string; update?: YmclUpdateResult }
+	| { ok: false; error: string }
+
+const pendingDownloads = new Map<
+	string,
+	{
+		archive: YmclMrpackDownload
+		selected: string[]
+		jobId: string
+	}
+>()
 
 interface ServerOption {
 	serverId: string
@@ -71,6 +103,7 @@ export function useDomainPacks() {
 	const { addNotification } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 	const ymclStore = useYmclStore()
+	const operations = useDomainPackOperations()
 
 	const messages = defineMessages({
 		downloaded: {
@@ -91,26 +124,48 @@ export function useDomainPacks() {
 		},
 		catchupFailed: {
 			id: 'app.ymcl.packs.catchup-failed',
-			defaultMessage:
-				'已安装基线版本 {version}，增量更新到 {target} 失败；启动时会自动重试。',
+			defaultMessage: '已安装基线版本 {version}，增量更新到 {target} 失败；启动时会自动重试。',
+		},
+		contextChanged: {
+			id: 'app.ymcl.packs.context-changed',
+			defaultMessage: 'The active domain or account changed. Continue from the original domain.',
+		},
+		operationInProgress: {
+			id: 'app.ymcl.packs.operation-in-progress',
+			defaultMessage: 'A task for this server is already running. View its progress in Downloads.',
 		},
 	})
 
 	/** 基线安装后的增量追平；失败只提示，不推翻已完成的安装。 */
-	function catchUpAfterBaseline(
+	async function catchUpAfterBaseline(
 		instanceId: string,
 		archive: YmclMrpackDownload,
-	): Promise<string> {
-		return catchUpPackUpdate(instanceId, archive, (error) => {
-			addNotification({
-				title: formatMessage(messages.catchupFailed, {
-					version: archive.version,
-					target: archive.target_version ?? '',
-				}),
-				text: ymclErrorMessage(error),
-				type: 'error',
-			})
-		})
+		options: DomainPackOperationOptions,
+	) {
+		let warning = ''
+		if (archive.target_version && archive.target_version !== archive.version) {
+			options.onProgress?.({ stage: 'updating', packId: archive.pack_id, instanceId })
+		}
+		let version = archive.version
+		let update: YmclUpdateResult | undefined
+		try {
+			if (archive.target_version && archive.target_version !== archive.version) {
+				update = await ymcl.applyPackUpdate(instanceId)
+				version = update.new_version || archive.version
+			}
+		} catch (error) {
+			warning = ymclErrorMessage(error)
+			if (options.notify !== false)
+				addNotification({
+					title: formatMessage(messages.catchupFailed, {
+						version: archive.version,
+						target: archive.target_version ?? '',
+					}),
+					text: ymclErrorMessage(error),
+					type: 'error',
+				})
+		}
+		return { version, warning, update }
 	}
 
 	const loading = ref(false)
@@ -171,7 +226,9 @@ export function useDomainPacks() {
 			}
 			const previews = await Promise.all(
 				bound.map(
-					async (server): Promise<{
+					async (
+						server,
+					): Promise<{
 						diagnostic: DomainPackServerDiagnostic
 						entry: DomainPackEntry | null
 					}> => {
@@ -276,69 +333,201 @@ export function useDomainPacks() {
 		}
 	}
 
-	async function download(pack: DomainPackEntry) {
-		if (downloadingServer.value) return
+	async function download(
+		pack: DomainPackEntry,
+		options: DomainPackOperationOptions = {},
+	): Promise<DomainPackOperationResult | undefined> {
+		if (downloadingServer.value || updatingInstance.value) return
+		const domainId = ymclStore.activeDomainId
+		const userId = ymclStore.session?.session.user_id
+		const pendingKey = JSON.stringify([domainId, userId, pack.serverId, pack.packId])
+		const handle = operations.begin(
+			{ domainId, userId: userId ?? null, serverId: pack.serverId },
+			{ stage: 'downloading', packId: pack.packId },
+		)
+		if (!handle) return operationInProgress(options)
+		const onProgress = options.onProgress
+		options = {
+			...options,
+			onProgress(progress) {
+				operations.advance(handle, progress)
+				onProgress?.(progress)
+			},
+		}
+		const requireSameDomain = () => {
+			if (ymclStore.activeDomainId !== domainId || ymclStore.session?.session.user_id !== userId) {
+				throw new Error(formatMessage(messages.contextChanged))
+			}
+		}
 		downloadingServer.value = pack.serverId
 		try {
 			const name = pack.serverName || pack.packId
 			// WF-4 首装走 mrpack：归档自带 dependencies，游戏版本/加载器由内置
 			// 导入器物化，不再需要面板上的 requiredVersion。目标版本没有完整
 			// 包（纯增量版本）时后端回退为 parent 链上的基线 mrpack。
-			const archive = await ymcl.downloadPackMrpack(pack.serverId, pack.packId, [])
-			const job = await install_create_modpack_instance(
-				{ type: 'fromFile', path: archive.path },
-				{ name },
-			)
-			const settled = await wait_for_install_job(job.job_id)
-			const instanceId = settled.target.instance_id ?? ''
+			let pending = pendingDownloads.get(pendingKey)
+			if (!pending) {
+				const selected = options.selectedFeatures ?? []
+				options.onProgress?.({ stage: 'downloading', packId: pack.packId })
+				const archive = await ymcl.downloadPackMrpack(pack.serverId, pack.packId, selected)
+				requireSameDomain()
+				const job = await install_create_modpack_instance(
+					{ type: 'fromFile', path: archive.path },
+					{ name },
+				)
+				pending = { archive, selected, jobId: job.job_id }
+				pendingDownloads.set(pendingKey, pending)
+			} else {
+				const job = await install_job_get(pending.jobId)
+				requireSameDomain()
+				if (['failed', 'interrupted', 'canceled'].includes(job.status))
+					await install_job_retry(job.job_id)
+			}
+			const { archive, selected, jobId } = pending
+			options.onProgress?.({ stage: 'installing', packId: archive.pack_id, jobId })
+			const settled = await wait_for_install_job(jobId)
+			const instanceId = installJobInstanceId(settled) ?? ''
 			if (!instanceId) throw new Error('实例创建未返回 instanceId')
+			requireSameDomain()
+			options.onProgress?.({ stage: 'finalizing', packId: archive.pack_id, instanceId, jobId })
 			await ymcl.adoptPackState(
 				instanceId,
 				pack.serverId,
 				archive.pack_id,
 				archive.version,
 				archive.channel ?? null,
-				[],
+				selected,
 			)
-			const finalVersion = await catchUpAfterBaseline(instanceId, archive)
-			addNotification({
-				title: formatMessage(messages.downloaded, { name }),
-				text: `${archive.pack_id} → ${finalVersion}`,
-				type: 'success',
-			})
-			await refresh()
+			pendingDownloads.delete(pendingKey)
+			requireSameDomain()
+			const { version, warning, update } = await catchUpAfterBaseline(instanceId, archive, options)
+			if (options.notify !== false)
+				addNotification({
+					title: formatMessage(messages.downloaded, { name }),
+					text: `${archive.pack_id} → ${version}`,
+					type: 'success',
+				})
+			if (ymclStore.activeDomainId === domainId) await refresh()
+			const result = { ok: true, instanceId, version, warning, update } as const
+			operations.finish(handle, result)
+			return result
 		} catch (error) {
-			addNotification({
-				title: formatMessage(messages.installFailed),
-				text: ymclErrorMessage(error),
-				type: 'error',
-			})
+			if (options.notify !== false)
+				addNotification({
+					title: formatMessage(messages.installFailed),
+					text: ymclErrorMessage(error),
+					type: 'error',
+				})
+			const result = { ok: false, error: ymclErrorMessage(error) } as const
+			operations.finish(handle, result)
+			return result
 		} finally {
 			downloadingServer.value = ''
 		}
 	}
 
-	async function update(pack: DomainPackEntry) {
-		const install = installFor(pack)
-		if (!install || updatingInstance.value) return
-		updatingInstance.value = install.instanceId
+	async function update(
+		pack: DomainPackEntry,
+		options: DomainPackOperationOptions = {},
+	): Promise<DomainPackOperationResult | undefined> {
+		let install = options.instanceId
+			? [...installsByPack.value.values()]
+					.flat()
+					.find((item) => item.instanceId === options.instanceId)
+			: installFor(pack)
+		if ((!install && !options.instanceId) || updatingInstance.value || downloadingServer.value)
+			return
+		const domainId = ymclStore.activeDomainId
+		const userId = ymclStore.session?.session.user_id
+		const handle = operations.begin(
+			{ domainId, userId: userId ?? null, serverId: pack.serverId },
+			{
+				stage: 'updating',
+				packId: pack.packId,
+				instanceId: options.instanceId ?? install?.instanceId,
+			},
+		)
+		if (!handle) return operationInProgress(options)
+		const onProgress = options.onProgress
+		options = {
+			...options,
+			onProgress(progress) {
+				operations.advance(handle, progress)
+				onProgress?.(progress)
+			},
+		}
+		const requireSameDomain = () => {
+			if (ymclStore.activeDomainId !== domainId || ymclStore.session?.session.user_id !== userId) {
+				throw new Error(formatMessage(messages.contextChanged))
+			}
+		}
+		updatingInstance.value = options.instanceId ?? install!.instanceId
 		try {
+			if (!install) {
+				const check = await ymcl.preLaunchCheck(options.instanceId!)
+				requireSameDomain()
+				if (
+					!check.managed ||
+					!check.pack_id ||
+					(check.pack_id !== pack.packId && check.server_id !== pack.serverId)
+				)
+					throw new Error(formatMessage(messages.updateFailed))
+				install = {
+					instanceId: options.instanceId!,
+					instanceName: '',
+					serverId: check.server_id ?? pack.serverId,
+					packId: check.pack_id,
+					currentVersion: check.current_version ?? '',
+				}
+			}
+			let outcome: DomainPackOperationResult
 			if (install.packId === pack.packId) {
 				// 同一包的版本推进：MIP WF-5 增量更新。
-				const result = await ymcl.applyPackUpdate(install.instanceId)
-				addNotification({
-					title: formatMessage(messages.updated, { version: result.new_version }),
-					type: 'success',
+				options.onProgress?.({
+					stage: 'updating',
+					packId: pack.packId,
+					instanceId: install.instanceId,
 				})
+				const result = await ymcl.applyPackUpdate(install.instanceId)
+				if (options.notify !== false)
+					addNotification({
+						title: formatMessage(messages.updated, { version: result.new_version }),
+						type: 'success',
+					})
+				outcome = {
+					ok: true,
+					instanceId: install.instanceId,
+					version: result.new_version,
+					update: result,
+				}
 			} else {
 				// 服务器删包重传（packId 变化）：下载当前绑定包并装入原实例。
+				options.onProgress?.({
+					stage: 'downloading',
+					packId: pack.packId,
+					instanceId: install.instanceId,
+				})
 				const archive = await ymcl.downloadPackMrpack(pack.serverId, null, [])
+				requireSameDomain()
 				const job = await install_pack_to_existing_instance(
 					install.instanceId,
 					{ type: 'fromFile', path: archive.path },
 					null,
 				)
+				options.onProgress?.({
+					stage: 'installing',
+					packId: archive.pack_id,
+					instanceId: install.instanceId,
+					jobId: job.job_id,
+				})
 				await wait_for_install_job(job.job_id)
+				requireSameDomain()
+				options.onProgress?.({
+					stage: 'finalizing',
+					packId: archive.pack_id,
+					instanceId: install.instanceId,
+					jobId: job.job_id,
+				})
 				// 服务器删包重传换了 packId：force 接管旧包实例。
 				await ymcl.adoptPackState(
 					install.instanceId,
@@ -349,22 +538,41 @@ export function useDomainPacks() {
 					[],
 					true,
 				)
-				const finalVersion = await catchUpAfterBaseline(install.instanceId, archive)
-				addNotification({
-					title: formatMessage(messages.updated, { version: finalVersion }),
-					type: 'success',
-				})
+				requireSameDomain()
+				const { version, warning, update } = await catchUpAfterBaseline(
+					install.instanceId,
+					archive,
+					options,
+				)
+				if (options.notify !== false)
+					addNotification({
+						title: formatMessage(messages.updated, { version }),
+						type: 'success',
+					})
+				outcome = { ok: true, instanceId: install.instanceId, version, warning, update }
 			}
-			await refresh()
+			if (ymclStore.activeDomainId === domainId) await refresh()
+			operations.finish(handle, outcome)
+			return outcome
 		} catch (error) {
-			addNotification({
-				title: formatMessage(messages.updateFailed),
-				text: ymclErrorMessage(error),
-				type: 'error',
-			})
+			if (options.notify !== false)
+				addNotification({
+					title: formatMessage(messages.updateFailed),
+					text: ymclErrorMessage(error),
+					type: 'error',
+				})
+			const result = { ok: false, error: ymclErrorMessage(error) } as const
+			operations.finish(handle, result)
+			return result
 		} finally {
 			updatingInstance.value = ''
 		}
+	}
+
+	function operationInProgress(options: DomainPackOperationOptions): DomainPackOperationResult {
+		const error = formatMessage(messages.operationInProgress)
+		if (options.notify !== false) addNotification({ title: error, type: 'error' })
+		return { ok: false, error }
 	}
 
 	watch(

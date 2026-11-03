@@ -89,7 +89,7 @@ test('release compiles the frontend before drafting a release or starting platfo
 	assert.equal(release.jobs['build-macos'].needs, 'preflight')
 })
 
-test('Windows installer variants reuse a binary without weakening release optimization', async () => {
+test('Windows installer variants reuse an LTO binary and preserve parallel optimization', async () => {
 	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	for (const job of [ci.jobs.desktop, release.jobs.build]) {
@@ -101,7 +101,10 @@ test('Windows installer variants reuse a binary without weakening release optimi
 		assert.doesNotMatch(commands, /tauri build[^\n]*tauri-native/)
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 	}
-	assert.equal(release.jobs.build.env.CARGO_PROFILE_RELEASE_LTO, 'true')
+	assert.equal(
+		release.jobs.build.env.CARGO_PROFILE_RELEASE_LTO,
+		"${{ runner.os == 'Windows' && 'thin' || 'true' }}",
+	)
 	assert.ok(ci.jobs.desktop.steps.some((step) => step.run?.includes('turbo run build')))
 })
 
@@ -112,16 +115,30 @@ test('native Windows installers do not publish stale modern updater signatures',
 	const variants = release.jobs.build.steps.find(
 		(step) => step.name === 'Prepare Windows distribution variants',
 	)
-	assert.ok(variants.run.includes('$modernSignaturePath'))
+	const modern = release.jobs.build.steps.find(
+		(step) => step.name === 'Name the signed Windows modern installer',
+	)
+	assert.ok(modern.run.includes('$modernSignaturePath'))
 	assert.doesNotMatch(variants.run, /\$nativeSignature/)
 	const staging = release.jobs.build.steps.findIndex((step) =>
 		step.run?.includes('stage-release-assets.mjs'),
 	)
-	assert.ok(staging >= 0 && staging < release.jobs.build.steps.indexOf(variants))
+	const publish = release.jobs.build.steps.findIndex(
+		(step) => step.name === 'Publish Windows installer and updater immediately',
+	)
+	assert.ok(staging >= 0 && staging < release.jobs.build.steps.indexOf(modern))
+	assert.ok(publish > release.jobs.build.steps.indexOf(modern))
+	assert.ok(publish < release.jobs.build.steps.indexOf(variants))
+	assert.equal(release.jobs.build.steps[publish].if, "runner.os == 'Windows'")
+	assert.equal(
+		release.jobs.build.steps[publish].uses,
+		'./.github/actions/publish-release-assets',
+	)
+	assert.equal(release.jobs.build.strategy.matrix.include[0].name, 'Windows x64')
 	assert.doesNotMatch(variants.run, /gh release (upload|delete-asset)/)
 })
 
-test('release and branch cache warming use the same full-LTO targets and setup', async () => {
+test('release and branch cache warming use matching LTO profiles, targets and setup', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const warm = parse(
 		await readFile(join(root, '.github/workflows/prepare-release-cache.yml'), 'utf8'),
@@ -134,7 +151,12 @@ test('release and branch cache warming use the same full-LTO targets and setup',
 		...release.jobs['build-macos'].strategy.matrix.include,
 	])
 	for (const job of [release.jobs.build, release.jobs['build-macos'], warm.jobs.warm]) {
-		assert.equal(job.env.CARGO_PROFILE_RELEASE_LTO, 'true')
+		assert.equal(
+			job.env.CARGO_PROFILE_RELEASE_LTO,
+			job === release.jobs['build-macos']
+				? 'true'
+				: "${{ runner.os == 'Windows' && 'thin' || 'true' }}",
+		)
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 		const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
 		assert.equal(checkout.with['fetch-depth'], 1)
@@ -195,7 +217,7 @@ test('macOS compiles architectures on native runners and only bundles the combin
 		await readFile(join(root, '.github/actions/setup-release-build/action.yml'), 'utf8'),
 	).runs.steps
 	for (const step of preparation.filter((step) =>
-		/Cache full-LTO|Cache npm, Java|Cache frontend|Prefetch Rust/.test(step.name ?? ''),
+		/Cache release Rust|Cache npm, Java|Cache frontend|Prefetch Rust/.test(step.name ?? ''),
 	)) {
 		assert.equal(step.if, "inputs.bundle-only != 'true'")
 	}
@@ -329,6 +351,17 @@ test('recovery platform selection is explicit and normal releases still require 
 	assert.equal(selection.default, 'both')
 	assert.deepEqual(selection.options, ['both', 'yudream'])
 	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, "${{ inputs.update_platforms || 'both' }}")
+})
+
+test('stable website metadata updates the default branch from a tag checkout', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const publish = release.jobs['verify-and-publish'].steps.find(
+		(step) => step.name === 'Publish website download metadata',
+	)
+	assert.equal(publish.env.DEFAULT_BRANCH, '${{ github.event.repository.default_branch }}')
+	assert.match(publish.run, /git switch --create release-website-metadata "origin\/\$\{DEFAULT_BRANCH\}"/)
+	assert.match(publish.run, /git push origin "HEAD:\$\{DEFAULT_BRANCH\}"/)
+	assert.doesNotMatch(publish.run, /push origin main|--force/)
 })
 
 test('staging preserves signed updater bytes across rebundling and keeps universal asset names', async () => {

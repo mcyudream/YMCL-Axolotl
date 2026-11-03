@@ -146,6 +146,7 @@ async fn run_with_extra_launch_args_inner(
     })?
 }
 
+/// The caller holds the instance maintenance lock throughout preparation.
 #[tracing::instrument(skip(credentials))]
 async fn run_credentials(
     instance_id: &str,
@@ -159,8 +160,6 @@ async fn run_credentials(
     if super::has_active_instance_operation(instance_id) {
         return Err(crate::ErrorKind::InputError("Wait for the active backup operation to finish before launching this instance".to_string()).into());
     }
-    let _maintenance_guard =
-        super::lock_instance_maintenance(instance_id).await;
     let state = State::get().await?;
     if let Err(error) =
         crate::api::instance::sync_game_options_before_launch(instance_id).await
@@ -518,6 +517,51 @@ pub async fn try_update_playtime_by_instance_id(
 mod tests {
     use super::{modrinth_pack_version_id, playtime_api_url};
     use crate::state::InstanceLink;
+
+    #[cfg(not(feature = "tauri"))]
+    #[tokio::test]
+    async fn credential_launch_does_not_reacquire_maintenance_lock() {
+        use super::{Credentials, QuickPlayType, State, run_credentials};
+        use crate::state::{MinecraftAccountType, MinecraftProfile};
+        use std::time::Duration;
+
+        // The shared state outlives the test, so retain its temporary root.
+        let root = tempfile::tempdir().unwrap().keep();
+        State::init_for_test(root.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let instance_id = format!("local:{}", uuid::Uuid::new_v4());
+        let credentials = Credentials {
+            account_id: None,
+            offline_profile: MinecraftProfile::default(),
+            account_type: MinecraftAccountType::Offline,
+            access_token: String::new(),
+            refresh_token: String::new(),
+            expires: chrono::Utc::now(),
+            active: false,
+            yggdrasil: None,
+        };
+        let _maintenance_guard =
+            super::super::lock_instance_maintenance(&instance_id).await;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_credentials(
+                &instance_id,
+                &credentials,
+                QuickPlayType::None,
+                true,
+                None,
+                None,
+                60,
+            ),
+        )
+        .await
+        .expect("launch preparation must progress while its caller holds the maintenance lock");
+
+        let error = result.expect_err("the test instance does not exist");
+        assert!(error.to_string().contains("nonexistent instance"));
+    }
 
     #[test]
     fn playtime_parent_requires_an_explicit_modrinth_link() {

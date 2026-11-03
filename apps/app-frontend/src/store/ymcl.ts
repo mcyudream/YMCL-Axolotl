@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 
 import type { HomeDashboardConfig } from '@/components/home/home-dashboard'
+import { normalizeDomainHomeLanding } from '@/components/ymcl/home/domain-home'
 import {
 	PERSONAL_DOMAIN_ID,
 	ymcl,
@@ -76,6 +77,11 @@ export const useYmclStore = defineStore('ymclStore', {
 				pages.find((page) => page.data_source === pageId) ??
 				null
 			)
+		},
+		domainHomeLanding: (state) =>
+			normalizeDomainHomeLanding((state.manifest?.home as YmclHomeProfile | undefined)?.landing),
+		showDomainLanding(): boolean {
+			return !this.isPersonal && !this.loginRequired && this.domainHomeLanding.enabled
 		},
 		/**
 		 * Domain-hosted home layout (YAP §6.5 home capability) mapped onto the

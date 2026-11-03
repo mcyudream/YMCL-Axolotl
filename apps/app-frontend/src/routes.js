@@ -46,14 +46,6 @@ export default new createRouter({
 			},
 		},
 		{
-			path: '/ymcl/design',
-			name: 'YmclHomeDesigner',
-			component: () => import('@/pages/ymcl/HomeDesigner.vue'),
-			meta: {
-				breadcrumb: [{ name: 'Home designer' }],
-			},
-		},
-		{
 			path: '/domain/:pageId',
 			name: 'YmclDomainPage',
 			component: () => import('@/pages/ymcl/DomainPageHost.vue'),

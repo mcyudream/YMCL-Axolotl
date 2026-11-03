@@ -49,6 +49,7 @@ pub(crate) fn cleanroom_installer_url(loader_version: &str) -> String {
 const CLEANROOM_MAVEN_METADATA_URL: &str = "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/maven-metadata.xml";
 const CLEANROOM_MAVEN_VERSION_URL: &str =
     "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/";
+
 const FORGE_MAVEN_URL: &str =
     "https://maven.minecraftforge.net/net/minecraftforge/forge/";
 const FORGE_PROMOTIONS_URL: &str = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json";
@@ -737,6 +738,61 @@ fn liteloader_latest_entry(
         .get("latest")
 }
 
+fn cleanroom_maven_loader_version(version: &str) -> Option<LoaderVersion> {
+    if !version.starts_with(|ch: char| ch.is_ascii_digit())
+        || !version.bytes().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, b'.' | b'-' | b'_')
+        })
+    {
+        return None;
+    }
+    Some(LoaderVersion {
+        id: version.to_string(),
+        url: format!(
+            "{CLEANROOM_MAVEN_VERSION_URL}{version}/cleanroom-{version}-installer.jar"
+        ),
+        stable: is_stable_version(version),
+        profile_source: LoaderProfileSource::Installer,
+        fallback_url: None,
+    })
+}
+
+pub(crate) async fn resolve_exact_cleanroom_version(
+    version: &str,
+    fetch_semaphore: &FetchSemaphore,
+) -> crate::Result<Option<LoaderVersion>> {
+    let Some(version) = cleanroom_maven_loader_version(version) else {
+        return Ok(None);
+    };
+    let client = crate::util::fetch::configured_client().await?;
+    verify_cleanroom_installer(version, &client, fetch_semaphore).await
+}
+
+async fn verify_cleanroom_installer(
+    version: LoaderVersion,
+    client: &reqwest::Client,
+    fetch_semaphore: &FetchSemaphore,
+) -> crate::Result<Option<LoaderVersion>> {
+    let _permit = fetch_semaphore.0.acquire().await?;
+    let response = client
+        .head(&version.url)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE
+    ) {
+        return Ok(None);
+    }
+    response.error_for_status()?;
+    tracing::debug!(
+        loader_version = %version.id,
+        "Verified exact Cleanroom installer missing from the loader manifest"
+    );
+    Ok(Some(version))
+}
+
 async fn fetch_cleanroom_manifest(
     fetch_semaphore: &FetchSemaphore,
     pool: &SqlitePool,
@@ -780,16 +836,7 @@ fn cleanroom_maven_manifest(metadata: MavenMetadata) -> Manifest {
         .versions
         .values
         .into_iter()
-        .map(|version| {
-            let url = format!("{CLEANROOM_MAVEN_VERSION_URL}{version}/cleanroom-{version}-installer.jar");
-            LoaderVersion {
-                id: version.clone(),
-                url,
-                stable: is_stable_version(&version),
-                profile_source: LoaderProfileSource::Installer,
-                fallback_url: None,
-            }
-        })
+        .filter_map(|version| cleanroom_maven_loader_version(&version))
         .collect::<Vec<_>>();
     loaders.sort_by(|left, right| compare_versions(&right.id, &left.id));
     Manifest {
@@ -2916,6 +2963,81 @@ mod tests {
         assert!(!loaders[0].stable);
         assert!(loaders[1].stable);
         assert!(!loaders[2].stable);
+    }
+
+    #[test]
+    fn cleanroom_exact_versions_use_maven_without_changing_the_version() {
+        let stable = cleanroom_maven_loader_version("0.4.0").unwrap();
+        assert_eq!(stable.id, "0.4.0");
+        assert!(stable.stable);
+        assert_eq!(stable.profile_source, LoaderProfileSource::Installer);
+        assert_eq!(
+            stable.url,
+            "https://repo.cleanroommc.com/releases/com/cleanroommc/cleanroom/0.4.0/cleanroom-0.4.0-installer.jar"
+        );
+        let alpha = cleanroom_maven_loader_version("0.4.0-alpha").unwrap();
+        assert!(!alpha.stable);
+        assert_ne!(stable.url, alpha.url);
+        for version in [
+            "",
+            "latest",
+            "../0.4.0",
+            "0.4.0/other",
+            "0.4.0?query",
+            "0.4.0#fragment",
+        ] {
+            assert!(
+                cleanroom_maven_loader_version(version).is_none(),
+                "{version}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanroom_installer_probe_distinguishes_missing_files_from_network_errors()
+     {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (status, expected) in [
+            (200, Some(true)),
+            (404, Some(false)),
+            (410, Some(false)),
+            (503, None),
+        ] {
+            let listener =
+                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    assert!(read > 0);
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                assert!(String::from_utf8_lossy(&request).starts_with(
+                    "HEAD /0.4.0/cleanroom-0.4.0-installer.jar HTTP/1.1"
+                ));
+                stream.write_all(format!("HTTP/1.1 {status} Response\r\nContent-Length: 5525743\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            });
+            let mut version = cleanroom_maven_loader_version("0.4.0").unwrap();
+            version.url =
+                format!("http://{address}/0.4.0/cleanroom-0.4.0-installer.jar");
+            let result = verify_cleanroom_installer(
+                version,
+                &reqwest::Client::builder().no_proxy().build().unwrap(),
+                &FetchSemaphore(tokio::sync::Semaphore::new(1)),
+            )
+            .await;
+            match expected {
+                Some(true) => assert_eq!(result.unwrap().unwrap().id, "0.4.0"),
+                Some(false) => assert!(result.unwrap().is_none()),
+                None => assert!(
+                    matches!(result.unwrap_err().raw.as_ref(), crate::ErrorKind::FetchError(error) if error.status().is_some_and(|value| value.as_u16() == status))
+                ),
+            }
+            server.await.unwrap();
+        }
     }
 
     #[test]

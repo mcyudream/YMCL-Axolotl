@@ -214,7 +214,7 @@ opt-level = 3
 
 # Optimize for speed and reduce size on release builds.
 # LTO stays off for local `pnpm app:build` and PR CI packaging. Tagged
-# releases re-enable fat LTO with CARGO_PROFILE_RELEASE_LTO=true.
+# releases enable ThinLTO on Windows and fat LTO on other platforms.
 # panic stays at Cargo's default unwind: spawn_blocking JoinError recovery
 # throughout app-lib assumes panics are catchable per-task, not process abort.
 [profile.release]

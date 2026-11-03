@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct ParallelMinecraftInstall {
     cancel: CancellationToken,
     task: Option<tokio::task::JoinHandle<crate::Result<()>>>,
+    reporter: InstallProgressReporter,
 }
 
 impl ParallelMinecraftInstall {
@@ -17,6 +18,7 @@ impl ParallelMinecraftInstall {
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
         let parallel_reporter = reporter.with_parallel_output();
+        let failure_reporter = parallel_reporter.clone();
         let task = tokio::spawn(async move {
             tokio::select! {
                 _ = task_cancel.cancelled() => {
@@ -38,6 +40,7 @@ impl ParallelMinecraftInstall {
         Self {
             cancel,
             task: Some(task),
+            reporter: failure_reporter,
         }
     }
 
@@ -52,7 +55,14 @@ impl ParallelMinecraftInstall {
     /// Waits for the core install to finish without cancelling it.
     pub(crate) async fn join(mut self) -> crate::Result<()> {
         if let Some(task) = self.task.take() {
-            task.await??;
+            let result = task.await?;
+            if result.is_err()
+                && let Err(error) =
+                    self.reporter.promote_parallel_failure().await
+            {
+                tracing::warn!(%error, "Failed to restore parallel Minecraft failure context");
+            }
+            result?;
         }
         Ok(())
     }

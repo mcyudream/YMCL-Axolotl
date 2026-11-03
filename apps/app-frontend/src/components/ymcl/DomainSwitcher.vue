@@ -97,6 +97,7 @@ async function activate(domain: YmclDomainSummary) {
 	shown.value = false
 	try {
 		await ymclStore.activateDomain(domain.id)
+		await router.push('/')
 	} catch (error) {
 		console.error('Failed to activate domain', error)
 	}

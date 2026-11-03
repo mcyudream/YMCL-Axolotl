@@ -483,6 +483,30 @@ pub(crate) fn minecraft_library_mirrors(url: &str) -> Vec<String> {
     if let Some(file_name) = url.strip_prefix(MACHINA_LWJGL_RELEASE) {
         mirrors.push(format!("{MOJANG_LWJGL_PATH}{file_name}"));
     }
+    for (primary, alternate) in [
+        (
+            "https://piston-data.mojang.com",
+            "https://launcher.mojang.com",
+        ),
+        (
+            "https://launcher.mojang.com",
+            "https://piston-data.mojang.com",
+        ),
+    ] {
+        let Some(object) = url.strip_prefix(&format!("{primary}/v1/objects/"))
+        else {
+            continue;
+        };
+        let Some((hash, filename)) = object.split_once('/') else {
+            continue;
+        };
+        if hash.len() == 40
+            && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && matches!(filename, "client.jar" | "server.jar")
+        {
+            mirrors.push(format!("{alternate}/v1/objects/{object}"));
+        }
+    }
     mirrors
 }
 
@@ -2666,6 +2690,35 @@ pub async fn download_log_config(
 mod tests {
     use super::*;
     use crate::launcher::natives::prepare_native_libraries as prepare_test_natives;
+
+    #[test]
+    fn minecraft_client_keeps_an_independent_official_object_fallback() {
+        let hash = "0f275bc1547d01fa5f56ba34bdc87d981ee12daf";
+        let piston = format!(
+            "https://piston-data.mojang.com/v1/objects/{hash}/client.jar"
+        );
+        let launcher =
+            format!("https://launcher.mojang.com/v1/objects/{hash}/client.jar");
+        assert_eq!(
+            minecraft_library_mirrors(&piston),
+            vec![piston.clone(), launcher.clone()]
+        );
+        assert_eq!(
+            minecraft_library_mirrors(&launcher),
+            vec![launcher, piston]
+        );
+        for original in [
+            "https://piston-data.mojang.com.evil.example/v1/objects/0f275bc1547d01fa5f56ba34bdc87d981ee12daf/client.jar",
+            "https://piston-data.mojang.com/v1/objects/invalid/client.jar",
+            "https://piston-data.mojang.com/v1/objects/0f275bc1547d01fa5f56ba34bdc87d981ee12daf/client.jar?token=secret",
+            "https://libraries.minecraft.net/example/library.jar",
+        ] {
+            assert_eq!(
+                minecraft_library_mirrors(original),
+                vec![original.to_string()]
+            );
+        }
+    }
 
     fn urls(values: &[&str]) -> Option<Vec<String>> {
         Some(values.iter().map(|value| (*value).to_string()).collect())

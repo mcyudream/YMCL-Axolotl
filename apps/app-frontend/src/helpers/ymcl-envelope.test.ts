@@ -10,6 +10,14 @@ import {
 	ymclRecordTitle,
 } from './ymcl-envelope.ts'
 
+test('pagination totals follow the same envelope as records and reject invalid values', () => {
+	assert.equal(normalizeYmclEnvelope({ data: { records: [], total: '12' } }).total, 12)
+	assert.equal(normalizeYmclEnvelope({ records: [], total: 0 }).total, 0)
+	for (const total of [-1, 1.5, Infinity, '', null, 'invalid', Number.MAX_SAFE_INTEGER + 1]) {
+		assert.equal(normalizeYmclEnvelope({ records: [], total }).total, undefined)
+	}
+})
+
 test('normalizeYmclEnvelope reads camelCase envelopes', () => {
 	const envelope = normalizeYmclEnvelope({
 		records: [{ id: 'a1', title: '活动一', summary: '测试' }],

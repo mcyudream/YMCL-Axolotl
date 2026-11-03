@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { normalizeHomeDashboard } from '../components/home/home-dashboard.ts'
+import { normalizeDomainHomeLanding } from '../components/ymcl/home/domain-home.ts'
 import {
 	HOME_CARD_TYPE_OPTIONS,
 	mapDashboardToHomeProfile,
@@ -16,6 +17,23 @@ const dataSources = [
 	{ id: 'mc.servers.list', providerCode: 'mc', sourceCode: 'servers.list' },
 	{ id: 'mc.stats.online', providerCode: 'mc', sourceCode: 'stats.online' },
 ]
+
+test('publishing widget changes preserves domain scenery and future profile extensions', () => {
+	const original = {
+		landing: normalizeDomainHomeLanding({
+			enabled: true,
+			slides: [{ image: '/welcome.webp' }],
+			music: { url: '/music.ogg' },
+		}),
+		adapterExtension: { retained: true },
+		cards: [{ id: 'recent', type: 'recent-instances' }],
+	}
+	const dashboard = mapHomeProfileToDashboard(original)
+	assert.ok(dashboard)
+	const { profile } = mapDashboardToHomeProfile(dashboard, original)
+	assert.deepEqual(profile.landing, original.landing)
+	assert.deepEqual((profile as typeof original).adapterExtension, original.adapterExtension)
+})
 
 test('maps adapter-contributed cards onto dashboard widgets', () => {
 	const config = mapHomeProfileToDashboard(
@@ -50,6 +68,88 @@ test('maps adapter-contributed cards onto dashboard widgets', () => {
 	})
 })
 
+test('publishing edits updates existing card settings and preserves adapter fields', () => {
+	const original = {
+		cards: [
+			{
+				id: 'greeting',
+				type: 'greeting',
+				requiredPermission: 'domain:member',
+				params: { greetingMode: 'text', greetingText: 'Old welcome', extension: 'keep' },
+			},
+			{ id: 'recent', type: 'recent-instances', params: { recentLimit: 4, extension: true } },
+			{
+				id: 'shortcut',
+				type: 'page-shortcut',
+				title: 'Old page',
+				params: { target: 'page:mc.servers', icon: 'server' },
+			},
+			{
+				id: 'data',
+				type: 'data-card',
+				title: 'Old stats',
+				params: { dataSource: 'mc.stats.online', variant: 'stats', extension: 1 },
+			},
+		],
+	}
+	const edited = mapHomeProfileToDashboard(original, dataSources)
+	assert.ok(edited)
+	edited.widgets[0].options = {
+		greetingMode: 'text',
+		greetingText: 'New welcome',
+		greetingFont: 'mono',
+		greetingFontSize: 28,
+	}
+	edited.widgets[1].options = { recentLimit: 8 }
+	edited.widgets[2].shortcut = { target: 'native:/skins', title: 'Wardrobe' }
+	edited.widgets[3].dataSource = {
+		id: 'mc.servers.list',
+		providerCode: 'mc',
+		sourceCode: 'servers.list',
+		variant: 'list',
+		title: 'Servers',
+	}
+	const { profile } = mapDashboardToHomeProfile(edited, original)
+	assert.equal(profile.cards?.[0].requiredPermission, 'domain:member')
+	assert.deepEqual(profile.cards?.[0].params, { ...edited.widgets[0].options, extension: 'keep' })
+	assert.deepEqual(profile.cards?.[1].params, { recentLimit: 8, extension: true })
+	assert.deepEqual(profile.cards?.[2].params, { target: 'native:/skins', icon: 'server' })
+	assert.equal(profile.cards?.[2].title, 'Wardrobe')
+	assert.deepEqual(profile.cards?.[3].params, {
+		dataSource: 'mc.servers.list',
+		variant: 'list',
+		extension: 1,
+	})
+	assert.equal(profile.cards?.[3].title, 'Servers')
+})
+
+test('clearing existing card options does not resurrect old text or presentation', () => {
+	const original = {
+		cards: [
+			{
+				id: 'greeting',
+				type: 'greeting',
+				params: { greetingMode: 'text', greetingText: 'Old text' },
+			},
+			{
+				id: 'data',
+				type: 'data-card',
+				title: 'Old title',
+				params: { dataSource: 'mc.stats.online', variant: 'hero' },
+			},
+		],
+	}
+	const edited = mapHomeProfileToDashboard(original, dataSources)
+	assert.ok(edited)
+	edited.widgets[0].options = { greetingMode: 'greeting' }
+	delete edited.widgets[1].dataSource!.title
+	delete edited.widgets[1].dataSource!.variant
+	const { profile } = mapDashboardToHomeProfile(edited, original)
+	assert.deepEqual(profile.cards?.[0].params, { greetingMode: 'greeting' })
+	assert.equal(profile.cards?.[1].title, undefined)
+	assert.deepEqual(profile.cards?.[1].params, { dataSource: 'mc.stats.online' })
+})
+
 test('unresolvable data-card bindings are dropped, ids split as fallback', () => {
 	// Adapter ids are "<providerCode>.<sourceCode>"; a dot-less id cannot be
 	// split and no manifest declaration exists, so the card is dropped.
@@ -72,7 +172,11 @@ test('unresolvable data-card bindings are dropped, ids split as fallback', () =>
 
 test('new domain widgets publish back with protocol params', () => {
 	const config = mapHomeProfileToDashboard(
-		{ cards: [{ id: 'c1', type: 'page-shortcut', params: { target: 'page:mc.servers' } }] },
+		{
+			cards: [
+				{ id: 'c1', type: 'page-shortcut', title: '服务器', params: { target: 'page:mc.servers' } },
+			],
+		},
 		dataSources,
 	)
 	assert.ok(config)
@@ -102,7 +206,7 @@ test('new domain widgets publish back with protocol params', () => {
 
 	assert.equal(skippedWidgets, 0)
 	assert.equal(profile.cards?.length, 2)
-	// The edited existing card keeps its original payload; sort/size sync from the editor.
+	// Existing fields and editor size survive publishing.
 	assert.deepEqual(profile.cards?.[0], {
 		id: 'c1',
 		type: 'page-shortcut',
@@ -162,11 +266,7 @@ test('normalize keeps valid domain widgets and drops broken ones', () => {
 test('mappable card types cover built-ins and adapter contributions', () => {
 	assert.deepEqual(
 		[...MAPPABLE_HOME_CARD_TYPES],
-		[
-			...HOME_CARD_TYPE_OPTIONS.map((option) => option.value),
-			'page-shortcut',
-			'data-card',
-		],
+		[...HOME_CARD_TYPE_OPTIONS.map((option) => option.value), 'page-shortcut', 'data-card'],
 	)
 })
 
@@ -292,19 +392,16 @@ test('resolveDataSourceTitle only uses adapter-provided labels', () => {
 })
 
 test('resolveDataSourceTitle falls back to well-known sourceCode labels', () => {
-	assert.equal(
-		resolveDataSourceTitle({ id: 'minecraft-activity-proof.activities' }),
-		'活动',
-	)
+	assert.equal(resolveDataSourceTitle({ id: 'minecraft-activity-proof.activities' }), '活动')
 	assert.equal(resolveDataSourceTitle({ id: 'project-progress.my-tasks' }), '我的任务')
-	assert.equal(
-		resolveDataSourceTitle({ id: 'project-progress.claimable-tasks' }),
-		'可认领任务',
-	)
+	assert.equal(resolveDataSourceTitle({ id: 'project-progress.claimable-tasks' }), '可认领任务')
 })
 
 test('resolveDataSourceTitle humanizes unknown source codes', () => {
-	assert.equal(resolveDataSourceTitle({ id: 'example-plugin.season-leaderboard' }), 'Season Leaderboard')
+	assert.equal(
+		resolveDataSourceTitle({ id: 'example-plugin.season-leaderboard' }),
+		'Season Leaderboard',
+	)
 	assert.equal(resolveDataSourceTitle({ id: 'mc.stats.online' }), 'Stats Online')
 })
 

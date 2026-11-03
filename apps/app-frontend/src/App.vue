@@ -210,7 +210,6 @@ import { AppPopupNotificationManager } from './providers/app-popup-notifications
 
 const themeStore = useTheming()
 const ymclStore = useYmclStore()
-void ymclStore.init()
 initYmclTheme()
 void listen('ymcl://event', (event) => {
 	const payload = (event.payload ?? {}) as { type?: string; domain_id?: string }
@@ -396,7 +395,8 @@ function toggleSidebar() {
 const forceSidebar = computed(
 	() => route.path.startsWith('/browse') || route.path.startsWith('/project'),
 )
-const forceSidebarHidden = computed(() => route.path === '/settings')
+const domainHomeVisible = computed(() => route.path === '/' && ymclStore.showDomainLanding)
+const forceSidebarHidden = computed(() => route.path === '/settings' || domainHomeVisible.value)
 const sidebarVisible = computed(
 	() => !forceSidebarHidden.value && (sidebarToggled.value || forceSidebar.value),
 )
@@ -1507,7 +1507,12 @@ async function setupApp() {
 		DiscoverContent: `/browse/${getLastBrowseContentProjectType()}`,
 		Library: '/library',
 	}
-	const defaultPageRoute = offline.value ? '/library' : defaultPageRoutes[default_page]
+	await ymclStore.init()
+	const defaultPageRoute = offline.value
+		? '/library'
+		: ymclStore.showDomainLanding
+			? '/'
+			: defaultPageRoutes[default_page]
 	if (defaultPageRoute && defaultPageRoute !== '/') await router.push(defaultPageRoute)
 
 	os.value = await getOS()
@@ -3098,6 +3103,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		class="app-contents"
 		:class="{
 			'sidebar-enabled': sidebarVisible,
+			'domain-home-mode': domainHomeVisible,
 			'studio-mode': route.name === 'FileStudio',
 			'disable-advanced-rendering': !themeStore.advancedRendering,
 			'has-custom-background': themeStore.customBackgroundPath && !themeStore.transparentBackground,
@@ -3766,6 +3772,24 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 	overflow-x: hidden;
 	scrollbar-gutter: stable;
 	padding-bottom: var(--floating-action-bar-clearance, 0px);
+}
+
+.domain-home-mode {
+	.app-viewport {
+		display: flex;
+		min-height: 0;
+		flex-direction: column;
+		overflow: hidden;
+		scrollbar-gutter: auto;
+	}
+	.page-transition-grid {
+		min-height: 0;
+		flex: 1;
+	}
+	.page-transition-layer {
+		height: 100%;
+		min-height: 0;
+	}
 }
 
 .app-contents::before {

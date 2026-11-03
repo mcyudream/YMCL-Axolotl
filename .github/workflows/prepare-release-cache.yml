@@ -37,15 +37,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Windows x64
+            runner: windows-2025
+            args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
           - name: Linux x64
             runner: ubuntu-24.04
             args: --config tauri-release.conf.json --config tauri-updater.conf.json
           - name: Linux arm64
             runner: ubuntu-24.04-arm
             args: --config tauri-release.conf.json --config tauri-updater.conf.json
-          - name: Windows x64
-            runner: windows-2025
-            args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
           - name: macOS Apple Silicon
             runner: macos-26
             targets: aarch64-apple-darwin
@@ -58,7 +58,7 @@ jobs:
     env:
       SQLX_OFFLINE: true
       CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_RELEASE_LTO: 'true'
+      CARGO_PROFILE_RELEASE_LTO: ${{ runner.os == 'Windows' && 'thin' || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

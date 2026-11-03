@@ -21,7 +21,13 @@ import {
 } from '@/helpers/install'
 import { list, run } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
-import { catchUpPackUpdate, ymcl, ymclErrorMessage } from '@/helpers/ymcl'
+import {
+	catchUpPackUpdate,
+	ymcl,
+	ymclErrorMessage,
+	type YmclJoinFeature as JoinFeature,
+	type YmclJoinPreview as JoinPreview,
+} from '@/helpers/ymcl'
 
 /**
  * Join-flow modal (YAP §7 进服分流): a domain server requires either its
@@ -155,8 +161,7 @@ const messages = defineMessages({
 	},
 	catchupFailed: {
 		id: 'app.ymcl.packs.catchup-failed',
-		defaultMessage:
-			'已安装基线版本 {version}，增量更新到 {target} 失败；启动时会自动重试。',
+		defaultMessage: '已安装基线版本 {version}，增量更新到 {target} 失败；启动时会自动重试。',
 	},
 	loadFailed: {
 		id: 'app.ymcl.features.load-failed',
@@ -181,46 +186,6 @@ interface ServerOption {
 	name?: string | null
 	mcAddress?: string | null
 	binding?: { packId?: string; mcVersion?: string | null } | null
-}
-
-interface JoinFeature {
-	id: string
-	name?: string | null
-	default: boolean
-	conflicts: string[]
-}
-
-interface InstalledPack {
-	instance_id: string
-	pack_id: string
-	version?: string | null
-	up_to_date: boolean
-}
-
-interface JoinPreview {
-	available: boolean
-	reason?: string | null
-	server_id?: string | null
-	server_name?: string | null
-	mc_address?: string | null
-	status?: string | null
-	has_pack: boolean
-	pack_id?: string | null
-	channel?: string | null
-	target_version?: string | null
-	required_version?: string | null
-	season_id?: string | null
-	season_name?: string | null
-	features: JoinFeature[]
-	optional_pack_id?: string | null
-	optional_target_version?: string | null
-	optional_features?: JoinFeature[]
-	installed?: InstalledPack | null
-	/**
-	 * 直连入口（P2P）就绪时的实际连接地址（sidecar 本地回环口）。
-	 * 域未提供或不可用时为 null，此时仍连公网 mc_address；玩家侧无感。
-	 */
-	launch_address?: string | null
 }
 
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
@@ -322,9 +287,7 @@ async function loadPreview(id: string) {
 	preview.value = null
 	checked.value = new Set()
 	try {
-		const result = await invoke<JoinPreview>('plugin:ymcl|ymcl_join_preview', {
-			serverId: id || null,
-		})
+		const result = await ymcl.joinPreview(id || null)
 		preview.value = result
 		checked.value = new Set(
 			result.features.filter((feature) => feature.default).map((feature) => feature.id),
@@ -720,9 +683,7 @@ defineExpose({
 						<!-- Instance picker: install target for pack installs, or the
 							generic matching-instance path on pack-free servers. An
 							already-installed pack instance skips it (direct launch). -->
-						<template
-							v-if="mode === 'pack' || (mode === 'existing' && !preview.has_pack)"
-						>
+						<template v-if="mode === 'pack' || (mode === 'existing' && !preview.has_pack)">
 							<div class="flex items-center justify-between">
 								<p class="m-0 text-sm font-semibold text-contrast">
 									{{ formatMessage(messages.pickInstance) }}

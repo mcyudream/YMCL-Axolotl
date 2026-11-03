@@ -11,6 +11,7 @@ export interface NormalizedYmclEnvelope {
 	itemActions: YmclAction[]
 	allow: string[]
 	schemaVersion?: number
+	total?: number
 }
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
@@ -186,6 +187,8 @@ export function normalizeYmclEnvelope(
 		? payload
 		: {}) as Record<string, unknown>
 	const allow = [...new Set([...pickAllow(root), ...fallbackAllow.map((v) => v.trim()).filter(Boolean)])]
+	const total =
+		typeof root.total === 'string' && root.total.trim() ? Number(root.total) : root.total
 	return {
 		records: pickRecords(root),
 		actions: pickActions(root, ['actions', 'pageActions', 'page_actions']),
@@ -199,6 +202,7 @@ export function normalizeYmclEnvelope(
 			'card_actions',
 		]),
 		allow,
+		...(typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? { total } : {}),
 		...(pickSchemaVersion(root) != null ? { schemaVersion: pickSchemaVersion(root) as number } : {}),
 	}
 }
