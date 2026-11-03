@@ -70,6 +70,7 @@ function digest(asset) {
 
 const assets = release.assets
 	.filter((asset) => asset.name !== 'latest.json')
+	.filter((asset) => /_x64[-_]/.test(asset.name))
 	.map((asset) => ({
 		filename: asset.name,
 		size: asset.size,

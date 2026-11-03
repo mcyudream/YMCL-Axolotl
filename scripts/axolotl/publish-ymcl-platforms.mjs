@@ -20,13 +20,7 @@ export function selectedUpdatePlatforms(environment = process.env) {
 }
 
 const pluginPath = '/api/plugins/ymcl-content'
-const expectedTargets = [
-	'darwin-aarch64',
-	'darwin-x86_64',
-	'linux-aarch64',
-	'linux-x86_64',
-	'windows-x86_64',
-]
+const expectedTargets = ['windows-x86_64']
 
 function failureDetails(error, secrets = []) {
 	const seen = new Set()
@@ -64,6 +58,8 @@ export async function prepareRelease(catalog, release, tag, signaturesDirectory)
 	const filenames = new Set()
 	const artifacts = await Promise.all(
 		catalog.artifacts.map(async (artifact) => {
+			if (!['windows', 'windows-x86_64'].includes(artifact.platform))
+				throw new Error('Only Windows release artifacts are currently supported')
 			if (
 				!artifact.filename ||
 				basename(artifact.filename) !== artifact.filename ||
@@ -95,6 +91,7 @@ export async function prepareRelease(catalog, release, tag, signaturesDirectory)
 			if (artifact.kind === 'updater') {
 				if (!signature) throw new Error(`Missing updater signature for ${artifact.filename}`)
 				for (const target of artifact.targetPlatforms ?? []) {
+					if (!expectedTargets.includes(target)) throw new Error(`Unsupported updater target ${target}`)
 					if (targets.has(target)) throw new Error(`Duplicate updater target ${target}`)
 					targets.add(target)
 				}

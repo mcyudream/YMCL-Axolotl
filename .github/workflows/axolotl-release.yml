@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       source_run_id:
-        description: Source release run; completed platform artifacts are verified before bundling
+        description: Source release run with a verified successful Windows build
         required: false
         type: string
       rebuild:
@@ -19,13 +19,8 @@ on:
         required: false
         default: false
         type: boolean
-      rebuild_macos_arm:
-        description: Recover a missing ARM build on an Intel macOS runner; reuse completed platform builds
-        required: false
-        default: false
-        type: boolean
       publish_only:
-        description: Only synchronize an existing complete release; skip macOS rebundling
+        description: Publish existing signed Windows assets without rebuilding
         required: false
         default: false
         type: boolean
@@ -47,7 +42,7 @@ env:
   YMCL_UPDATE_PLATFORMS: ${{ inputs.update_platforms || 'both' }}
 
 concurrency:
-  group: axolotl-release-${{ inputs.release_tag || github.ref_name }}${{ inputs.rebuild_macos_arm && '-arm-recovery' || '' }}
+  group: axolotl-release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -78,8 +73,6 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           PUBLISH_ONLY: ${{ inputs.publish_only && 'true' || 'false' }}
           REBUILD_RELEASE: ${{ inputs.rebuild && 'true' || 'false' }}
-          REBUILD_MACOS_ARM: ${{ inputs.rebuild_macos_arm && 'true' || 'false' }}
-          DEFER_SOURCE_ARTIFACTS: ${{ inputs.rebuild_macos_arm && 'true' || 'false' }}
         run: node scripts/axolotl/validate-release-recovery.mjs
 
       - name: Require production build and publish secrets
@@ -115,7 +108,7 @@ jobs:
           node scripts/axolotl/check-migrations.mjs --release
           node scripts/axolotl/brand-guard.mjs
           node scripts/axolotl/i18n-check.mjs
-          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs
+          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs scripts/axolotl/windows-release.test.mjs
           rustc --edition=2024 --test packages/app-lib/build_env.rs -o "${RUNNER_TEMP}/curseforge-build-env-tests"
           "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
@@ -161,18 +154,12 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             args: --config tauri-release.conf.json --config tauri-modern.conf.json --config tauri-updater.conf.json
-          - name: Linux x64
-            runner: ubuntu-24.04
-            args: --config tauri-release.conf.json --config tauri-updater.conf.json
-          - name: Linux arm64
-            runner: ubuntu-24.04-arm
-            args: --config tauri-release.conf.json --config tauri-updater.conf.json
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
       CARGO_INCREMENTAL: '0'
       # ThinLTO parallelizes Windows optimization; all installer variants reuse it.
-      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}
+      CARGO_PROFILE_RELEASE_LTO: 'thin'
       AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
     steps:
       - name: Check out source
@@ -315,201 +302,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-macos:
-    name: Compile (${{ matrix.name }})
-    needs: preflight
-    if: github.event_name != 'workflow_dispatch' || inputs.rebuild
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS Apple Silicon
-            runner: macos-26
-            targets: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
-          - name: macOS Intel
-            runner: macos-15-intel
-            targets: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
-    runs-on: ${{ matrix.runner }}
-    env:
-      SQLX_OFFLINE: true
-      CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_RELEASE_LTO: 'true'
-      AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-          submodules: recursive
-      - name: Restore release caches and prepare dependencies
-        uses: ./.github/actions/setup-release-build
-        with:
-          runner: ${{ matrix.runner }}
-          targets: ${{ matrix.targets }}
-      - name: Set release version
-        shell: bash
-        run: |
-          node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
-          cargo update --workspace --offline
-      - name: Compile one native macOS architecture
-        id: compile
-        shell: bash
-        env:
-          BUILD_ARGS: ${{ matrix.args }}
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-        run: |
-          read -ra args <<< "$BUILD_ARGS"
-          pnpm --filter @modrinth/app tauri build --no-bundle "${args[@]}" -- --locked --timings
-      - name: Verify the production binary contains the CurseForge key
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-          BUILD_TARGET: ${{ matrix.targets }}
-        run: node scripts/axolotl/verify-embedded-curseforge-key.mjs "target/${BUILD_TARGET}/release/YMCL"
-      - name: Upload compiled architecture for universal bundling
-        if: ${{ !cancelled() && steps.compile.conclusion == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-${{ matrix.targets }}
-          path: target/${{ matrix.targets }}/release/YMCL
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-          overwrite: true
-
-  rebuild-macos-arm:
-    name: Recover macOS Apple Silicon on Intel
-    needs: preflight
-    if: inputs.rebuild_macos_arm
-    runs-on: macos-15-intel
-    env:
-      SQLX_OFFLINE: true
-      CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_RELEASE_LTO: 'true'
-      AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-          submodules: recursive
-      - name: Restore release caches and prepare dependencies
-        uses: ./.github/actions/setup-release-build
-        with:
-          runner: macos-15-intel
-          targets: aarch64-apple-darwin
-      - name: Set release version
-        run: |
-          node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
-          cargo update --workspace --offline
-      - name: Compile ARM with the Apple SDK
-        id: compile
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-        run: pnpm --filter @modrinth/app tauri build --no-bundle --target aarch64-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json -- --locked --timings
-      - name: Verify ARM architecture and the embedded production key
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-        run: |
-          lipo target/aarch64-apple-darwin/release/YMCL -verify_arch arm64
-          node scripts/axolotl/verify-embedded-curseforge-key.mjs target/aarch64-apple-darwin/release/YMCL
-      - name: Upload verified ARM architecture
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-aarch64-apple-darwin
-          path: target/aarch64-apple-darwin/release/YMCL
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-          overwrite: true
-
-  bundle-macos:
-    name: Bundle and publish macOS universal
-    needs: [preflight, build-macos, rebuild-macos-arm]
-    if: ${{ !cancelled() && !inputs.publish_only && needs.preflight.result == 'success' && ((inputs.rebuild_macos_arm && needs['rebuild-macos-arm'].result == 'success') || (!inputs.rebuild_macos_arm && (needs['build-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild)))) }}
-    runs-on: macos-15-intel
-    env:
-      SQLX_OFFLINE: true
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          submodules: recursive
-      - name: Verify completed source artifacts after ARM recovery
-        if: inputs.rebuild_macos_arm
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-          REBUILD_MACOS_ARM: 'true'
-        run: node scripts/axolotl/validate-release-recovery.mjs
-      - name: Prepare bundling tools and resources
-        uses: ./.github/actions/setup-release-build
-        with:
-          runner: macos-15-intel
-          bundle-only: 'true'
-      - name: Set release version
-        run: node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
-      - name: Download both compiled architectures
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: macos-*
-          path: macos-binaries
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.source_run_id || github.run_id }}
-      - name: Download the recovered ARM architecture
-        if: inputs.rebuild_macos_arm
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: macos-aarch64-apple-darwin
-          path: macos-binaries/macos-aarch64-apple-darwin
-      - name: Assemble and verify the universal binary
-        env:
-          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
-        run: |
-          output=target/universal-apple-darwin/release/YMCL
-          mkdir -p "$(dirname "$output")"
-          lipo -create \
-            macos-binaries/macos-aarch64-apple-darwin/YMCL \
-            macos-binaries/macos-x86_64-apple-darwin/YMCL \
-            -output "$output"
-          lipo "$output" -verify_arch arm64 x86_64
-          chmod +x "$output"
-          node scripts/axolotl/verify-embedded-curseforge-key.mjs "$output"
-      - name: Bundle and sign without recompiling Rust or the frontend
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
-        run: pnpm --filter @modrinth/app tauri bundle --target universal-apple-darwin --config tauri-release.conf.json --config tauri-updater.conf.json
-      - name: Stage universal release assets
-        run: |
-          ARTIFACT_PATHS="$(node --input-type=module <<'NODE'
-          import { readdirSync } from 'node:fs'
-          import { join } from 'node:path'
-          const bundle = 'target/universal-apple-darwin/release/bundle'
-          const dmgs = readdirSync(join(bundle, 'dmg')).filter(name => name.endsWith('.dmg'))
-          const archives = readdirSync(join(bundle, 'macos')).filter(name => name.endsWith('.app.tar.gz'))
-          if (dmgs.length !== 1 || archives.length !== 1) throw new Error('Expected one universal DMG and updater archive')
-          console.log(JSON.stringify([
-            join(bundle, 'dmg', dmgs[0]),
-            join(bundle, 'macos', archives[0]),
-            join(bundle, 'macos', `${archives[0]}.sig`),
-          ]))
-          NODE
-          )"
-          export ARTIFACT_PATHS
-          node scripts/axolotl/stage-release-assets.mjs "${RUNNER_TEMP}/release-assets" universal-apple-darwin
-      - name: Publish completed platform immediately
-        uses: ./.github/actions/publish-release-assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   verify-and-publish:
     name: Verify complete update and publish mirrors
-    needs: [preflight, build, bundle-macos]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['bundle-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_only && needs['bundle-macos'].result == 'skipped')) && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild)) }}
+    needs: [preflight, build]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild && needs.build.result == 'skipped')) }}
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -546,20 +342,12 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release-check/release.json
 
       - name: Generate update manifest
-        if: ${{ !inputs.publish_only }}
         run: node scripts/axolotl/create-update-manifest.mjs release-check/release.json release-check/signatures "${RELEASE_TAG}" release-check/latest.json
-
-      - name: Download existing update manifest
-        if: inputs.publish_only
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download "${RELEASE_TAG}" --pattern latest.json --dir release-check
 
       - name: Verify update manifest
         run: node scripts/axolotl/verify-update-manifest.mjs release-check/latest.json "${RELEASE_TAG}"
 
       - name: Upload update manifest
-        if: ${{ !inputs.publish_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${RELEASE_TAG}" release-check/latest.json --clobber

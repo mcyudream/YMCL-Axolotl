@@ -18,18 +18,6 @@ if (!Array.isArray(assets)) {
 
 const targets = [
 	{
-		platforms: ['darwin-aarch64', 'darwin-x86_64'],
-		assetSuffix: '_universal.app.tar.gz',
-	},
-	{
-		platforms: ['linux-aarch64'],
-		assetSuffix: '_aarch64.AppImage.tar.gz',
-	},
-	{
-		platforms: ['linux-x86_64'],
-		assetSuffix: '_amd64.AppImage.tar.gz',
-	},
-	{
 		platforms: ['windows-x86_64'],
 		assetSuffix: '_x64-setup.nsis.zip',
 	},

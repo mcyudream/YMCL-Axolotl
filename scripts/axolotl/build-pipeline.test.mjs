@@ -86,7 +86,6 @@ test('release compiles the frontend before drafting a release or starting platfo
 	const draft = steps.findIndex((step) => step.run?.includes('gh release create'))
 	assert.ok(install >= 0 && build > install && draft > build)
 	assert.equal(release.jobs.build.needs, 'preflight')
-	assert.equal(release.jobs['build-macos'].needs, 'preflight')
 })
 
 test('Windows installer variants reuse an LTO binary and preserve parallel optimization', async () => {
@@ -103,7 +102,7 @@ test('Windows installer variants reuse an LTO binary and preserve parallel optim
 	}
 	assert.equal(
 		release.jobs.build.env.CARGO_PROFILE_RELEASE_LTO,
-		"${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}",
+		'thin',
 	)
 	assert.ok(ci.jobs.desktop.steps.some((step) => step.run?.includes('turbo run build')))
 })
@@ -145,14 +144,11 @@ test('release and branch cache warming use matching LTO profiles, targets and se
 	)
 	assert.deepEqual(warm.jobs.warm.strategy.matrix.include, [
 		...release.jobs.build.strategy.matrix.include,
-		...release.jobs['build-macos'].strategy.matrix.include,
 	])
-	for (const job of [release.jobs.build, release.jobs['build-macos'], warm.jobs.warm]) {
+	for (const job of [release.jobs.build, warm.jobs.warm]) {
 		assert.equal(
 			job.env.CARGO_PROFILE_RELEASE_LTO,
-			job === release.jobs['build-macos']
-				? 'true'
-				: "${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}",
+			'thin',
 		)
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 		const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
@@ -188,50 +184,13 @@ test('release and branch cache warming use matching LTO profiles, targets and se
 	)
 })
 
-test('macOS compiles architectures on native runners and only bundles the combined binary', async () => {
-	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const compile = release.jobs['build-macos']
-	assert.equal(compile.needs, 'preflight')
-	assert.equal(compile.strategy['fail-fast'], false)
-	assert.deepEqual(
-		compile.strategy.matrix.include.map(({ runner, targets }) => ({ runner, targets })),
-		[
-			{ runner: 'macos-26', targets: 'aarch64-apple-darwin' },
-			{ runner: 'macos-15-intel', targets: 'x86_64-apple-darwin' },
-		],
-	)
-	assert.ok(compile.steps.some((step) => step.run?.includes('tauri build --no-bundle')))
-	const upload = compile.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))
-	assert.equal(upload.with['if-no-files-found'], 'error')
-	assert.equal(upload.with['compression-level'], 0)
-	assert.equal(upload.if, "${{ !cancelled() && steps.compile.conclusion == 'success' }}")
-	const bundle = release.jobs['bundle-macos']
-	assert.deepEqual(bundle.needs, ['preflight', 'build-macos', 'rebuild-macos-arm'])
-	assert.equal(bundle['runs-on'], 'macos-15-intel')
-	const setup = bundle.steps.find((step) => step.uses === './.github/actions/setup-release-build')
-	assert.equal(setup.with['bundle-only'], 'true')
-	const preparation = parse(
-		await readFile(join(root, '.github/actions/setup-release-build/action.yml'), 'utf8'),
-	).runs.steps
-	for (const step of preparation.filter((step) =>
-		/Cache release Rust|Cache npm, Java|Cache frontend|Prefetch Rust/.test(step.name ?? ''),
-	)) {
-		assert.equal(step.if, "inputs.bundle-only != 'true'")
-	}
-	const commands = bundle.steps.map((step) => step.run ?? '').join('\n')
-	assert.match(commands, /lipo -create/)
-	assert.match(commands, /lipo "\$output" -verify_arch arm64 x86_64/)
-	assert.match(commands, /tauri bundle --target universal-apple-darwin/)
-	assert.doesNotMatch(commands, /tauri build|cargo (build|check|test)/)
-	const signing = bundle.steps.find((step) => step.run?.includes('tauri bundle'))
-	assert.equal(signing.env.TAURI_SIGNING_PRIVATE_KEY, '${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}')
-})
+
 
 test('completed platforms publish independently while update manifests require the complete release', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	assert.equal(release.jobs.build.strategy['fail-fast'], false)
 	assert.equal(release.jobs.build.needs, 'preflight')
-	for (const job of [release.jobs.build, release.jobs['bundle-macos']]) {
+	for (const job of [release.jobs.build]) {
 		const verification = job.steps.findIndex((step) =>
 			step.run?.includes('verify-embedded-curseforge-key.mjs'),
 		)
@@ -246,7 +205,7 @@ test('completed platforms publish independently while update manifests require t
 	)
 	assert.equal(build.with.tagName, undefined)
 	assert.equal(build.with.releaseId, undefined)
-	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['preflight', 'build', 'bundle-macos'])
+	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['preflight', 'build'])
 	const publish = parse(
 		await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
 	)
@@ -274,21 +233,16 @@ test('manual recovery validates source artifacts and skips successful platform c
 	)
 	assert.equal(validation.if, "github.event_name == 'workflow_dispatch'")
 	assert.equal(validation.env.SOURCE_RUN_ID, '${{ inputs.source_run_id }}')
-	for (const name of ['build', 'build-macos'])
+	for (const name of ['build'])
 		assert.equal(
 			release.jobs[name].if,
 			"github.event_name != 'workflow_dispatch' || inputs.rebuild",
 		)
-	for (const name of ['bundle-macos', 'verify-and-publish']) {
+	for (const name of ['verify-and-publish']) {
 		assert.match(release.jobs[name].if, /!cancelled\(\)/)
 		assert.match(release.jobs[name].if, /needs.preflight.result == 'success'/)
 		assert.match(release.jobs[name].if, /github.event_name == 'workflow_dispatch'/)
 	}
-	const download = release.jobs['bundle-macos'].steps.find((step) =>
-		step.uses?.startsWith('actions/download-artifact@'),
-	)
-	assert.equal(download.with['run-id'], '${{ inputs.source_run_id || github.run_id }}')
-	assert.equal(download.with['github-token'], '${{ secrets.GITHUB_TOKEN }}')
 	const publish = release.jobs['verify-and-publish'].steps
 	for (const name of [
 		'Promote complete stable release to latest',
@@ -302,48 +256,40 @@ test('manual recovery validates source artifacts and skips successful platform c
 	assert.doesNotMatch(mirror.run, /push --force/)
 })
 
-test('final synchronization skips macOS rebundling and preserves the published manifest', async () => {
+test('manual publication reuses Windows assets and generates the missing update manifest', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	assert.equal(release.on.workflow_dispatch.inputs.publish_only.type, 'boolean')
-	assert.equal(release.on.workflow_dispatch.inputs.publish_only.default, false)
-	const evaluate = (condition, publishOnly, preflight, bundle, event = 'workflow_dispatch') =>
-		Function(
-			'inputs',
-			'needs',
-			'github',
-			'cancelled',
-			`return ${condition.slice(3, -3)}`,
-		)(
-			{ publish_only: publishOnly },
-			{
-				preflight: { result: preflight },
-				build: { result: 'skipped' },
-				'build-macos': { result: 'skipped' },
-				'bundle-macos': { result: bundle },
-			},
+	const condition = release.jobs['verify-and-publish'].if
+	const evaluate = ({ event = 'workflow_dispatch', rebuild = false, preflight = 'success', build = 'skipped' } = {}) =>
+		Function('github', 'inputs', 'needs', 'cancelled', `return ${condition.slice(3, -3)}`)(
 			{ event_name: event },
+			{ rebuild },
+			{ preflight: { result: preflight }, build: { result: build } },
 			() => false,
 		)
-	const bundle = release.jobs['bundle-macos'].if
-	const finalize = release.jobs['verify-and-publish'].if
-	assert.equal(evaluate(bundle, true, 'success', 'skipped'), false)
-	assert.equal(evaluate(bundle, false, 'success', 'skipped'), true)
-	assert.equal(evaluate(finalize, true, 'success', 'skipped'), true)
-	assert.equal(evaluate(finalize, false, 'success', 'skipped'), false)
-	assert.equal(evaluate(finalize, true, 'failure', 'skipped'), false)
-	assert.equal(evaluate(finalize, true, 'success', 'failure'), false)
-	assert.equal(evaluate(finalize, true, 'success', 'skipped', 'push'), false)
+	assert.equal(evaluate(), true)
+	assert.equal(evaluate({ event: 'push' }), false)
+	assert.equal(evaluate({ event: 'push', build: 'success' }), true)
+	assert.equal(evaluate({ preflight: 'failure' }), false)
+	assert.equal(evaluate({ build: 'failure' }), false)
+	assert.equal(evaluate({ rebuild: true }), false)
 	const steps = release.jobs['verify-and-publish'].steps
 	for (const name of ['Generate update manifest', 'Upload update manifest'])
-		assert.equal(steps.find((step) => step.name === name).if, '${{ !inputs.publish_only }}')
-	const download = steps.find((step) => step.name === 'Download existing update manifest')
-	assert.equal(download.if, 'inputs.publish_only')
-	assert.match(download.run, /--pattern latest\.json/)
-	const validation = release.jobs.preflight.steps.find((step) =>
-		step.run?.includes('validate-release-recovery.mjs'),
-	)
-	assert.equal(validation.env.PUBLISH_ONLY, "${{ inputs.publish_only && 'true' || 'false' }}")
+		assert.equal(steps.find((step) => step.name === name).if, undefined)
+	assert.ok(!steps.some((step) => step.name === 'Download existing update manifest'))
 })
+
+test('desktop release, CI and cache warming currently build Windows only', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
+	const warm = parse(await readFile(join(root, '.github/workflows/prepare-release-cache.yml'), 'utf8'))
+	assert.deepEqual(ci.jobs.desktop.strategy.matrix.os, ['windows-latest'])
+	for (const job of [release.jobs.build, warm.jobs.warm])
+		assert.deepEqual(job.strategy.matrix.include.map((entry) => entry.runner), ['windows-2025'])
+	for (const name of ['build-macos', 'rebuild-macos-arm', 'bundle-macos'])
+		assert.equal(release.jobs[name], undefined)
+	assert.equal(release.on.workflow_dispatch.inputs.rebuild_macos_arm, undefined)
+})
+
 
 test('recovery platform selection is explicit and normal releases still require both sites', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
@@ -354,46 +300,7 @@ test('recovery platform selection is explicit and normal releases still require 
 	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, "${{ inputs.update_platforms || 'both' }}")
 })
 
-test('ARM capacity recovery reuses completed platforms and verifies the cross-compiled architecture', async () => {
-	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const arm = release.jobs['rebuild-macos-arm']
-	assert.ok(release.concurrency.group.includes("inputs.rebuild_macos_arm && '-arm-recovery'"))
-	assert.equal(arm.if, 'inputs.rebuild_macos_arm')
-	assert.equal(arm['runs-on'], 'macos-15-intel')
-	assert.equal(arm.env.CARGO_PROFILE_RELEASE_LTO, 'true')
-	const commands = arm.steps.map((step) => step.run ?? '').join('\n')
-	assert.match(commands, /tauri build --no-bundle --target aarch64-apple-darwin/)
-	assert.match(commands, /lipo .* -verify_arch arm64/)
-	assert.match(commands, /verify-embedded-curseforge-key/)
-	const condition = release.jobs['bundle-macos'].if.slice(3, -3)
-	const canBundle = (result) =>
-		Function(
-			'inputs',
-			'needs',
-			'cancelled',
-			`return ${condition}`,
-		)(
-			{ rebuild_macos_arm: true },
-			{ preflight: { result: 'success' }, 'rebuild-macos-arm': { result } },
-			() => false,
-		)
-	assert.equal(canBundle('success'), true)
-	for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(canBundle(result), false)
-	const download = release.jobs['bundle-macos'].steps.find(
-		(step) => step.name === 'Download the recovered ARM architecture',
-	)
-	assert.equal(download.with.name, 'macos-aarch64-apple-darwin')
-	assert.equal(download.with.path, 'macos-binaries/macos-aarch64-apple-darwin')
-	const validation = release.jobs['bundle-macos'].steps.find(
-		(step) => step.name === 'Verify completed source artifacts after ARM recovery',
-	)
-	assert.equal(validation.env.REBUILD_MACOS_ARM, 'true')
-	assert.equal(validation.env.DEFER_SOURCE_ARTIFACTS, undefined)
-	assert.ok(
-		release.jobs['bundle-macos'].steps.indexOf(validation) <
-			release.jobs['bundle-macos'].steps.indexOf(download),
-	)
-})
+
 
 test('stable website metadata updates the default branch from a tag checkout', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
@@ -533,7 +440,7 @@ test('release refuses missing credentials and verifies the key in each productio
 	]) {
 		assert.equal(secretGuard.env[name], `\${{ secrets.${name} }}`)
 	}
-	for (const job of [release.jobs.build, release.jobs['build-macos']]) {
+	for (const job of [release.jobs.build]) {
 		assert.equal(job.env.AXOLOTL_REQUIRE_CURSEFORGE_API_KEY, '1')
 		const verification = job.steps.find((step) =>
 			step.run?.includes('verify-embedded-curseforge-key.mjs'),

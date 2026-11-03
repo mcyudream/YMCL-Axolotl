@@ -20,9 +20,6 @@ const signature = Buffer.from('test signature').toString('base64')
 const bytes = Buffer.from('test release binary')
 const sha256 = createHash('sha256').update(bytes).digest('hex')
 const artifacts = [
-	['YMCL_universal.app.tar.gz', ['darwin-aarch64', 'darwin-x86_64']],
-	[`YMCL_${version}_amd64.AppImage.tar.gz`, ['linux-x86_64']],
-	[`YMCL_${version}_aarch64.AppImage.tar.gz`, ['linux-aarch64']],
 	[`YMCL_${version}_x64-setup.nsis.zip`, ['windows-x86_64']],
 ].map(([filename, targetPlatforms]) => ({
 	filename,
@@ -107,14 +104,14 @@ test('release preparation requires all signed update targets and trusted downloa
 		}
 		const catalog = { version, artifacts }
 		const prepared = await prepareRelease(catalog, metadata, tag, directory)
-		assert.equal(prepared.artifacts.length, 4)
+		assert.equal(prepared.artifacts.length, 1)
 		assert.equal(prepared.channel, 'beta')
 		await assert.rejects(
 			prepareRelease(catalog, { ...metadata, draft: true }, tag, directory),
 			/published/,
 		)
 		await assert.rejects(
-			prepareRelease({ ...catalog, artifacts: artifacts.slice(0, 3) }, metadata, tag, directory),
+			prepareRelease({ ...catalog, artifacts: [{ ...artifacts[0], targetPlatforms: [] }] }, metadata, tag, directory),
 			/Missing updater target/,
 		)
 		await assert.rejects(

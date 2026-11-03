@@ -59,11 +59,12 @@ try {
 	assert.equal(result.status, 0, result.stderr)
 	const catalog = JSON.parse(fs.readFileSync(output, 'utf8'))
 	assert.equal(catalog.version, '1.9.5-beta.1')
-	assert.equal(catalog.files.length, files.length)
+	assert.equal(catalog.files.length, files.filter((name) => /_x64[-_]/.test(name)).length)
+	assert.ok(catalog.artifacts.every((artifact) => ['windows', 'windows-x86_64'].includes(artifact.platform)))
 	assert.deepEqual(
-		catalog.artifacts.find((artifact) => artifact.filename.endsWith('_amd64.AppImage.tar.gz'))
+		catalog.artifacts.find((artifact) => artifact.filename.endsWith('_x64-setup.nsis.zip'))
 			.targetPlatforms,
-		['linux-x86_64'],
+		['windows-x86_64'],
 	)
 	assert.equal(
 		catalog.artifacts.find((artifact) => artifact.filename.endsWith('modern-setup.exe')).variant,
@@ -73,11 +74,7 @@ try {
 		catalog.artifacts.find((artifact) => artifact.filename.endsWith('portable.zip')).kind,
 		'portable',
 	)
-	assert.deepEqual(
-		catalog.artifacts.find((artifact) => artifact.filename.endsWith('_universal.app.tar.gz'))
-			.targetPlatforms,
-		['darwin-aarch64', 'darwin-x86_64'],
-	)
+
 } finally {
 	fs.rmSync(directory, { recursive: true, force: true })
 }

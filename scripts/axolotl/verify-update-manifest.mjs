@@ -15,13 +15,11 @@ if (manifest.version !== expectedVersion) {
 	throw new Error(`Manifest version ${manifest.version} does not match ${expectedVersion}`)
 }
 
-const requiredPlatforms = [
-	'darwin-aarch64',
-	'darwin-x86_64',
-	'linux-aarch64',
-	'linux-x86_64',
-	'windows-x86_64',
-]
+const requiredPlatforms = ['windows-x86_64']
+
+if (Object.keys(manifest.platforms ?? {}).some((platform) => !requiredPlatforms.includes(platform))) {
+	throw new Error('Only Windows updates are currently supported')
+}
 
 for (const platform of requiredPlatforms) {
 	const update = manifest.platforms?.[platform]

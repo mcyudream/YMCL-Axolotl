@@ -25,77 +25,18 @@ function fixture() {
 			head_branch: 'v2.0.0-beta.3',
 			head_sha: releaseSha,
 		},
-		jobs: [
-			'Release preflight',
-			'Build (Linux x64)',
-			'Build (Linux arm64)',
-			'Build (Windows x64)',
-			'Compile (macOS Apple Silicon)',
-			'Compile (macOS Intel)',
-		].map((name) => ({ name, status: 'completed', conclusion: 'success' })),
-		artifacts: ['macos-aarch64-apple-darwin', 'macos-x86_64-apple-darwin'].map((name) => ({
-			name,
-			expired: false,
-			size_in_bytes: 100,
-			digest: `sha256:${'b'.repeat(64)}`,
-			workflow_run: { id: 123, head_sha: releaseSha, repository_id: 1, head_repository_id: 1 },
-		})),
+		jobs: ['Release preflight', 'Build (Windows x64)'].map((name) => ({ name, status: 'completed', conclusion: 'success' })),
 	}
 }
 
-test('recovery accepts verified native artifacts and only packaging workflow changes', () => {
+test('recovery accepts a verified Windows build and only packaging workflow changes', () => {
 	assert.doesNotThrow(() => validateRecoverySource(fixture()))
 	const source = fixture()
 	source.changedPaths.push('scripts/axolotl/publish-ymcl-platforms.mjs')
 	assert.doesNotThrow(() => validateRecoverySource(source))
 })
 
-test('ARM capacity recovery requires successful completed platforms and one verified Intel binary', () => {
-	const source = fixture()
-	source.rebuildMacosArm = true
-	source.jobs.find((job) => job.name === 'Compile (macOS Apple Silicon)').conclusion = 'cancelled'
-	source.artifacts = source.artifacts.filter(
-		(artifact) => artifact.name === 'macos-x86_64-apple-darwin',
-	)
-	assert.doesNotThrow(() => validateRecoverySource(source))
-	assert.throws(() => validateRecoverySource({ ...source, publishOnly: true }), /publish-only/)
-	assert.throws(
-		() => validateRecoverySource({ ...source, artifacts: [] }),
-		/verified Intel artifact/,
-	)
-	source.jobs.find((job) => job.name === 'Build (Windows x64)').conclusion = 'failure'
-	assert.throws(() => validateRecoverySource(source), /successful Build/)
-})
 
-test('ARM recovery may compile in parallel but must verify complete source artifacts before bundling', () => {
-	const source = fixture()
-	Object.assign(source, {
-		rebuildMacosArm: true,
-		deferSourceArtifacts: true,
-		artifacts: [],
-	})
-	source.jobs.find((job) => job.name === 'Compile (macOS Apple Silicon)').conclusion = 'cancelled'
-	source.run.status = 'in_progress'
-	assert.doesNotThrow(() => validateRecoverySource(source))
-	assert.throws(
-		() => validateRecoverySource({ ...source, jobs: [] }),
-		/failed or cancelled native ARM/,
-	)
-	assert.throws(
-		() => validateRecoverySource({ ...source, deferSourceArtifacts: false }),
-		/completed release run/,
-	)
-	assert.throws(
-		() => validateRecoverySource({ ...source, rebuildMacosArm: false }),
-		/Only ARM compilation/,
-	)
-	assert.throws(
-		() => validateRecoverySource({ ...source, publishOnly: true }),
-		/Only ARM compilation/,
-	)
-	source.changedPaths.push('apps/app/src/main.rs')
-	assert.throws(() => validateRecoverySource(source), /cannot change release source/)
-})
 
 test('rebuild allows CI-only repairs before assets exist and preserves published releases', () => {
 	const source = fixture()
@@ -120,7 +61,6 @@ test('recovery accepts repaired build runs only when their source still matches 
 		head_sha: 'c'.repeat(40),
 	})
 	source.sourceChangedPaths = ['.github/workflows/axolotl-release.yml']
-	for (const artifact of source.artifacts) artifact.workflow_run.head_sha = source.run.head_sha
 	assert.doesNotThrow(() => validateRecoverySource(source))
 	source.sourceChangedPaths.push('apps/app-frontend/src/pages/Index.vue')
 	assert.throws(() => validateRecoverySource(source), /exact tag and commit/)
@@ -160,7 +100,7 @@ function publishedRelease() {
 		tag_name: tag,
 		draft: false,
 		published_at: '2026-11-03T00:20:07Z',
-		assets: names.map((name) => ({
+		assets: names.filter((name) => /_x64[-_]/.test(name)).map((name) => ({
 			name,
 			size: 100,
 			state: 'uploaded',
@@ -170,7 +110,7 @@ function publishedRelease() {
 	}
 }
 
-test('final synchronization requires all published installers, updates, signatures and manifest', () => {
+test('final synchronization requires signed Windows assets without a preexisting manifest', () => {
 	const source = fixture()
 	source.publishOnly = true
 	source.artifacts = []
@@ -243,39 +183,12 @@ test('recovery requires successful builds and cannot accept a failed key verific
 	for (const state of ['failure', 'cancelled', 'skipped', null]) {
 		const source = fixture()
 		source.jobs.at(-1).conclusion = state
-		assert.throws(() => validateRecoverySource(source), /successful Compile/)
+		assert.throws(() => validateRecoverySource(source), /successful Build/)
 	}
 	const missing = fixture()
 	missing.jobs.pop()
-	assert.throws(() => validateRecoverySource(missing), /successful Compile/)
+	assert.throws(() => validateRecoverySource(missing), /successful Build/)
 	const duplicate = fixture()
 	duplicate.jobs.push({ ...duplicate.jobs[0] })
 	assert.throws(() => validateRecoverySource(duplicate), /one successful/)
-})
-
-test('recovery refuses incomplete, expired or substituted architecture artifacts', () => {
-	for (const patch of [
-		{ expired: true },
-		{ size_in_bytes: 0 },
-		{ digest: null },
-		{
-			workflow_run: { id: 124, head_sha: 'a'.repeat(40), repository_id: 1, head_repository_id: 1 },
-		},
-		{
-			workflow_run: { id: 123, head_sha: 'c'.repeat(40), repository_id: 1, head_repository_id: 1 },
-		},
-		{
-			workflow_run: { id: 123, head_sha: 'a'.repeat(40), repository_id: 2, head_repository_id: 2 },
-		},
-	]) {
-		const source = fixture()
-		Object.assign(source.artifacts[0], patch)
-		assert.throws(() => validateRecoverySource(source), /native artifact/)
-	}
-	for (const count of [1, 3]) {
-		const source = fixture()
-		if (count === 1) source.artifacts.pop()
-		else source.artifacts.push({ ...source.artifacts[0] })
-		assert.throws(() => validateRecoverySource(source), /exactly two/)
-	}
 })

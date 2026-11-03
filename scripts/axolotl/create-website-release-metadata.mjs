@@ -19,7 +19,7 @@ const metadata = {
 	tag_name: release.tag_name,
 	assets: release.assets
 		.map((asset) => asset.name)
-		.filter((name) => typeof name === 'string' && name.length > 0),
+		.filter((name) => typeof name === 'string' && /_x64[-_]/.test(name)),
 }
 
 fs.writeFileSync(outputPath, `${JSON.stringify(metadata, null, 2)}\n`)
