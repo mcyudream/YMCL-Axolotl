@@ -57,8 +57,11 @@ export function validateRecoverySource({
 	publishOnly = false,
 	sourceChangedPaths,
 	rebuildMacosArm = false,
+	deferSourceArtifacts = false,
 }) {
 	validateRecoveryInputs(tag, sourceRunId)
+	if (deferSourceArtifacts && (!rebuildMacosArm || publishOnly))
+		throw new Error('Only ARM compilation can defer source artifact verification')
 	const taggedSource =
 		run.event === 'push' && run.head_branch === tag && run.head_sha === releaseSha
 	const repairedSource =
@@ -71,13 +74,15 @@ export function validateRecoverySource({
 		run.repository?.full_name !== repository ||
 		run.head_repository?.full_name !== repository ||
 		run.path !== '.github/workflows/axolotl-release.yml' ||
-		run.status !== 'completed' ||
+		(run.status !== 'completed' &&
+			!(deferSourceArtifacts && ['queued', 'in_progress', 'waiting'].includes(run.status))) ||
 		(!taggedSource && !repairedSource)
 	)
 		throw new Error('Source run must be a completed release run for the exact tag and commit')
 	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
 	if (unexpectedPaths.length)
 		throw new Error(`Recovery cannot change release source files: ${unexpectedPaths.join(', ')}`)
+	if (deferSourceArtifacts) return
 	const jobsToVerify = requiredJobs.filter(
 		(name) => !rebuildMacosArm || name !== 'Compile (macOS Apple Silicon)',
 	)
@@ -183,6 +188,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	const publishOnly = process.env.PUBLISH_ONLY === 'true'
 	const rebuild = process.env.REBUILD_RELEASE === 'true'
 	const rebuildMacosArm = process.env.REBUILD_MACOS_ARM === 'true'
+	const deferSourceArtifacts = process.env.DEFER_SOURCE_ARTIFACTS === 'true'
 	validateReleaseTag(tag)
 	if (!process.env.GH_TOKEN || !process.env.GITHUB_REPOSITORY)
 		throw new Error('Recovery requires GitHub credentials and repository context')
@@ -220,6 +226,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 			artifacts: artifactData.artifacts,
 			publishOnly,
 			rebuildMacosArm,
+			deferSourceArtifacts,
 			sourceChangedPaths:
 				run.event === 'workflow_dispatch' && /^[a-f0-9]{40}$/.test(run.head_sha ?? '')
 					? git('diff', '--name-only', releaseSha, run.head_sha, '--').split('\n').filter(Boolean)
@@ -233,6 +240,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 			)
 			console.log(
 				`Validated complete published assets for ${tag} at ${releaseSha}; final synchronization only`,
+			)
+		} else if (deferSourceArtifacts) {
+			console.log(
+				`Validated ${tag} source; source artifacts must pass verification before macOS bundling`,
 			)
 		} else {
 			console.log(

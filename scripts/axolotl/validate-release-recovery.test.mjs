@@ -67,6 +67,32 @@ test('ARM capacity recovery requires successful completed platforms and one veri
 	assert.throws(() => validateRecoverySource(source), /successful Build/)
 })
 
+test('ARM recovery may compile in parallel but must verify complete source artifacts before bundling', () => {
+	const source = fixture()
+	Object.assign(source, {
+		rebuildMacosArm: true,
+		deferSourceArtifacts: true,
+		jobs: [],
+		artifacts: [],
+	})
+	source.run.status = 'in_progress'
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	assert.throws(
+		() => validateRecoverySource({ ...source, deferSourceArtifacts: false }),
+		/completed release run/,
+	)
+	assert.throws(
+		() => validateRecoverySource({ ...source, rebuildMacosArm: false }),
+		/Only ARM compilation/,
+	)
+	assert.throws(
+		() => validateRecoverySource({ ...source, publishOnly: true }),
+		/Only ARM compilation/,
+	)
+	source.changedPaths.push('apps/app/src/main.rs')
+	assert.throws(() => validateRecoverySource(source), /cannot change release source/)
+})
+
 test('rebuild allows CI-only repairs before assets exist and preserves published releases', () => {
 	const source = fixture()
 	assert.doesNotThrow(() => validateRebuildSource({ ...source, release: null }))

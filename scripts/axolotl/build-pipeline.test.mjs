@@ -383,6 +383,15 @@ test('ARM capacity recovery reuses completed platforms and verifies the cross-co
 	)
 	assert.equal(download.with.name, 'macos-aarch64-apple-darwin')
 	assert.equal(download.with.path, 'macos-binaries/macos-aarch64-apple-darwin')
+	const validation = release.jobs['bundle-macos'].steps.find(
+		(step) => step.name === 'Verify completed source artifacts after ARM recovery',
+	)
+	assert.equal(validation.env.REBUILD_MACOS_ARM, 'true')
+	assert.equal(validation.env.DEFER_SOURCE_ARTIFACTS, undefined)
+	assert.ok(
+		release.jobs['bundle-macos'].steps.indexOf(validation) <
+			release.jobs['bundle-macos'].steps.indexOf(download),
+	)
 })
 
 test('stable website metadata updates the default branch from a tag checkout', async () => {
