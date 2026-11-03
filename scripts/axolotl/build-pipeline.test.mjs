@@ -187,7 +187,7 @@ test('macOS compiles architectures on native runners and only bundles the combin
 	assert.equal(upload.with['compression-level'], 0)
 	assert.equal(upload.if, "${{ !cancelled() && steps.compile.conclusion == 'success' }}")
 	const bundle = release.jobs['bundle-macos']
-	assert.equal(bundle.needs, 'build-macos')
+	assert.deepEqual(bundle.needs, ['preflight', 'build-macos'])
 	assert.equal(bundle['runs-on'], 'macos-15-intel')
 	const setup = bundle.steps.find((step) => step.uses === './.github/actions/setup-release-build')
 	assert.equal(setup.with['bundle-only'], 'true')
@@ -201,7 +201,7 @@ test('macOS compiles architectures on native runners and only bundles the combin
 	}
 	const commands = bundle.steps.map((step) => step.run ?? '').join('\n')
 	assert.match(commands, /lipo -create/)
-	assert.match(commands, /lipo -verify_arch arm64 x86_64/)
+	assert.match(commands, /lipo "\$output" -verify_arch arm64 x86_64/)
 	assert.match(commands, /tauri bundle --target universal-apple-darwin/)
 	assert.doesNotMatch(commands, /tauri build|cargo (build|check|test)/)
 	const signing = bundle.steps.find((step) => step.run?.includes('tauri bundle'))
@@ -227,7 +227,7 @@ test('completed platforms publish independently while update manifests require t
 	)
 	assert.equal(build.with.tagName, undefined)
 	assert.equal(build.with.releaseId, undefined)
-	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['build', 'bundle-macos'])
+	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['preflight', 'build', 'bundle-macos'])
 	const publish = parse(
 		await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
 	)
@@ -241,6 +241,42 @@ test('completed platforms publish independently while update manifests require t
 	)
 	const latest = finalize.findIndex((step) => step.run?.includes('gh release edit'))
 	assert.ok(upload >= 0 && latest > upload)
+})
+
+test('manual recovery validates source artifacts and skips successful platform compilations', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	assert.equal(release.on.workflow_dispatch.inputs.release_tag.required, true)
+	assert.equal(release.on.workflow_dispatch.inputs.source_run_id.required, true)
+	assert.equal(release.env.RELEASE_TAG, '${{ inputs.release_tag || github.ref_name }}')
+	assert.equal(release.permissions.actions, 'read')
+	const validation = release.jobs.preflight.steps.find((step) =>
+		step.run?.includes('validate-release-recovery.mjs'),
+	)
+	assert.equal(validation.if, "github.event_name == 'workflow_dispatch'")
+	assert.equal(validation.env.SOURCE_RUN_ID, '${{ inputs.source_run_id }}')
+	for (const name of ['build', 'build-macos'])
+		assert.equal(release.jobs[name].if, "github.event_name != 'workflow_dispatch'")
+	for (const name of ['bundle-macos', 'verify-and-publish']) {
+		assert.match(release.jobs[name].if, /!cancelled\(\)/)
+		assert.match(release.jobs[name].if, /needs.preflight.result == 'success'/)
+		assert.match(release.jobs[name].if, /github.event_name == 'workflow_dispatch'/)
+	}
+	const download = release.jobs['bundle-macos'].steps.find((step) =>
+		step.uses?.startsWith('actions/download-artifact@'),
+	)
+	assert.equal(download.with['run-id'], '${{ inputs.source_run_id || github.run_id }}')
+	assert.equal(download.with['github-token'], '${{ secrets.GITHUB_TOKEN }}')
+	const publish = release.jobs['verify-and-publish'].steps
+	for (const name of [
+		'Promote complete stable release to latest',
+		'Publish website download metadata',
+	])
+		assert.equal(
+			publish.find((step) => step.name === name).if,
+			"${{ !contains(env.RELEASE_TAG, '-') }}",
+		)
+	const mirror = publish.find((step) => step.name === 'Mirror published release to CNB')
+	assert.doesNotMatch(mirror.run, /push --force/)
 })
 
 test('staging preserves signed updater bytes across rebundling and keeps universal asset names', async () => {
@@ -302,12 +338,13 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 			} = parse(
 				await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
 			)
-			for (const { tag, draft, fail } of [
+			for (const { tag, draft, fail, recovery } of [
 				{ tag: 'v1.2.3', draft: true },
 				{ tag: 'v1.2.3-beta.1', draft: true },
 				{ tag: 'v1.2.3', draft: false },
 				{ tag: 'v1.2.3-beta.1', draft: false },
 				{ tag: 'v1.2.3', draft: true, fail: true },
+				{ tag: 'v1.2.3-beta.1', draft: false, recovery: true },
 			]) {
 				await writeFile(log, '')
 				const run = () => {
@@ -317,7 +354,8 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 								...process.env,
 								PATH: `${directory}:${process.env.PATH}`,
 								RUNNER_TEMP: directory,
-								GITHUB_REF_NAME: tag,
+								GITHUB_REF_NAME: recovery ? 'ymcl-dev' : tag,
+								RELEASE_TAG: recovery ? tag : '',
 								PUBLISH_TEST_LOG: log,
 								PUBLISH_TEST_DRAFT: String(draft),
 								PUBLISH_TEST_FAIL: fail ? '1' : '0',
@@ -329,6 +367,7 @@ if (args[1] === 'view') console.log(process.env.PUBLISH_TEST_DRAFT)
 				else run()
 				const commands = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
 				assert.equal(commands[0][1], 'upload')
+				assert.equal(commands[0][2], tag)
 				assert.ok(commands[0].includes(join(directory, 'release-assets/YMCL.dmg')))
 				if (fail || (!draft && !tag.includes('-')))
 					assert.equal(

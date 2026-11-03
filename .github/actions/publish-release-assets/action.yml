@@ -5,12 +5,13 @@ runs:
   steps:
     - name: Upload verified release assets
       shell: bash
-      run: gh release upload "${GITHUB_REF_NAME}" "${RUNNER_TEMP}/release-assets/"* --clobber
+      run: gh release upload "${RELEASE_TAG:-$GITHUB_REF_NAME}" "${RUNNER_TEMP}/release-assets/"* --clobber
     - name: Make completed platform available
       shell: bash
       run: |
-        if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-          gh release edit "${GITHUB_REF_NAME}" --draft=false --prerelease --latest=false
-        elif [[ "$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft')" == "true" ]]; then
-          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest=false
+        tag="${RELEASE_TAG:-$GITHUB_REF_NAME}"
+        if [[ "$tag" == *-* ]]; then
+          gh release edit "$tag" --draft=false --prerelease --latest=false
+        elif [[ "$(gh release view "$tag" --json isDraft --jq '.isDraft')" == "true" ]]; then
+          gh release edit "$tag" --draft=false --latest=false
         fi

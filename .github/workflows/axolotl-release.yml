@@ -4,12 +4,26 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to finish publishing
+        required: true
+        type: string
+      source_run_id:
+        description: Failed release run with successful native macOS builds
+        required: true
+        type: string
 
 permissions:
   contents: write
+  actions: read
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 concurrency:
-  group: axolotl-release-${{ github.ref }}
+  group: axolotl-release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,6 +46,13 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+
+      - name: Validate existing release artifacts before recovery
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: node scripts/axolotl/validate-release-recovery.mjs
 
       - name: Require production build and publish secrets
         env:
@@ -66,7 +87,7 @@ jobs:
           node scripts/axolotl/check-migrations.mjs --release
           node scripts/axolotl/brand-guard.mjs
           node scripts/axolotl/i18n-check.mjs
-          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs
+          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs
           rustc --edition=2024 --test packages/app-lib/build_env.rs -o "${RUNNER_TEMP}/curseforge-build-env-tests"
           "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
@@ -79,30 +100,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           release_notes="${RUNNER_TEMP}/axolotl-release-notes.md"
-          node scripts/axolotl/create-release-notes.mjs "${GITHUB_REF_NAME}" "$release_notes"
+          node scripts/axolotl/create-release-notes.mjs "${RELEASE_TAG}" "$release_notes"
           existing_release="$(
             gh release list --limit 100 --json tagName \
-              --jq ".[] | select(.tagName == \"${GITHUB_REF_NAME}\") | .tagName"
+              --jq ".[] | select(.tagName == \"${RELEASE_TAG}\") | .tagName"
           )"
           if [[ -n "$existing_release" ]]; then
-            echo "Release ${GITHUB_REF_NAME} already exists"
-            gh release edit "${GITHUB_REF_NAME}" --notes-file "$release_notes"
+            echo "Release ${RELEASE_TAG} already exists"
+            gh release edit "${RELEASE_TAG}" --notes-file "$release_notes"
             exit 0
           fi
 
           release_args=(
             --draft
             --notes-file "$release_notes"
-            --title "YMCL ${GITHUB_REF_NAME}"
+            --title "YMCL ${RELEASE_TAG}"
           )
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          if [[ "${RELEASE_TAG}" == *-* ]]; then
             release_args+=(--prerelease)
           fi
-          gh release create "${GITHUB_REF_NAME}" "${release_args[@]}"
+          gh release create "${RELEASE_TAG}" "${release_args[@]}"
 
   build:
     name: Build (${{ matrix.name }})
     needs: preflight
+    if: github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +169,7 @@ jobs:
       - name: Set release version
         shell: bash
         run: |
-          node scripts/axolotl/set-version.mjs "${{ github.ref_name }}"
+          node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
           cargo update --workspace --offline
 
       - name: Build release assets
@@ -191,7 +213,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $version = $env:RELEASE_TAG -replace '^v', ''
           $appName = "YMCL"
           $outDir = "target/release/bundle/nsis"
           $buildDir = "target/portable-build"
@@ -254,6 +276,7 @@ jobs:
   build-macos:
     name: Compile (${{ matrix.name }})
     needs: preflight
+    if: github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -286,7 +309,7 @@ jobs:
       - name: Set release version
         shell: bash
         run: |
-          node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"
+          node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
           cargo update --workspace --offline
       - name: Compile one native macOS architecture
         id: compile
@@ -315,7 +338,8 @@ jobs:
 
   bundle-macos:
     name: Bundle and publish macOS universal
-    needs: build-macos
+    needs: [preflight, build-macos]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['build-macos'].result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: macos-15-intel
     env:
       SQLX_OFFLINE: true
@@ -331,12 +355,14 @@ jobs:
           runner: macos-15-intel
           bundle-only: 'true'
       - name: Set release version
-        run: node scripts/axolotl/set-version.mjs "${GITHUB_REF_NAME}"
+        run: node scripts/axolotl/set-version.mjs "${RELEASE_TAG}"
       - name: Download both compiled architectures
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: macos-*
           path: macos-binaries
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.source_run_id || github.run_id }}
       - name: Assemble and verify the universal binary
         env:
           CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
@@ -347,7 +373,7 @@ jobs:
             macos-binaries/macos-aarch64-apple-darwin/YMCL \
             macos-binaries/macos-x86_64-apple-darwin/YMCL \
             -output "$output"
-          lipo -verify_arch arm64 x86_64 "$output"
+          lipo "$output" -verify_arch arm64 x86_64
           chmod +x "$output"
           node scripts/axolotl/verify-embedded-curseforge-key.mjs "$output"
       - name: Bundle and sign without recompiling Rust or the frontend
@@ -381,7 +407,8 @@ jobs:
 
   verify-and-publish:
     name: Verify complete update and publish mirrors
-    needs: [build, bundle-macos]
+    needs: [preflight, build, bundle-macos]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs['bundle-macos'].result == 'success' && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -400,7 +427,7 @@ jobs:
       - name: Download updater signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download "${GITHUB_REF_NAME}" --pattern '*.sig' --dir release-check/signatures
+        run: gh release download "${RELEASE_TAG}" --pattern '*.sig' --dir release-check/signatures
 
       - name: Download release metadata
         env:
@@ -409,36 +436,36 @@ jobs:
           release_id="$(
             gh api "repos/${GITHUB_REPOSITORY}/releases" \
               --paginate \
-              --jq ".[] | select(.tag_name == \"${GITHUB_REF_NAME}\") | .id"
+              --jq ".[] | select(.tag_name == \"${RELEASE_TAG}\") | .id"
           )"
           if [[ -z "$release_id" ]]; then
-            echo "Release ${GITHUB_REF_NAME} was not found"
+            echo "Release ${RELEASE_TAG} was not found"
             exit 1
           fi
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release-check/release.json
 
       - name: Generate update manifest
-        run: node scripts/axolotl/create-update-manifest.mjs release-check/release.json release-check/signatures "${GITHUB_REF_NAME}" release-check/latest.json
+        run: node scripts/axolotl/create-update-manifest.mjs release-check/release.json release-check/signatures "${RELEASE_TAG}" release-check/latest.json
 
       - name: Verify update manifest
-        run: node scripts/axolotl/verify-update-manifest.mjs release-check/latest.json "${GITHUB_REF_NAME}"
+        run: node scripts/axolotl/verify-update-manifest.mjs release-check/latest.json "${RELEASE_TAG}"
 
       - name: Upload update manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" release-check/latest.json --clobber
+        run: gh release upload "${RELEASE_TAG}" release-check/latest.json --clobber
 
       - name: Promote complete stable release to latest
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(env.RELEASE_TAG, '-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --latest
+        run: gh release edit "${RELEASE_TAG}" --latest
 
       - name: Build Update Server artifact catalog
         run: |
           node scripts/axolotl/create-update-server-catalog.mjs \
             release-check/release.json \
-            "${GITHUB_REF_NAME}" \
+            "${RELEASE_TAG}" \
             release-check/update-server-catalog.json
           node scripts/axolotl/create-update-server-catalog.test.mjs
 
@@ -451,7 +478,7 @@ jobs:
             release-check/update-server-catalog.json \
             release-check/release.json \
             release-check/signatures \
-            "${GITHUB_REF_NAME}"
+            "${RELEASE_TAG}"
 
       - name: Notify Update Server to publish release assets
         if: env.UPDATE_SERVER_URL != ''
@@ -463,10 +490,10 @@ jobs:
           node scripts/axolotl/publish-update-server.mjs \
             release-check/update-server-catalog.json \
             release-check/release.json \
-            "${GITHUB_REF_NAME}"
+            "${RELEASE_TAG}"
 
       - name: Publish website download metadata
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(env.RELEASE_TAG, '-') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -482,7 +509,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "Website metadata is unchanged"
           else
-            git commit -m "chore(website): update download metadata to ${GITHUB_REF_NAME} [skip ci]"
+            git commit -m "chore(website): update download metadata to ${RELEASE_TAG} [skip ci]"
             git push origin main
           fi
 
@@ -503,10 +530,10 @@ jobs:
             git -c "http.extraHeader=Authorization: Basic $auth" "$@"
           }
 
-          git fetch origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-          git_cnb push --force "$cnb_url" \
-            "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git_cnb push "$cnb_url" \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
-          node scripts/axolotl/cnb-release.mjs finalize "${GITHUB_REF_NAME}" cnb-release/final
+          node scripts/axolotl/cnb-release.mjs finalize "${RELEASE_TAG}" cnb-release/final
           node scripts/axolotl/verify-update-manifest.mjs \
-            cnb-release/final/latest.json "${GITHUB_REF_NAME}" cnb
+            cnb-release/final/latest.json "${RELEASE_TAG}" cnb
