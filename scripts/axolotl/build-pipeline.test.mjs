@@ -357,6 +357,7 @@ test('recovery platform selection is explicit and normal releases still require 
 test('ARM capacity recovery reuses completed platforms and verifies the cross-compiled architecture', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const arm = release.jobs['rebuild-macos-arm']
+	assert.ok(release.concurrency.group.includes("inputs.rebuild_macos_arm && '-arm-recovery'"))
 	assert.equal(arm.if, 'inputs.rebuild_macos_arm')
 	assert.equal(arm['runs-on'], 'macos-15-intel')
 	assert.equal(arm.env.CARGO_PROFILE_RELEASE_LTO, 'true')

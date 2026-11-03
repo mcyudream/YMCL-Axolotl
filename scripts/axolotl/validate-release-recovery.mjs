@@ -82,7 +82,19 @@ export function validateRecoverySource({
 	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
 	if (unexpectedPaths.length)
 		throw new Error(`Recovery cannot change release source files: ${unexpectedPaths.join(', ')}`)
-	if (deferSourceArtifacts) return
+	if (deferSourceArtifacts) {
+		const nativeArm = jobs.filter((job) => job.name === 'Compile (macOS Apple Silicon)')
+		if (
+			nativeArm.length !== 1 ||
+			nativeArm[0].status !== 'completed' ||
+			!['failure', 'cancelled', 'skipped'].includes(nativeArm[0].conclusion) ||
+			artifacts.some((artifact) => artifact.name === 'macos-aarch64-apple-darwin')
+		)
+			throw new Error(
+				'ARM recovery requires a failed or cancelled native ARM job without an artifact',
+			)
+		return
+	}
 	const jobsToVerify = requiredJobs.filter(
 		(name) => !rebuildMacosArm || name !== 'Compile (macOS Apple Silicon)',
 	)

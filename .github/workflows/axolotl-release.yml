@@ -47,7 +47,7 @@ env:
   YMCL_UPDATE_PLATFORMS: ${{ inputs.update_platforms || 'both' }}
 
 concurrency:
-  group: axolotl-release-${{ inputs.release_tag || github.ref_name }}
+  group: axolotl-release-${{ inputs.release_tag || github.ref_name }}${{ inputs.rebuild_macos_arm && '-arm-recovery' || '' }}
   cancel-in-progress: false
 
 jobs:

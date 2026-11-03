@@ -72,11 +72,15 @@ test('ARM recovery may compile in parallel but must verify complete source artif
 	Object.assign(source, {
 		rebuildMacosArm: true,
 		deferSourceArtifacts: true,
-		jobs: [],
 		artifacts: [],
 	})
+	source.jobs.find((job) => job.name === 'Compile (macOS Apple Silicon)').conclusion = 'cancelled'
 	source.run.status = 'in_progress'
 	assert.doesNotThrow(() => validateRecoverySource(source))
+	assert.throws(
+		() => validateRecoverySource({ ...source, jobs: [] }),
+		/failed or cancelled native ARM/,
+	)
 	assert.throws(
 		() => validateRecoverySource({ ...source, deferSourceArtifacts: false }),
 		/completed release run/,
