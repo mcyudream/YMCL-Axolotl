@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url'
 const recoveryPaths = new Set([
 	'.github/workflows/axolotl-release.yml',
 	'.github/actions/publish-release-assets/action.yml',
+	'.github/actions/setup-release-build/action.yml',
+	'.github/workflows/prepare-release-cache.yml',
 	'scripts/axolotl/build-pipeline.test.mjs',
 	'scripts/axolotl/validate-release-recovery.mjs',
 	'scripts/axolotl/validate-release-recovery.test.mjs',
@@ -23,11 +25,24 @@ const requiredJobs = [
 
 const requiredArtifacts = ['macos-aarch64-apple-darwin', 'macos-x86_64-apple-darwin']
 
-export function validateRecoveryInputs(tag, sourceRunId) {
+function validateReleaseTag(tag) {
 	if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag ?? ''))
 		throw new Error('Recovery requires an existing version tag')
+}
+
+export function validateRecoveryInputs(tag, sourceRunId) {
+	validateReleaseTag(tag)
 	if (!/^[1-9]\d*$/.test(sourceRunId ?? ''))
 		throw new Error('Recovery requires a numeric source run ID')
+}
+
+export function validateRebuildSource({ tag, changedPaths, release }) {
+	validateReleaseTag(tag)
+	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
+	if (unexpectedPaths.length)
+		throw new Error(`Rebuild cannot change release source files: ${unexpectedPaths.join(', ')}`)
+	if (release && (!release.draft || release.assets?.length))
+		throw new Error('Rebuild cannot overwrite an existing published release or uploaded assets')
 }
 
 export function validateRecoverySource({
@@ -40,17 +55,23 @@ export function validateRecoverySource({
 	jobs,
 	artifacts,
 	publishOnly = false,
+	sourceChangedPaths,
 }) {
 	validateRecoveryInputs(tag, sourceRunId)
+	const taggedSource =
+		run.event === 'push' && run.head_branch === tag && run.head_sha === releaseSha
+	const repairedSource =
+		run.event === 'workflow_dispatch' &&
+		/^[a-f0-9]{40}$/.test(run.head_sha ?? '') &&
+		Array.isArray(sourceChangedPaths) &&
+		sourceChangedPaths.every((path) => recoveryPaths.has(path))
 	if (
 		String(run.id) !== sourceRunId ||
 		run.repository?.full_name !== repository ||
 		run.head_repository?.full_name !== repository ||
 		run.path !== '.github/workflows/axolotl-release.yml' ||
-		run.event !== 'push' ||
 		run.status !== 'completed' ||
-		run.head_branch !== tag ||
-		run.head_sha !== releaseSha
+		(!taggedSource && !repairedSource)
 	)
 		throw new Error('Source run must be a completed release run for the exact tag and commit')
 	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
@@ -78,7 +99,7 @@ export function validateRecoverySource({
 			!(artifact.size_in_bytes > 0) ||
 			!/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') ||
 			String(artifact.workflow_run?.id) !== sourceRunId ||
-			artifact.workflow_run?.head_sha !== releaseSha ||
+			artifact.workflow_run?.head_sha !== run.head_sha ||
 			artifact.workflow_run?.repository_id !== run.repository.id ||
 			artifact.workflow_run?.head_repository_id !== run.repository.id
 		)
@@ -128,7 +149,7 @@ export function validatePublishedRelease(release, tag, repository) {
 		if (!names.has(name)) throw new Error(`Publish-only recovery is missing ${name}`)
 }
 
-async function readGitHub(path) {
+async function readGitHub(path, optional = false) {
 	const response = await fetch(
 		`${process.env.GITHUB_API_URL ?? 'https://api.github.com'}/repos/${process.env.GITHUB_REPOSITORY}${path}`,
 		{
@@ -141,6 +162,7 @@ async function readGitHub(path) {
 			signal: AbortSignal.timeout(30_000),
 		},
 	)
+	if (optional && response.status === 404) return null
 	if (!response.ok) throw new Error(`Recovery source lookup failed: HTTP ${response.status}`)
 	return response.json()
 }
@@ -149,7 +171,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	const tag = process.env.RELEASE_TAG
 	const sourceRunId = process.env.SOURCE_RUN_ID
 	const publishOnly = process.env.PUBLISH_ONLY === 'true'
-	validateRecoveryInputs(tag, sourceRunId)
+	const rebuild = process.env.REBUILD_RELEASE === 'true'
+	validateReleaseTag(tag)
 	if (!process.env.GH_TOKEN || !process.env.GITHUB_REPOSITORY)
 		throw new Error('Recovery requires GitHub credentials and repository context')
 	const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
@@ -157,36 +180,52 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	const changedPaths = git('diff', '--name-only', releaseSha, 'HEAD', '--')
 		.split('\n')
 		.filter(Boolean)
-	const [run, jobData, artifactData] = await Promise.all([
-		readGitHub(`/actions/runs/${sourceRunId}`),
-		readGitHub(`/actions/runs/${sourceRunId}/jobs?filter=latest&per_page=100`),
-		readGitHub(`/actions/runs/${sourceRunId}/artifacts?per_page=100`),
-	])
-	if (jobData.total_count > 100 || artifactData.total_count > 100)
-		throw new Error('Recovery source exceeds the supported job or artifact count')
-	validateRecoverySource({
-		tag,
-		sourceRunId,
-		repository: process.env.GITHUB_REPOSITORY,
-		releaseSha,
-		changedPaths,
-		run,
-		jobs: jobData.jobs,
-		artifacts: artifactData.artifacts,
-		publishOnly,
-	})
-	if (publishOnly) {
-		validatePublishedRelease(
-			await readGitHub(`/releases/tags/${encodeURIComponent(tag)}`),
+	if (rebuild) {
+		if (publishOnly || sourceRunId)
+			throw new Error('Rebuild cannot reuse artifacts or publish-only mode')
+		validateRebuildSource({
 			tag,
-			process.env.GITHUB_REPOSITORY,
-		)
-		console.log(
-			`Validated complete published assets for ${tag} at ${releaseSha}; final synchronization only`,
-		)
+			changedPaths,
+			release: await readGitHub(`/releases/tags/${encodeURIComponent(tag)}`, true),
+		})
+		console.log(`Validated ${tag} at ${releaseSha}; rebuilding with CI-only repairs`)
 	} else {
-		console.log(
-			`Validated ${tag} at ${releaseSha}; reusing native artifacts from run ${sourceRunId}`,
-		)
+		validateRecoveryInputs(tag, sourceRunId)
+		const [run, jobData, artifactData] = await Promise.all([
+			readGitHub(`/actions/runs/${sourceRunId}`),
+			readGitHub(`/actions/runs/${sourceRunId}/jobs?filter=latest&per_page=100`),
+			readGitHub(`/actions/runs/${sourceRunId}/artifacts?per_page=100`),
+		])
+		if (jobData.total_count > 100 || artifactData.total_count > 100)
+			throw new Error('Recovery source exceeds the supported job or artifact count')
+		validateRecoverySource({
+			tag,
+			sourceRunId,
+			repository: process.env.GITHUB_REPOSITORY,
+			releaseSha,
+			changedPaths,
+			run,
+			jobs: jobData.jobs,
+			artifacts: artifactData.artifacts,
+			publishOnly,
+			sourceChangedPaths:
+				run.event === 'workflow_dispatch' && /^[a-f0-9]{40}$/.test(run.head_sha ?? '')
+					? git('diff', '--name-only', releaseSha, run.head_sha, '--').split('\n').filter(Boolean)
+					: undefined,
+		})
+		if (publishOnly) {
+			validatePublishedRelease(
+				await readGitHub(`/releases/tags/${encodeURIComponent(tag)}`),
+				tag,
+				process.env.GITHUB_REPOSITORY,
+			)
+			console.log(
+				`Validated complete published assets for ${tag} at ${releaseSha}; final synchronization only`,
+			)
+		} else {
+			console.log(
+				`Validated ${tag} at ${releaseSha}; reusing native artifacts from run ${sourceRunId}`,
+			)
+		}
 	}
 }

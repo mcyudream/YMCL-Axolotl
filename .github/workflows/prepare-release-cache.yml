@@ -58,7 +58,7 @@ jobs:
     env:
       SQLX_OFFLINE: true
       CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_RELEASE_LTO: ${{ runner.os == 'Windows' && 'thin' || 'true' }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

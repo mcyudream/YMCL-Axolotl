@@ -12,8 +12,13 @@ on:
         type: string
       source_run_id:
         description: Failed release run with successful native macOS builds
-        required: true
+        required: false
         type: string
+      rebuild:
+        description: Rebuild an existing tag that has no published assets, with CI-only repairs
+        required: false
+        default: false
+        type: boolean
       publish_only:
         description: Only synchronize an existing complete release; skip macOS rebundling
         required: false
@@ -67,6 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           PUBLISH_ONLY: ${{ inputs.publish_only && 'true' || 'false' }}
+          REBUILD_RELEASE: ${{ inputs.rebuild && 'true' || 'false' }}
         run: node scripts/axolotl/validate-release-recovery.mjs
 
       - name: Require production build and publish secrets
@@ -140,7 +146,7 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     needs: preflight
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch' || inputs.rebuild
     strategy:
       fail-fast: false
       matrix:
@@ -159,7 +165,7 @@ jobs:
       SQLX_OFFLINE: true
       CARGO_INCREMENTAL: '0'
       # ThinLTO parallelizes Windows optimization; all installer variants reuse it.
-      CARGO_PROFILE_RELEASE_LTO: ${{ runner.os == 'Windows' && 'thin' || 'true' }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}
       AXOLOTL_REQUIRE_CURSEFORGE_API_KEY: '1'
     steps:
       - name: Check out source
@@ -305,7 +311,7 @@ jobs:
   build-macos:
     name: Compile (${{ matrix.name }})
     needs: preflight
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch' || inputs.rebuild
     strategy:
       fail-fast: false
       matrix:
@@ -368,7 +374,7 @@ jobs:
   bundle-macos:
     name: Bundle and publish macOS universal
     needs: [preflight, build-macos]
-    if: ${{ !cancelled() && !inputs.publish_only && needs.preflight.result == 'success' && (needs['build-macos'].result == 'success' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !inputs.publish_only && needs.preflight.result == 'success' && (needs['build-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild)) }}
     runs-on: macos-15-intel
     env:
       SQLX_OFFLINE: true
@@ -437,7 +443,7 @@ jobs:
   verify-and-publish:
     name: Verify complete update and publish mirrors
     needs: [preflight, build, bundle-macos]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['bundle-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_only && needs['bundle-macos'].result == 'skipped')) && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['bundle-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_only && needs['bundle-macos'].result == 'skipped')) && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild)) }}
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}

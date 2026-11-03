@@ -103,7 +103,7 @@ test('Windows installer variants reuse an LTO binary and preserve parallel optim
 	}
 	assert.equal(
 		release.jobs.build.env.CARGO_PROFILE_RELEASE_LTO,
-		"${{ runner.os == 'Windows' && 'thin' || 'true' }}",
+		"${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}",
 	)
 	assert.ok(ci.jobs.desktop.steps.some((step) => step.run?.includes('turbo run build')))
 })
@@ -130,10 +130,7 @@ test('native Windows installers do not publish stale modern updater signatures',
 	assert.ok(publish > release.jobs.build.steps.indexOf(modern))
 	assert.ok(publish < release.jobs.build.steps.indexOf(variants))
 	assert.equal(release.jobs.build.steps[publish].if, "runner.os == 'Windows'")
-	assert.equal(
-		release.jobs.build.steps[publish].uses,
-		'./.github/actions/publish-release-assets',
-	)
+	assert.equal(release.jobs.build.steps[publish].uses, './.github/actions/publish-release-assets')
 	assert.equal(release.jobs.build.strategy.matrix.include[0].name, 'Windows x64')
 	assert.doesNotMatch(variants.run, /gh release (upload|delete-asset)/)
 })
@@ -155,7 +152,7 @@ test('release and branch cache warming use matching LTO profiles, targets and se
 			job.env.CARGO_PROFILE_RELEASE_LTO,
 			job === release.jobs['build-macos']
 				? 'true'
-				: "${{ runner.os == 'Windows' && 'thin' || 'true' }}",
+				: "${{ matrix.runner == 'windows-2025' && 'thin' || 'true' }}",
 		)
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 		const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
@@ -268,7 +265,8 @@ test('completed platforms publish independently while update manifests require t
 test('manual recovery validates source artifacts and skips successful platform compilations', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	assert.equal(release.on.workflow_dispatch.inputs.release_tag.required, true)
-	assert.equal(release.on.workflow_dispatch.inputs.source_run_id.required, true)
+	assert.equal(release.on.workflow_dispatch.inputs.source_run_id.required, false)
+	assert.equal(release.on.workflow_dispatch.inputs.rebuild.default, false)
 	assert.equal(release.env.RELEASE_TAG, '${{ inputs.release_tag || github.ref_name }}')
 	assert.equal(release.permissions.actions, 'read')
 	const validation = release.jobs.preflight.steps.find((step) =>
@@ -277,7 +275,10 @@ test('manual recovery validates source artifacts and skips successful platform c
 	assert.equal(validation.if, "github.event_name == 'workflow_dispatch'")
 	assert.equal(validation.env.SOURCE_RUN_ID, '${{ inputs.source_run_id }}')
 	for (const name of ['build', 'build-macos'])
-		assert.equal(release.jobs[name].if, "github.event_name != 'workflow_dispatch'")
+		assert.equal(
+			release.jobs[name].if,
+			"github.event_name != 'workflow_dispatch' || inputs.rebuild",
+		)
 	for (const name of ['bundle-macos', 'verify-and-publish']) {
 		assert.match(release.jobs[name].if, /!cancelled\(\)/)
 		assert.match(release.jobs[name].if, /needs.preflight.result == 'success'/)
@@ -359,7 +360,10 @@ test('stable website metadata updates the default branch from a tag checkout', a
 		(step) => step.name === 'Publish website download metadata',
 	)
 	assert.equal(publish.env.DEFAULT_BRANCH, '${{ github.event.repository.default_branch }}')
-	assert.match(publish.run, /git switch --create release-website-metadata "origin\/\$\{DEFAULT_BRANCH\}"/)
+	assert.match(
+		publish.run,
+		/git switch --create release-website-metadata "origin\/\$\{DEFAULT_BRANCH\}"/,
+	)
 	assert.match(publish.run, /git push origin "HEAD:\$\{DEFAULT_BRANCH\}"/)
 	assert.doesNotMatch(publish.run, /push origin main|--force/)
 })

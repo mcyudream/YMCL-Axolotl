@@ -4,6 +4,7 @@ import {
 	validatePublishedRelease,
 	validateRecoveryInputs,
 	validateRecoverySource,
+	validateRebuildSource,
 } from './validate-release-recovery.mjs'
 
 function fixture() {
@@ -47,6 +48,35 @@ test('recovery accepts verified native artifacts and only packaging workflow cha
 	const source = fixture()
 	source.changedPaths.push('scripts/axolotl/publish-ymcl-platforms.mjs')
 	assert.doesNotThrow(() => validateRecoverySource(source))
+})
+
+test('rebuild allows CI-only repairs before assets exist and preserves published releases', () => {
+	const source = fixture()
+	assert.doesNotThrow(() => validateRebuildSource({ ...source, release: null }))
+	assert.doesNotThrow(() =>
+		validateRebuildSource({ ...source, release: { draft: true, assets: [] } }),
+	)
+	for (const release of [
+		{ draft: false, assets: [] },
+		{ draft: true, assets: [{}] },
+	])
+		assert.throws(() => validateRebuildSource({ ...source, release }), /cannot overwrite/)
+	source.changedPaths.push('packages/app-lib/src/launcher/mod.rs')
+	assert.throws(() => validateRebuildSource(source), /cannot change release source/)
+})
+
+test('recovery accepts repaired build runs only when their source still matches the release tag', () => {
+	const source = fixture()
+	Object.assign(source.run, {
+		event: 'workflow_dispatch',
+		head_branch: 'ymcl-dev',
+		head_sha: 'c'.repeat(40),
+	})
+	source.sourceChangedPaths = ['.github/workflows/axolotl-release.yml']
+	for (const artifact of source.artifacts) artifact.workflow_run.head_sha = source.run.head_sha
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	source.sourceChangedPaths.push('apps/app-frontend/src/pages/Index.vue')
+	assert.throws(() => validateRecoverySource(source), /exact tag and commit/)
 })
 
 function publishedRelease() {
