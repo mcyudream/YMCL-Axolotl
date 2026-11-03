@@ -12,6 +12,10 @@ use super::state::{self, MipPackState};
 use crate::State;
 use crate::api::ymcl::registry;
 
+mod upload;
+use upload::{Progress, PublishClient, PublishStage, UploadFile};
+pub use upload::{PublishProgress, PublishProgressCallback};
+
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct PublishDiffEntry {
     pub path: String,
@@ -682,7 +686,9 @@ pub async fn push_initial(
     exclude: Vec<String>,
     notes: Option<&str>,
     min_java: Option<u32>,
+    on_progress: PublishProgressCallback,
 ) -> crate::Result<serde_json::Value> {
+    let progress = Progress::new(on_progress);
     let (instance_dir, mip_base) = publish_target(instance_id).await?;
     let pack_id = match pack_id.map(str::trim).filter(|id| !id.is_empty()) {
         Some(explicit) => {
@@ -743,6 +749,7 @@ pub async fn push_initial(
     if let Some(min_major) = min_java {
         mip_json["java"] = serde_json::json!({ "minMajor": min_major });
     }
+    progress.stage(PublishStage::Packing);
     let archive_path = crate::api::instance::build_publish_archive(
         instance_id,
         candidates,
@@ -757,6 +764,7 @@ pub async fn push_initial(
         channel,
         bind.as_ref(),
         notes,
+        &progress,
     )
     .await
     {
@@ -774,6 +782,7 @@ pub async fn push_initial(
     .await;
     tokio::fs::remove_file(&archive_path).await.ok();
     let report = report?;
+    progress.stage(PublishStage::Publishing);
 
     // Record which server the pack was bound to so the instance's own state
     // is authoritative on the next diff (resolve_target_manifest matches the
@@ -804,44 +813,13 @@ pub async fn push_initial(
     )
     .await?;
     let mut report = report;
+    progress.stage(PublishStage::Mirroring);
     attach_mirrors(
         &mut report,
         mirror_github_resources(instance_id, &mip_base).await,
     );
+    progress.stage(PublishStage::Completed);
     Ok(report)
-}
-
-/// Read size for streamed upload parts: big enough that a multi-gigabyte pack
-/// does not travel in 8 KiB pieces, small enough that the buffer never
-/// registers as memory use.
-const UPLOAD_STREAM_CHUNK_BYTES: usize = 256 * 1024;
-
-/// Multipart part that streams `path` straight from disk, declaring its exact
-/// length so the request keeps a `Content-Length` header instead of falling
-/// back to chunked transfer encoding. The archive of a full pack is gigabytes;
-/// reading it into a `Vec` ahead of the upload is what makes a large initial
-/// publish an out-of-memory candidate.
-async fn streamed_file_part(
-    path: &Path,
-    mime: &str,
-    file_name: Option<&str>,
-) -> crate::Result<reqwest::multipart::Part> {
-    let length = tokio::fs::metadata(path).await?.len();
-    let file = tokio::fs::File::open(path).await?;
-    let mut part = reqwest::multipart::Part::stream_with_length(
-        reqwest::Body::wrap_stream(
-            tokio_util::io::ReaderStream::with_capacity(
-                file,
-                UPLOAD_STREAM_CHUNK_BYTES,
-            ),
-        ),
-        length,
-    )
-    .mime_str(mime)?;
-    if let Some(file_name) = file_name {
-        part = part.file_name(file_name.to_string());
-    }
-    Ok(part)
 }
 
 /// Builds the multipart ingest form: `file` = mrpack zip + metadata fields.
@@ -851,13 +829,16 @@ async fn build_initial_upload(
     channel: Option<&str>,
     bind: Option<&serde_json::Value>,
     notes: Option<&str>,
+    progress: &Progress,
 ) -> crate::Result<reqwest::multipart::Form> {
-    let archive = streamed_file_part(
-        archive_path,
-        "application/zip",
-        Some("pack.mrpack"),
-    )
-    .await?;
+    let size = tokio::fs::metadata(archive_path).await?.len();
+    progress.start_upload(size, 1);
+    progress.batch(1, 0);
+    let archive = progress
+        .part(archive_path, 0, size, "pack.mrpack", 0, true)
+        .await?
+        .mime_str("application/zip")?
+        .file_name("pack.mrpack");
     let mut form = reqwest::multipart::Form::new().part("file", archive);
     form = form.text("version", version.to_string());
     if let Some(channel) = channel {
@@ -987,30 +968,7 @@ pub(crate) async fn post_multipart(
     path: &str,
     form: reqwest::multipart::Form,
 ) -> crate::Result<serde_json::Value> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .build()?;
-    let url = format!("{mip_base}{path}");
-    let state = State::get().await?;
-    let active = registry::active_domain_id(&state.pool).await?;
-    let session = crate::api::ymcl::auth::ensure_session(&active)
-        .await
-        .ok()
-        .flatten();
-    let mut request = client.post(&url);
-    if let Some(token) = session.as_ref().map(|s| s.access_token.as_str()) {
-        request = request.header("Authorization", token);
-    }
-    let response = request.multipart(form).send().await?;
-    let status = response.status();
-    let text = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(crate::ErrorKind::OtherError(format!(
-            "Publish failed ({status}): {text}"
-        ))
-        .into());
-    }
-    Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    PublishClient::new(mip_base).await?.post(path, form).await
 }
 
 /// Pushes the diff as an incremental delta publish. The adapter composes
@@ -1038,7 +996,9 @@ pub async fn push_delta(
     include: Vec<String>,
     notes: Option<&str>,
     min_java: Option<u32>,
+    on_progress: PublishProgressCallback,
 ) -> crate::Result<serde_json::Value> {
+    let progress = Progress::new(on_progress);
     let (instance_dir, mut pack_state, mip_base) =
         instance_context(instance_id).await?;
     // 基线与服务端同步：对绑定当前目标版本做增量；基线已被删则拒绝并
@@ -1095,10 +1055,9 @@ pub async fn push_delta(
         .into());
     }
 
-    // Multipart（MIP 附录 B）：part "delta" = JSON 索引，changed/added 的
-    // 二进制按出现顺序放在 "file0"、"file1"、…。changed 条目整条替换 base
-    // 的 manifest 条目，所以显式带上 base 的 policy 与 feature（state 有
-    // 记录时）；features/policies 声明交给适配器对新增条目做 glob 标注。
+    // Upload binaries into verified CAS objects first. Only this final index
+    // creates a version and applies its binding; partial uploads create no version.
+    // Changed entries preserve the base policy and feature declarations.
     //
     // 自愈存量 manifest：旧包入库时没有 game，delta 带上本实例的游戏版本与
     // 加载器，适配器优先用它回填（无则继承 base）；loader 键名与 mrpack
@@ -1140,7 +1099,10 @@ pub async fn push_delta(
         "changed": [],
         "added": [],
         "deleted": diff.deleted,
-        "moved": diff.moved,
+        "moved": diff.moved.iter().map(|entry| serde_json::json!({
+            "from": entry.from,
+            "to": entry.path,
+        })).collect::<Vec<_>>(),
         "game": game,
         "features": features
             .iter()
@@ -1164,17 +1126,27 @@ pub async fn push_delta(
             })
             .collect::<Vec<_>>(),
     });
-    let mut form = reqwest::multipart::Form::new();
-    let mut part_index = 0usize;
+    let mut uploads = Vec::new();
+    let mut uploaded_hashes = std::collections::HashSet::new();
     for (list, key) in [(&diff.changed, "changed"), (&diff.added, "added")] {
         for file in list {
-            let bytes = tokio::fs::read(instance_dir.join(&file.path)).await?;
-            form = form.part(
-                format!("file{part_index}"),
-                reqwest::multipart::Part::bytes(bytes)
-                    .mime_str("application/octet-stream")?,
-            );
-            let mut entry = serde_json::json!({ "path": file.path });
+            let path = instance_dir.join(&file.path);
+            let size = tokio::fs::metadata(&path).await?.len();
+            let sha512 = file.sha512.as_ref().ok_or_else(|| {
+                crate::ErrorKind::OtherError(format!(
+                    "Missing publish hash: {}",
+                    file.path
+                ))
+            })?;
+            if uploaded_hashes.insert(sha512.clone()) {
+                uploads.push(UploadFile {
+                    path,
+                    name: file.path.clone(),
+                    sha512: sha512.clone(),
+                    size,
+                });
+            }
+            let mut entry = serde_json::json!({ "path": file.path, "sha512": sha512, "size": size });
             if let Some(base_file) = server_base.files.get(file.path.as_str()) {
                 entry["policy"] =
                     serde_json::Value::String(base_file.policy.clone());
@@ -1187,7 +1159,6 @@ pub async fn push_delta(
                 .as_array_mut()
                 .expect("array literal")
                 .push(entry);
-            part_index += 1;
         }
     }
     if let Some(bind) = bind {
@@ -1200,14 +1171,17 @@ pub async fn push_delta(
     {
         delta["notes"] = serde_json::Value::String(notes.to_string());
     }
-    form = form.text("delta", delta.to_string());
-
-    let mut report = post_multipart(
-        &mip_base,
-        &format!("/api/packs/{}/ingest/delta", pack_state.pack_id),
-        form,
-    )
-    .await?;
+    let client = PublishClient::new(&mip_base).await?;
+    client
+        .upload(&pack_state.pack_id, &uploads, &progress)
+        .await?;
+    progress.stage(PublishStage::Publishing);
+    let mut report = client
+        .post(
+            &format!("/api/packs/{}/ingest/delta", pack_state.pack_id),
+            reqwest::multipart::Form::new().text("delta", delta.to_string()),
+        )
+        .await?;
 
     // Persist the publish profile only after the upload succeeded: a failed
     // push must not silently record selections that never shipped. Rules hit
@@ -1228,10 +1202,12 @@ pub async fn push_delta(
     pack_state.publish_profile = Some(profile);
     state::save(&instance_dir, &pack_state).await?;
 
+    progress.stage(PublishStage::Mirroring);
     attach_mirrors(
         &mut report,
         mirror_github_resources(instance_id, &mip_base).await,
     );
+    progress.stage(PublishStage::Completed);
     Ok(report)
 }
 
@@ -1727,7 +1703,7 @@ mod tests {
         let path = directory.path().join("pack.mrpack");
         // Larger than one stream chunk, so the part is genuinely streamed in
         // pieces rather than produced in a single write.
-        let payload: Vec<u8> = (0..(UPLOAD_STREAM_CHUNK_BYTES * 2 + 1234))
+        let payload: Vec<u8> = (0..(256 * 1024 * 2 + 1234))
             .map(|index| (index % 251) as u8)
             .collect();
         std::fs::write(&path, &payload).unwrap();
@@ -1737,10 +1713,14 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(serve_one_upload(listener));
 
-        let part =
-            streamed_file_part(&path, "application/zip", Some("pack.mrpack"))
-                .await
-                .unwrap();
+        let progress = Progress::new(std::sync::Arc::new(|_| {}));
+        let part = progress
+            .part(&path, 0, payload.len() as u64, "pack.mrpack", 0, true)
+            .await
+            .unwrap()
+            .mime_str("application/zip")
+            .unwrap()
+            .file_name("pack.mrpack");
         let form = reqwest::multipart::Form::new()
             .part("file", part)
             .text("version", "1.0.0");

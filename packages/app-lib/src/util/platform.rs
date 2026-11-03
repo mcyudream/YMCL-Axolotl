@@ -72,7 +72,9 @@ pub const ARCH_WIDTH: &str = "32";
 
 // Platform rule handling
 fn normalize_architecture(java_arch: &str) -> &str {
-    if java_arch.eq_ignore_ascii_case("amd64") {
+    if java_arch.eq_ignore_ascii_case("amd64")
+        || java_arch.eq_ignore_ascii_case("x64")
+    {
         "x86_64"
     } else if java_arch.eq_ignore_ascii_case("i386")
         || java_arch.eq_ignore_ascii_case("i686")
@@ -102,7 +104,7 @@ pub fn os_rule(
             "x86" | "i386" | "i686" => {
                 matches!(actual.as_str(), "x86" | "i386" | "i686")
             }
-            "x86_64" | "amd64" => {
+            "x86_64" | "amd64" | "x64" => {
                 matches!(actual.as_str(), "x86_64" | "amd64")
             }
             "arm" | "arm32" => actual.starts_with("arm") && actual != "arm64",
@@ -115,7 +117,8 @@ pub fn os_rule(
 
     if let Some(name) = &rule.name {
         let native = Os::native_arch(normalized_arch);
-        rule_match &= name == &native || name == &native.get_os();
+        rule_match &= name != &Os::Unknown
+            && (name == &native || name == &native.get_os());
     }
 
     // `rule.version` is ignored because it's not usually seen on real recent
@@ -141,5 +144,31 @@ pub fn classpath_separator(java_arch: &str) -> &'static str {
         | Os::LinuxArm64
         | Os::Unknown => ":",
         Os::Windows | Os::WindowsArm64 => ";",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn x64_architecture_rules_match_java_aliases_and_reject_other_architectures()
+     {
+        for expected in ["x64", "X64", "amd64", "x86_64"] {
+            let rule = OsRule {
+                name: None,
+                version: None,
+                arch: Some(expected.to_string()),
+            };
+            for actual in ["x64", "X64", "amd64", "AMD64", "x86_64"] {
+                assert!(os_rule(&rule, actual, false), "{expected} / {actual}");
+            }
+            for actual in ["x86", "i686", "aarch64", "arm64", "arm"] {
+                assert!(
+                    !os_rule(&rule, actual, false),
+                    "{expected} / {actual}"
+                );
+            }
+        }
     }
 }

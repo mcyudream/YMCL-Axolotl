@@ -10,6 +10,15 @@ export const DOMAIN_DESIGN_PERMISSION = 'plugin:ymcl-adapter:design'
 /** Adapter RBAC permission guarding pack publishing/ingest (YAP §7, admin). */
 export const DOMAIN_PUBLISH_PERMISSION = 'plugin:ymcl-adapter:publish'
 
+export interface YmclPublishProgress {
+	stage: 'preparing' | 'packing' | 'uploading' | 'publishing' | 'mirroring' | 'completed'
+	uploadedBytes: number
+	totalBytes: number
+	batch: number
+	totalBatches: number
+	currentFile: string | null
+}
+
 /** Session permission check mirroring yda RBAC: exact id, the global
  * wildcard, or a `prefix:*` subtree grant all satisfy a requirement. */
 export function hasDomainPermission(

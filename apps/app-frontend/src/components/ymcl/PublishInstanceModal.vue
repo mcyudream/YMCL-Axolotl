@@ -16,17 +16,19 @@ import {
 	FileTreeSelect,
 	injectNotificationManager,
 	NewModal,
+	ProgressBar,
 	StyledInput,
+	useFormatBytes,
 	useVIntl,
 } from '@modrinth/ui'
 import { join } from '@tauri-apps/api/path'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
-import { invoke } from '@tauri-apps/api/core'
-import { computed, ref, watch } from 'vue'
+import { Channel, invoke } from '@tauri-apps/api/core'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import PublishChangeListModal from '@/components/ymcl/PublishChangeListModal.vue'
 import { get_full_path, get_pack_export_candidates } from '@/helpers/instance'
-import { ymcl, ymclErrorMessage } from '@/helpers/ymcl'
+import { ymcl, ymclErrorMessage, type YmclPublishProgress } from '@/helpers/ymcl'
 import { useYmclStore } from '@/store/ymcl'
 
 /**
@@ -42,6 +44,7 @@ const props = defineProps<{
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
+const formatBytes = useFormatBytes()
 const ymclStore = useYmclStore()
 
 const messages = defineMessages({
@@ -71,6 +74,22 @@ const messages = defineMessages({
 		defaultMessage: '不设置',
 	},
 	push: { id: 'app.ymcl.publish.push', defaultMessage: '发布更新' },
+	preparing: { id: 'app.ymcl.publish.progress.preparing', defaultMessage: 'Preparing files…' },
+	packing: { id: 'app.ymcl.publish.progress.packing', defaultMessage: 'Building the initial package…' },
+	uploading: {
+		id: 'app.ymcl.publish.progress.uploading',
+		defaultMessage: 'Uploading batch {batch} of {total}…',
+	},
+	publishing: { id: 'app.ymcl.publish.progress.publishing', defaultMessage: 'Publishing the version…' },
+	mirroring: {
+		id: 'app.ymcl.publish.progress.mirroring',
+		defaultMessage: 'Syncing required resources…',
+	},
+	completed: { id: 'app.ymcl.publish.progress.completed', defaultMessage: 'Published' },
+	uploadedBytes: {
+		id: 'app.ymcl.publish.progress.bytes',
+		defaultMessage: '{uploaded} / {total} uploaded',
+	},
 	initialMode: {
 		id: 'app.ymcl.publish.initial-mode',
 		defaultMessage: '该实例未绑定域整合包，将作为初始包发布并创建整合包。',
@@ -347,6 +366,17 @@ const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const diff = ref<PublishDiff | null>(null)
 const checking = ref(false)
 const pushing = ref(false)
+const publishProgress = ref<YmclPublishProgress | null>(null)
+const publishError = ref<string | null>(null)
+const publishProgressLabel = computed(() => {
+	const progress = publishProgress.value
+	if (publishError.value) return formatMessage(messages.pushFailed)
+	if (!progress) return formatMessage(messages.preparing)
+	if (progress.stage === 'uploading') {
+		return formatMessage(messages.uploading, { batch: progress.batch, total: progress.totalBatches })
+	}
+	return formatMessage(messages[progress.stage])
+})
 const version = ref('')
 const channel = ref('stable')
 /** 最低 Java 大版本（MIP §3.6 game.java）：空串=不设置（增量时沿用基线）。 */
@@ -1019,6 +1049,19 @@ function onContentNavigate(path: string) {
 async function push() {
 	if (!version.value || pushing.value) return
 	pushing.value = true
+	publishError.value = null
+	publishProgress.value = {
+		stage: 'preparing',
+		uploadedBytes: 0,
+		totalBytes: 0,
+		batch: 0,
+		totalBatches: 0,
+		currentFile: null,
+	}
+	const onProgress = new Channel<YmclPublishProgress>()
+	onProgress.onmessage = (progress) => {
+		publishProgress.value = progress
+	}
 	try {
 		const bind = serverId.value
 			? { serverId: serverId.value, optional: bindOptional.value }
@@ -1040,6 +1083,7 @@ async function push() {
 		const minJavaValue = minJava.value ? Number(minJava.value) : null
 		if (diff.value?.managed) {
 			report = await invoke('plugin:ymcl|ymcl_publish_push', {
+				onProgress,
 				instanceId: props.instanceId,
 				version: version.value,
 				channel: channel.value || null,
@@ -1056,6 +1100,7 @@ async function push() {
 		} else {
 			// packId 不传：由启动器生成 `slug-<uuid>`，避免重名冲突。
 			report = await invoke('plugin:ymcl|ymcl_publish_initial', {
+				onProgress,
 				instanceId: props.instanceId,
 				version: version.value,
 				channel: channel.value || null,
@@ -1091,11 +1136,14 @@ async function push() {
 			type: bind ? 'success' : 'warn',
 		})
 		console.debug('publish report', report)
+		pushing.value = false
+		await nextTick()
 		modal.value?.hide()
 	} catch (error) {
+		publishError.value = ymclErrorMessage(error)
 		addNotification({
 			title: formatMessage(messages.pushFailed),
-			text: ymclErrorMessage(error),
+			text: publishError.value,
 			type: 'error',
 		})
 	} finally {
@@ -1105,6 +1153,9 @@ async function push() {
 
 defineExpose({
 	show: () => {
+		if (pushing.value) return
+		publishProgress.value = null
+		publishError.value = null
 		diff.value = null
 		version.value = ''
 		channel.value = 'stable'
@@ -1127,11 +1178,12 @@ defineExpose({
 	<NewModal
 		ref="modal"
 		:header="formatMessage(messages.title)"
+		:disable-close="pushing"
 		scrollable
 		width="38rem"
 		max-width="calc(100vw - 2rem)"
 	>
-		<div class="flex min-h-40 flex-col gap-4">
+		<div :inert="pushing || undefined" class="flex min-h-40 flex-col gap-4">
 			<p class="m-0 text-sm leading-relaxed text-secondary">
 				{{ instanceName }} · {{ formatMessage(messages.description) }}
 			</p>
@@ -1614,6 +1666,31 @@ defineExpose({
 			</template>
 		</div>
 		<template #actions>
+			<div v-if="publishProgress" class="mb-4 flex flex-col gap-2" aria-live="polite">
+				<ProgressBar
+					:progress="publishProgress.uploadedBytes"
+					:max="Math.max(1, publishProgress.totalBytes)"
+					:label="publishProgressLabel"
+					:color="publishError ? 'red' : 'brand'"
+					:show-progress="publishProgress.stage === 'uploading'"
+					:waiting="pushing && publishProgress.stage !== 'uploading' && publishProgress.stage !== 'completed'"
+					full-width
+				>
+					<template #progress-icon />
+				</ProgressBar>
+				<p v-if="publishProgress.totalBytes > 0" class="m-0 text-xs text-secondary">
+					{{ formatMessage(messages.uploadedBytes, {
+						uploaded: formatBytes(publishProgress.uploadedBytes),
+						total: formatBytes(publishProgress.totalBytes),
+					}) }}
+				</p>
+				<p v-if="pushing && publishProgress.currentFile" class="m-0 truncate text-xs text-secondary">
+					{{ publishProgress.currentFile }}
+				</p>
+				<p v-if="publishError" class="m-0 break-words text-sm text-red" role="alert">
+					{{ publishError }}
+				</p>
+			</div>
 			<div class="flex items-center justify-end gap-2">
 				<ButtonStyled type="outlined">
 					<button :disabled="checking || pushing" @click="checkDiff">
@@ -1639,8 +1716,7 @@ defineExpose({
 						"
 						@click="push"
 					>
-						<LoaderIcon v-if="pushing" class="animate-spin" />
-						<UploadIcon v-else />
+						<UploadIcon />
 						{{ formatMessage(diff.managed ? messages.push : messages.pushInitial) }}
 					</button>
 				</ButtonStyled>

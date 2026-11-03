@@ -18240,5 +18240,26 @@
 	},
 	"app.ymcl.design.description": {
 		"message": "为域内所有成员配置首页背景、焦点、音乐和卡片。发布后对全体成员生效。"
+	},
+	"app.ymcl.publish.progress.preparing": {
+		"message": "正在准备文件…"
+	},
+	"app.ymcl.publish.progress.packing": {
+		"message": "正在打包初始包…"
+	},
+	"app.ymcl.publish.progress.uploading": {
+		"message": "正在上传第 {batch} / {total} 批…"
+	},
+	"app.ymcl.publish.progress.publishing": {
+		"message": "正在发布版本…"
+	},
+	"app.ymcl.publish.progress.mirroring": {
+		"message": "正在同步所需资源…"
+	},
+	"app.ymcl.publish.progress.completed": {
+		"message": "发布完成"
+	},
+	"app.ymcl.publish.progress.bytes": {
+		"message": "已上传 {uploaded} / {total}"
 	}
 }

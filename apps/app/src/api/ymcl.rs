@@ -743,7 +743,7 @@ pub async fn ymcl_publish_diff(
 }
 
 // Push the diff as an incremental delta to the domain (release console)
-// invoke('plugin:ymcl|ymcl_publish_push', { instanceId, version, channel, bind, features, policies, exclude?, include?, notes? })
+// invoke('plugin:ymcl|ymcl_publish_push', { instanceId, version, channel, bind, features, policies, exclude?, include?, notes?, onProgress })
 #[tauri::command]
 pub async fn ymcl_publish_push(
     instance_id: String,
@@ -756,6 +756,9 @@ pub async fn ymcl_publish_push(
     include: Option<Vec<String>>,
     notes: Option<String>,
     min_java: Option<u32>,
+    on_progress: tauri::ipc::Channel<
+        theseus::ymcl::mip::publish::PublishProgress,
+    >,
 ) -> Result<serde_json::Value> {
     Ok(theseus::ymcl::mip::publish::push_delta(
         &instance_id,
@@ -768,11 +771,14 @@ pub async fn ymcl_publish_push(
         include.unwrap_or_default(),
         notes.as_deref(),
         min_java,
+        std::sync::Arc::new(move |progress| {
+            let _ = on_progress.send(progress);
+        }),
     )
     .await?)
 }
 
-// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude?, notes?, minJava? })
+// invoke('plugin:ymcl|ymcl_publish_initial', { instanceId, packId?, version, channel, bind, features, policies, exclude?, notes?, minJava?, onProgress })
 // packId omitted → the launcher generates a unique `slug-<uuid>` id.
 #[tauri::command]
 pub async fn ymcl_publish_initial(
@@ -786,6 +792,9 @@ pub async fn ymcl_publish_initial(
     exclude: Option<Vec<String>>,
     notes: Option<String>,
     min_java: Option<u32>,
+    on_progress: tauri::ipc::Channel<
+        theseus::ymcl::mip::publish::PublishProgress,
+    >,
 ) -> Result<serde_json::Value> {
     Ok(theseus::ymcl::mip::publish::push_initial(
         &instance_id,
@@ -798,6 +807,9 @@ pub async fn ymcl_publish_initial(
         exclude.unwrap_or_default(),
         notes.as_deref(),
         min_java,
+        std::sync::Arc::new(move |progress| {
+            let _ = on_progress.send(progress);
+        }),
     )
     .await?)
 }

@@ -18238,5 +18238,26 @@
 	},
 	"app.ymcl.design.description": {
 		"message": "Configure home backgrounds, highlights, music and cards for every member. Publishing makes the changes visible to everyone."
+	},
+	"app.ymcl.publish.progress.preparing": {
+		"message": "Preparing files…"
+	},
+	"app.ymcl.publish.progress.packing": {
+		"message": "Building the initial package…"
+	},
+	"app.ymcl.publish.progress.uploading": {
+		"message": "Uploading batch {batch} of {total}…"
+	},
+	"app.ymcl.publish.progress.publishing": {
+		"message": "Publishing the version…"
+	},
+	"app.ymcl.publish.progress.mirroring": {
+		"message": "Syncing required resources…"
+	},
+	"app.ymcl.publish.progress.completed": {
+		"message": "Published"
+	},
+	"app.ymcl.publish.progress.bytes": {
+		"message": "{uploaded} / {total} uploaded"
 	}
 }

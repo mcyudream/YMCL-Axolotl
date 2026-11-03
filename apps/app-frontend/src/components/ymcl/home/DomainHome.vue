@@ -132,7 +132,7 @@ function onFocusOut(event: FocusEvent) {
 
 <template>
 	<section
-		class="domain-home h-full gap-[clamp(1rem,3vh,2rem)]"
+		class="domain-home min-h-full gap-[clamp(1rem,3vh,2rem)] overflow-hidden"
 		:class="{ 'domain-home-preview': preview, 'domain-home-inactive': !active }"
 		:style="{ '--domain-home-overlay': config.overlay / 100 }"
 	>
@@ -160,10 +160,12 @@ function onFocusOut(event: FocusEvent) {
 		</header>
 
 		<div
-			class="domain-home-main min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden"
+			class="domain-home-main grid min-w-0 flex-1 items-stretch gap-8 py-[clamp(0.5rem,2vh,2rem)]"
 			:class="{ 'has-focus': config.focusSources.length > 0 }"
 		>
-			<div class="domain-home-intro max-h-full overflow-y-auto overscroll-contain">
+			<div
+				class="domain-home-intro min-w-0 self-start pt-[clamp(1rem,15vh,10rem)] max-[900px]:pt-0"
+			>
 				<p class="domain-home-eyebrow">
 					{{
 						playerName
@@ -178,12 +180,13 @@ function onFocusOut(event: FocusEvent) {
 					</div>
 				</Transition>
 			</div>
-			<DomainHomeFocus
-				v-if="config.focusSources.length"
-				class="min-h-0 max-h-full"
-				:sources="config.focusSources"
-				:preview="preview"
-			/>
+			<div v-if="config.focusSources.length" class="relative min-h-0 min-w-0">
+				<DomainHomeFocus
+					class="min-h-0 max-h-full min-[901px]:absolute min-[901px]:inset-x-0 min-[901px]:top-1/2 min-[901px]:-translate-y-1/2"
+					:sources="config.focusSources"
+					:preview="preview"
+				/>
+			</div>
 		</div>
 
 		<nav
@@ -235,7 +238,7 @@ function onFocusOut(event: FocusEvent) {
 			</button>
 		</nav>
 
-		<footer class="domain-home-footer shrink-0">
+		<footer class="domain-home-footer mt-auto shrink-0">
 			<div class="domain-home-ambience flex min-w-0 flex-col items-start gap-3">
 				<DomainHomeProfile v-if="!preview" />
 				<DomainHomeMusic v-if="config.music.url" :music="config.music" :preview="preview" />
@@ -250,7 +253,6 @@ function onFocusOut(event: FocusEvent) {
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	overflow: hidden;
 	padding: clamp(1.5rem, 4vw, 3rem);
 	padding-block: clamp(1rem, 3vh, 2rem);
 	padding-inline-end: max(var(--domain-home-navigation-space, 0px), clamp(1.5rem, 4vw, 3rem));
@@ -331,20 +333,8 @@ function onFocusOut(event: FocusEvent) {
 	font-size: 0.6875rem;
 	color: rgb(255 255 255 / 60%);
 }
-.domain-home-main {
-	display: grid;
-	min-width: 0;
-	flex: 1;
-	align-items: center;
-	gap: 2rem;
-	padding-block: clamp(0.5rem, 2vh, 2rem);
-}
 .domain-home-main.has-focus {
 	grid-template-columns: minmax(0, 1fr) minmax(16rem, 21rem);
-}
-.domain-home-intro {
-	min-width: 0;
-	align-self: center;
 }
 .domain-home-eyebrow {
 	margin: 0 0 1rem;
@@ -463,10 +453,6 @@ function onFocusOut(event: FocusEvent) {
 @media (max-width: 900px) {
 	.domain-home-main.has-focus {
 		grid-template-columns: minmax(0, 1fr);
-	}
-	.domain-home-main {
-		grid-template-rows: auto minmax(0, 1fr);
-		overflow-y: auto;
 	}
 	.domain-home-footer {
 		grid-template-columns: minmax(0, 1fr);

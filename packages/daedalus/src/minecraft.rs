@@ -175,7 +175,8 @@ pub enum Os {
     LinuxArm64,
     /// Linux ARM 32
     LinuxArm32,
-    /// The OS is unknown
+    /// The OS is unknown or not supported by this launcher
+    #[serde(other)]
     Unknown,
 }
 
@@ -359,6 +360,53 @@ impl Library {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn unknown_operating_systems_keep_library_rule_constraints() {
+        for name in ["freebsd", "openbsd", "future-platform"] {
+            let library: Library = serde_json::from_value(json!({
+                "name": "example:platform-library:1.0.0:natives-freebsd",
+                "rules": [{"action": "allow", "os": {"name": name}}]
+            }))
+            .unwrap();
+
+            let rules = library.rules.as_ref().unwrap();
+            assert_eq!(rules.len(), 1);
+            assert!(matches!(rules[0].action, RuleAction::Allow));
+            assert_eq!(rules[0].os.as_ref().unwrap().name, Some(Os::Unknown));
+        }
+    }
+
+    #[test]
+    fn unknown_native_platforms_preserve_supported_classifiers() {
+        let library = native_library(json!({
+            "freebsd": "natives-freebsd",
+            "openbsd": "natives-openbsd",
+            "linux": "natives-linux",
+            "osx": "natives-osx",
+            "windows": "natives-windows"
+        }));
+        let library: Library =
+            serde_json::from_value(serde_json::to_value(library).unwrap())
+                .unwrap();
+
+        for (os, expected) in [
+            (Os::Linux, "natives-linux"),
+            (Os::LinuxArm32, "natives-linux"),
+            (Os::LinuxArm64, "natives-linux"),
+            (Os::Osx, "natives-osx"),
+            (Os::OsxArm64, "natives-osx"),
+            (Os::Windows, "natives-windows"),
+            (Os::WindowsArm64, "natives-windows"),
+        ] {
+            assert_eq!(
+                library
+                    .natives_os_key_and_classifiers_for_os(os)
+                    .map(|(key, _)| key),
+                Some(expected),
+            );
+        }
+    }
 
     fn native_library(natives: serde_json::Value) -> Library {
         serde_json::from_value(json!({

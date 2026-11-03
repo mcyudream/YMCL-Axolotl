@@ -28,6 +28,47 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.1.1',
+		version: '2.1.1',
+		publishedAt: '2026-11-03',
+		title: {
+			'en-US': 'YMCL 2.1.1',
+			'zh-CN': 'YMCL 2.1.1',
+		},
+		changes: {
+			added: [
+				{
+					'en-US': 'Added modpack publication progress showing the current stage, upload batch, and transferred bytes.',
+					'zh-CN': '整合包发布新增进度条，显示当前阶段、上传批次及已上传大小。',
+				},
+			],
+			changed: [
+				{
+					'en-US': 'Changed incremental modpack publishing to upload files in batches and split large files into smaller uploads.',
+					'zh-CN': '整合包增量发布改为分批上传，并将大文件拆分上传，减少单次请求的数据量。',
+				},
+			],
+			fixed: [
+				{
+					'en-US': 'Fixed Cleanroom beta installation failing on unsupported platform metadata and incorrectly matching Windows x64 dependencies.',
+					'zh-CN': '修复 Cleanroom 测试版因不支持的平台元数据而安装失败，以及 Windows x64 依赖匹配错误的问题。',
+				},
+				{
+					'en-US': 'Fixed unwanted scrollbars in domain homepage titles and title movement when launch cards change height.',
+					'zh-CN': '修复域首页标题出现多余滚动条，以及启动卡片高度变化带动标题上下移动的问题。',
+				},
+				{
+					'en-US': 'Fixed publication failures losing their error details and the publication dialog remaining open after success.',
+					'zh-CN': '修复发布失败后错误详情未保留，以及发布成功后弹窗未关闭的问题。',
+				},
+			],
+		},
+		notes: {
+			'en-US': 'Batched incremental uploads require YMCL domain adapter 0.16.0 or later.',
+			'zh-CN': '分批增量上传需要域服务端的 YMCL 适配插件升级至 0.16.0 或更高版本。',
+		},
+	},
+	{
 		id: 'launcher-2.1.0',
 		version: '2.1.0',
 		publishedAt: '2026-11-03',

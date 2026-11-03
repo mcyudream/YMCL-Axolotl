@@ -3746,6 +3746,42 @@ mod linked_rule_tests {
     use super::*;
     use d::minecraft::{FeatureRule, OsRule, Rule};
 
+    #[test]
+    fn unknown_platform_rules_do_not_change_the_last_matching_action() {
+        for name in ["freebsd", "openbsd", "future-platform", "unknown"] {
+            for (fallback, action, expected) in [
+                (RuleAction::Allow, "disallow", true),
+                (RuleAction::Disallow, "allow", false),
+            ] {
+                let unsupported: Rule =
+                    serde_json::from_value(serde_json::json!({
+                        "action": action,
+                        "os": {"name": name}
+                    }))
+                    .unwrap();
+
+                assert_eq!(
+                    parse_rule(
+                        &unsupported,
+                        std::env::consts::ARCH,
+                        &QuickPlayType::None,
+                        true,
+                    ),
+                    None,
+                );
+                assert_eq!(
+                    parse_rules(
+                        &[rule(fallback, None, None), unsupported],
+                        std::env::consts::ARCH,
+                        &QuickPlayType::None,
+                        true,
+                    ),
+                    expected,
+                );
+            }
+        }
+    }
+
     fn rule(
         action: RuleAction,
         os: Option<OsRule>,

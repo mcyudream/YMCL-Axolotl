@@ -2543,6 +2543,73 @@ mod tests {
         })
     }
 
+    #[test]
+    fn installer_parser_keeps_unsupported_platform_rules_in_both_profiles() {
+        for in_version_profile in [true, false] {
+            let unsupported = serde_json::json!({
+                "name": "example:platform-library:1.0:natives-freebsd",
+                "rules": [{"action": "allow", "os": {"name": "freebsd", "arch": "x64"}}]
+            });
+            let mut version =
+                minimal_installer_version("1.12.2-Cleanroom-test");
+            version.as_object_mut().unwrap().remove("inheritsFrom");
+            version["libraries"] = serde_json::json!([{
+                "name": "example:platform-library:1.0:natives-windows",
+                "rules": [{"action": "allow", "os": {"name": "windows", "arch": "x64"}}]
+            }]);
+            let installer_libraries = if in_version_profile {
+                version["libraries"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(unsupported);
+                Vec::new()
+            } else {
+                vec![unsupported]
+            };
+            let parsed = parse_installer(
+                installer_fixture(
+                    None,
+                    serde_json::json!({
+                        "minecraft": "1.12.2",
+                        "versionInfo": version,
+                        "libraries": installer_libraries,
+                    }),
+                ),
+                "https://example.com/cleanroom.jar",
+            )
+            .unwrap();
+            let profile: PartialVersionInfo = serde_json::from_value(
+                serde_json::to_value(parsed.profile).unwrap(),
+            )
+            .unwrap();
+
+            assert_eq!(profile.inherits_from, "1.12.2");
+            for (classifier, expected) in [
+                ("natives-freebsd", daedalus::minecraft::Os::Unknown),
+                ("natives-windows", daedalus::minecraft::Os::Windows),
+            ] {
+                let library = profile
+                    .libraries
+                    .iter()
+                    .find(|library| library.name.ends_with(classifier))
+                    .unwrap();
+                let rules = library.rules.as_ref().unwrap();
+                assert_eq!(rules.len(), 1);
+                assert_eq!(rules[0].os.as_ref().unwrap().name, Some(expected));
+                assert_eq!(
+                    rules[0].os.as_ref().unwrap().arch.as_deref(),
+                    Some("x64")
+                );
+                if classifier == "natives-freebsd" {
+                    assert_eq!(
+                        library.include_in_classpath,
+                        in_version_profile
+                    );
+                }
+            }
+        }
+    }
+
     fn installer_fixture(
         version_path: Option<&str>,
         profile: serde_json::Value,
