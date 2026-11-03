@@ -50,6 +50,23 @@ test('recovery accepts verified native artifacts and only packaging workflow cha
 	assert.doesNotThrow(() => validateRecoverySource(source))
 })
 
+test('ARM capacity recovery requires successful completed platforms and one verified Intel binary', () => {
+	const source = fixture()
+	source.rebuildMacosArm = true
+	source.jobs.find((job) => job.name === 'Compile (macOS Apple Silicon)').conclusion = 'cancelled'
+	source.artifacts = source.artifacts.filter(
+		(artifact) => artifact.name === 'macos-x86_64-apple-darwin',
+	)
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	assert.throws(() => validateRecoverySource({ ...source, publishOnly: true }), /publish-only/)
+	assert.throws(
+		() => validateRecoverySource({ ...source, artifacts: [] }),
+		/verified Intel artifact/,
+	)
+	source.jobs.find((job) => job.name === 'Build (Windows x64)').conclusion = 'failure'
+	assert.throws(() => validateRecoverySource(source), /successful Build/)
+})
+
 test('rebuild allows CI-only repairs before assets exist and preserves published releases', () => {
 	const source = fixture()
 	assert.doesNotThrow(() => validateRebuildSource({ ...source, release: null }))

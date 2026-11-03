@@ -56,6 +56,7 @@ export function validateRecoverySource({
 	artifacts,
 	publishOnly = false,
 	sourceChangedPaths,
+	rebuildMacosArm = false,
 }) {
 	validateRecoveryInputs(tag, sourceRunId)
 	const taggedSource =
@@ -77,7 +78,10 @@ export function validateRecoverySource({
 	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
 	if (unexpectedPaths.length)
 		throw new Error(`Recovery cannot change release source files: ${unexpectedPaths.join(', ')}`)
-	for (const name of requiredJobs) {
+	const jobsToVerify = requiredJobs.filter(
+		(name) => !rebuildMacosArm || name !== 'Compile (macOS Apple Silicon)',
+	)
+	for (const name of jobsToVerify) {
 		const matches = jobs.filter((job) => job.name === name)
 		if (
 			matches.length !== 1 ||
@@ -86,11 +90,17 @@ export function validateRecoverySource({
 		)
 			throw new Error(`Source run must have one successful ${name} job`)
 	}
+	if (publishOnly && rebuildMacosArm) throw new Error('ARM recovery cannot use publish-only mode')
 	if (publishOnly) return
 	const macosArtifacts = artifacts.filter((artifact) => artifact.name.startsWith('macos-'))
-	if (macosArtifacts.length !== requiredArtifacts.length)
-		throw new Error('Source run must contain exactly two native macOS artifacts')
-	for (const name of requiredArtifacts) {
+	const artifactsToVerify = rebuildMacosArm ? ['macos-x86_64-apple-darwin'] : requiredArtifacts
+	if (macosArtifacts.length !== artifactsToVerify.length)
+		throw new Error(
+			rebuildMacosArm
+				? 'ARM recovery requires exactly one verified Intel artifact'
+				: 'Source run must contain exactly two native macOS artifacts',
+		)
+	for (const name of artifactsToVerify) {
 		const matches = macosArtifacts.filter((artifact) => artifact.name === name)
 		const artifact = matches[0]
 		if (
@@ -172,6 +182,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	const sourceRunId = process.env.SOURCE_RUN_ID
 	const publishOnly = process.env.PUBLISH_ONLY === 'true'
 	const rebuild = process.env.REBUILD_RELEASE === 'true'
+	const rebuildMacosArm = process.env.REBUILD_MACOS_ARM === 'true'
 	validateReleaseTag(tag)
 	if (!process.env.GH_TOKEN || !process.env.GITHUB_REPOSITORY)
 		throw new Error('Recovery requires GitHub credentials and repository context')
@@ -181,7 +192,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 		.split('\n')
 		.filter(Boolean)
 	if (rebuild) {
-		if (publishOnly || sourceRunId)
+		if (publishOnly || sourceRunId || rebuildMacosArm)
 			throw new Error('Rebuild cannot reuse artifacts or publish-only mode')
 		validateRebuildSource({
 			tag,
@@ -208,6 +219,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 			jobs: jobData.jobs,
 			artifacts: artifactData.artifacts,
 			publishOnly,
+			rebuildMacosArm,
 			sourceChangedPaths:
 				run.event === 'workflow_dispatch' && /^[a-f0-9]{40}$/.test(run.head_sha ?? '')
 					? git('diff', '--name-only', releaseSha, run.head_sha, '--').split('\n').filter(Boolean)

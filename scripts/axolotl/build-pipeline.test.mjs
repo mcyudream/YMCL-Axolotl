@@ -206,7 +206,7 @@ test('macOS compiles architectures on native runners and only bundles the combin
 	assert.equal(upload.with['compression-level'], 0)
 	assert.equal(upload.if, "${{ !cancelled() && steps.compile.conclusion == 'success' }}")
 	const bundle = release.jobs['bundle-macos']
-	assert.deepEqual(bundle.needs, ['preflight', 'build-macos'])
+	assert.deepEqual(bundle.needs, ['preflight', 'build-macos', 'rebuild-macos-arm'])
 	assert.equal(bundle['runs-on'], 'macos-15-intel')
 	const setup = bundle.steps.find((step) => step.uses === './.github/actions/setup-release-build')
 	assert.equal(setup.with['bundle-only'], 'true')
@@ -352,6 +352,37 @@ test('recovery platform selection is explicit and normal releases still require 
 	assert.equal(selection.default, 'both')
 	assert.deepEqual(selection.options, ['both', 'yudream'])
 	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, "${{ inputs.update_platforms || 'both' }}")
+})
+
+test('ARM capacity recovery reuses completed platforms and verifies the cross-compiled architecture', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const arm = release.jobs['rebuild-macos-arm']
+	assert.equal(arm.if, 'inputs.rebuild_macos_arm')
+	assert.equal(arm['runs-on'], 'macos-15-intel')
+	assert.equal(arm.env.CARGO_PROFILE_RELEASE_LTO, 'true')
+	const commands = arm.steps.map((step) => step.run ?? '').join('\n')
+	assert.match(commands, /tauri build --no-bundle --target aarch64-apple-darwin/)
+	assert.match(commands, /lipo .* -verify_arch arm64/)
+	assert.match(commands, /verify-embedded-curseforge-key/)
+	const condition = release.jobs['bundle-macos'].if.slice(3, -3)
+	const canBundle = (result) =>
+		Function(
+			'inputs',
+			'needs',
+			'cancelled',
+			`return ${condition}`,
+		)(
+			{ rebuild_macos_arm: true },
+			{ preflight: { result: 'success' }, 'rebuild-macos-arm': { result } },
+			() => false,
+		)
+	assert.equal(canBundle('success'), true)
+	for (const result of ['failure', 'cancelled', 'skipped']) assert.equal(canBundle(result), false)
+	const download = release.jobs['bundle-macos'].steps.find(
+		(step) => step.name === 'Download the recovered ARM architecture',
+	)
+	assert.equal(download.with.name, 'macos-aarch64-apple-darwin')
+	assert.equal(download.with.path, 'macos-binaries/macos-aarch64-apple-darwin')
 })
 
 test('stable website metadata updates the default branch from a tag checkout', async () => {
