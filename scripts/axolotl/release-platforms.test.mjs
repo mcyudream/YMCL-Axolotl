@@ -271,3 +271,51 @@ test('downloads are rejected when the digest or expected size is wrong', async (
 		await rm(directory, { recursive: true, force: true })
 	}
 })
+
+test('network failures report the site, request, nested cause and elapsed time without keys', async () => {
+	const mock = platformMock()
+	const environment = { YUDREAM_API_KEY: 'test-private-key', SWUSTMC_API_KEY: 'test-swustmc' }
+	const fetcher = async (url, options) => {
+		if (url.startsWith(updatePlatforms[0].origin)) {
+			throw new TypeError('fetch failed', {
+				cause: Object.assign(new Error('connection timed out test-private-key'), {
+					code: 'UND_ERR_CONNECT_TIMEOUT',
+				}),
+			})
+		}
+		return mock.fetcher(url, options)
+	}
+	await assert.rejects(publishPlatforms(release, environment, fetcher), (error) => {
+		assert.match(
+			error.message,
+			/www\.yudream\.online: GET \/api\/plugins\/ymcl-content\/admin\/update\/releases\//,
+		)
+		assert.match(error.message, /failed after \d+ms/)
+		assert.match(error.message, /UND_ERR_CONNECT_TIMEOUT/)
+		assert.doesNotMatch(error.message, /test-private-key/)
+		return true
+	})
+	assert.equal(mock.state.get(updatePlatforms[1].origin).enabled, true)
+	assert.equal(mock.state.has(updatePlatforms[0].origin), false)
+})
+
+test('download failures identify the GitHub filename and preserve the transport error code', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-download-network-test-'))
+	try {
+		await assert.rejects(
+			downloadArtifact(artifacts[0], directory, async () => {
+				throw new TypeError('fetch failed', {
+					cause: Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }),
+				})
+			}),
+			(error) => {
+				assert.ok(error.message.includes(artifacts[0].filename))
+				assert.match(error.message, /GitHub download.*failed after \d+ms/)
+				assert.match(error.message, /ECONNRESET/)
+				return true
+			},
+		)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})

@@ -21,6 +21,22 @@ const expectedTargets = [
 	'windows-x86_64',
 ]
 
+function failureDetails(error, secrets = []) {
+	const seen = new Set()
+	const details = []
+	function visit(value) {
+		if (!value || seen.has(value) || seen.size >= 8) return
+		seen.add(value)
+		let message = `${value.name ?? 'Error'}${value.code ? ` [${value.code}]` : ''}: ${value.message ?? String(value)}`
+		for (const secret of secrets.filter(Boolean)) message = message.replaceAll(secret, '[redacted]')
+		details.push(message)
+		visit(value.cause)
+		for (const nested of value.errors ?? []) visit(nested)
+	}
+	visit(error)
+	return details.join(' <- ')
+}
+
 export async function prepareRelease(catalog, release, tag, signaturesDirectory) {
 	const version = tag.replace(/^v/, '')
 	if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
@@ -111,29 +127,42 @@ function matchesArtifact(actual, expected) {
 }
 
 export async function downloadArtifact(artifact, directory, fetcher = fetch) {
-	const response = await fetcher(artifact.downloadUrl, { signal: AbortSignal.timeout(10 * 60_000) })
-	if (!response.ok || !response.body)
-		throw new Error(`Download failed for ${artifact.filename}: HTTP ${response.status}`)
-	const destination = join(directory, artifact.filename)
-	const hash = createHash('sha256')
-	let bytes = 0
-	await pipeline(
-		Readable.fromWeb(response.body),
-		new Transform({
-			transform(chunk, _encoding, callback) {
-				bytes += chunk.length
-				if (bytes > artifact.size)
-					return callback(new Error(`Oversized artifact ${artifact.filename}`))
-				hash.update(chunk)
-				callback(null, chunk)
-			},
-		}),
-		createWriteStream(destination),
-	)
-	if (bytes !== artifact.size || hash.digest('hex') !== artifact.sha256) {
-		throw new Error(`Digest or size mismatch for ${artifact.filename}`)
+	const started = Date.now()
+	console.log(`[GitHub] Downloading ${artifact.filename} (${artifact.size} bytes)`)
+	try {
+		const response = await fetcher(artifact.downloadUrl, {
+			signal: AbortSignal.timeout(10 * 60_000),
+		})
+		if (!response.ok || !response.body)
+			throw new Error(`Download failed for ${artifact.filename}: HTTP ${response.status}`)
+		const destination = join(directory, artifact.filename)
+		const hash = createHash('sha256')
+		let bytes = 0
+		await pipeline(
+			Readable.fromWeb(response.body),
+			new Transform({
+				transform(chunk, _encoding, callback) {
+					bytes += chunk.length
+					if (bytes > artifact.size)
+						return callback(new Error(`Oversized artifact ${artifact.filename}`))
+					hash.update(chunk)
+					callback(null, chunk)
+				},
+			}),
+			createWriteStream(destination),
+		)
+		if (bytes !== artifact.size || hash.digest('hex') !== artifact.sha256) {
+			throw new Error(`Digest or size mismatch for ${artifact.filename}`)
+		}
+		console.log(
+			`[GitHub] Verified SHA-256 and size of ${artifact.filename} in ${Date.now() - started}ms`,
+		)
+		return destination
+	} catch (error) {
+		throw new Error(
+			`GitHub download ${artifact.filename} failed after ${Date.now() - started}ms: ${failureDetails(error)}`,
+		)
 	}
-	return destination
 }
 
 export async function publishPlatform(platform, apiKey, release, artifactFile, fetcher = fetch) {
@@ -148,25 +177,36 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		{ method = 'GET', body, publicRequest = false, optional = false } = {},
 	) {
 		const multipart = body instanceof FormData
-		const response = await fetcher(`${origin}${path}`, {
-			method,
-			headers: {
-				Accept: 'application/json',
-				...(!publicRequest ? { 'X-API-Key': apiKey } : {}),
-				...(body && !multipart ? { 'Content-Type': 'application/json' } : {}),
-			},
-			...(body ? { body: multipart ? body : JSON.stringify(body) } : {}),
-			signal: AbortSignal.timeout(multipart ? 10 * 60_000 : 30_000),
-			redirect: 'error',
-		})
-		if (optional && response.status === 404) return null
-		if (!response.ok || response.status === 204)
-			throw new Error(`${origin}: ${method} ${path} returned HTTP ${response.status}`)
-		const data = await response.json()
-		if (data.code !== undefined && data.code !== 200 && data.code !== 0) {
-			throw new Error(`${origin}: API rejected ${method} ${path}`)
+		const started = Date.now()
+		const context = `${origin}: ${method} ${path}`
+		console.log(`[${new URL(origin).hostname}] ${method} ${path}`)
+		try {
+			const response = await fetcher(`${origin}${path}`, {
+				method,
+				headers: {
+					Accept: 'application/json',
+					...(!publicRequest ? { 'X-API-Key': apiKey } : {}),
+					...(body && !multipart ? { 'Content-Type': 'application/json' } : {}),
+				},
+				...(body ? { body: multipart ? body : JSON.stringify(body) } : {}),
+				signal: AbortSignal.timeout(multipart ? 10 * 60_000 : 30_000),
+				redirect: 'error',
+			})
+			console.log(
+				`[${new URL(origin).hostname}] HTTP ${response.status} in ${Date.now() - started}ms`,
+			)
+			if (optional && response.status === 404) return null
+			if (!response.ok || response.status === 204) throw new Error(`HTTP ${response.status}`)
+			const data = await response.json()
+			if (data.code !== undefined && data.code !== 200 && data.code !== 0) {
+				throw new Error('API rejected request')
+			}
+			return data.data ?? data
+		} catch (error) {
+			throw new Error(
+				`${context} failed after ${Date.now() - started}ms: ${failureDetails(error, [apiKey])}`,
+			)
 		}
-		return data.data ?? data
 	}
 	const existing = await request(releasePath, { optional: true })
 	if (existing?.enabled) {
@@ -251,9 +291,16 @@ export async function publishPlatforms(release, environment = process.env, fetch
 				publishPlatform(platform, environment[platform.secret], release, artifactFile, fetcher),
 			),
 		)
-		const errors = results
-			.filter((result) => result.status === 'rejected')
-			.map((result) => result.reason.message)
+		const errors = results.flatMap((result, index) =>
+			result.status === 'rejected'
+				? [
+						`${updatePlatforms[index].origin}: ${failureDetails(
+							result.reason,
+							updatePlatforms.map((platform) => environment[platform.secret]),
+						)}`,
+					]
+				: [],
+		)
 		if (errors.length) throw new Error(errors.join('\n'))
 	} finally {
 		await rm(directory, { recursive: true, force: true })

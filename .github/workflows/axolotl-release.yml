@@ -14,6 +14,11 @@ on:
         description: Failed release run with successful native macOS builds
         required: true
         type: string
+      publish_only:
+        description: Only synchronize an existing complete release; skip macOS rebundling
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -52,6 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          PUBLISH_ONLY: ${{ inputs.publish_only && 'true' || 'false' }}
         run: node scripts/axolotl/validate-release-recovery.mjs
 
       - name: Require production build and publish secrets
@@ -96,6 +102,7 @@ jobs:
         run: pnpm turbo run build --filter=@modrinth/app-frontend
 
       - name: Prepare draft release
+        if: ${{ !inputs.publish_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -339,7 +346,7 @@ jobs:
   bundle-macos:
     name: Bundle and publish macOS universal
     needs: [preflight, build-macos]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['build-macos'].result == 'success' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !inputs.publish_only && needs.preflight.result == 'success' && (needs['build-macos'].result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: macos-15-intel
     env:
       SQLX_OFFLINE: true
@@ -408,7 +415,7 @@ jobs:
   verify-and-publish:
     name: Verify complete update and publish mirrors
     needs: [preflight, build, bundle-macos]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs['bundle-macos'].result == 'success' && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs['bundle-macos'].result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_only && needs['bundle-macos'].result == 'skipped')) && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
@@ -445,12 +452,20 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release-check/release.json
 
       - name: Generate update manifest
+        if: ${{ !inputs.publish_only }}
         run: node scripts/axolotl/create-update-manifest.mjs release-check/release.json release-check/signatures "${RELEASE_TAG}" release-check/latest.json
+
+      - name: Download existing update manifest
+        if: inputs.publish_only
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${RELEASE_TAG}" --pattern latest.json --dir release-check
 
       - name: Verify update manifest
         run: node scripts/axolotl/verify-update-manifest.mjs release-check/latest.json "${RELEASE_TAG}"
 
       - name: Upload update manifest
+        if: ${{ !inputs.publish_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${RELEASE_TAG}" release-check/latest.json --clobber

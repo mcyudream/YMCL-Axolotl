@@ -279,6 +279,49 @@ test('manual recovery validates source artifacts and skips successful platform c
 	assert.doesNotMatch(mirror.run, /push --force/)
 })
 
+test('final synchronization skips macOS rebundling and preserves the published manifest', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	assert.equal(release.on.workflow_dispatch.inputs.publish_only.type, 'boolean')
+	assert.equal(release.on.workflow_dispatch.inputs.publish_only.default, false)
+	const evaluate = (condition, publishOnly, preflight, bundle, event = 'workflow_dispatch') =>
+		Function(
+			'inputs',
+			'needs',
+			'github',
+			'cancelled',
+			`return ${condition.slice(3, -3)}`,
+		)(
+			{ publish_only: publishOnly },
+			{
+				preflight: { result: preflight },
+				build: { result: 'skipped' },
+				'build-macos': { result: 'skipped' },
+				'bundle-macos': { result: bundle },
+			},
+			{ event_name: event },
+			() => false,
+		)
+	const bundle = release.jobs['bundle-macos'].if
+	const finalize = release.jobs['verify-and-publish'].if
+	assert.equal(evaluate(bundle, true, 'success', 'skipped'), false)
+	assert.equal(evaluate(bundle, false, 'success', 'skipped'), true)
+	assert.equal(evaluate(finalize, true, 'success', 'skipped'), true)
+	assert.equal(evaluate(finalize, false, 'success', 'skipped'), false)
+	assert.equal(evaluate(finalize, true, 'failure', 'skipped'), false)
+	assert.equal(evaluate(finalize, true, 'success', 'failure'), false)
+	assert.equal(evaluate(finalize, true, 'success', 'skipped', 'push'), false)
+	const steps = release.jobs['verify-and-publish'].steps
+	for (const name of ['Generate update manifest', 'Upload update manifest'])
+		assert.equal(steps.find((step) => step.name === name).if, '${{ !inputs.publish_only }}')
+	const download = steps.find((step) => step.name === 'Download existing update manifest')
+	assert.equal(download.if, 'inputs.publish_only')
+	assert.match(download.run, /--pattern latest\.json/)
+	const validation = release.jobs.preflight.steps.find((step) =>
+		step.run?.includes('validate-release-recovery.mjs'),
+	)
+	assert.equal(validation.env.PUBLISH_ONLY, "${{ inputs.publish_only && 'true' || 'false' }}")
+})
+
 test('staging preserves signed updater bytes across rebundling and keeps universal asset names', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-staging-'))
 	try {

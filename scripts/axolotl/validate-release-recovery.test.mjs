@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { validateRecoveryInputs, validateRecoverySource } from './validate-release-recovery.mjs'
+import {
+	validatePublishedRelease,
+	validateRecoveryInputs,
+	validateRecoverySource,
+} from './validate-release-recovery.mjs'
 
 function fixture() {
 	const releaseSha = 'a'.repeat(40)
@@ -40,6 +44,95 @@ function fixture() {
 
 test('recovery accepts verified native artifacts and only packaging workflow changes', () => {
 	assert.doesNotThrow(() => validateRecoverySource(fixture()))
+	const source = fixture()
+	source.changedPaths.push('scripts/axolotl/publish-ymcl-platforms.mjs')
+	assert.doesNotThrow(() => validateRecoverySource(source))
+})
+
+function publishedRelease() {
+	const tag = 'v2.0.0-beta.3'
+	const names = [
+		'latest.json',
+		'YMCL-2.0.0-beta.3-1.aarch64.rpm',
+		'YMCL-2.0.0-beta.3-1.aarch64.rpm.sig',
+		'YMCL-2.0.0-beta.3-1.x86_64.rpm',
+		'YMCL-2.0.0-beta.3-1.x86_64.rpm.sig',
+		'YMCL_2.0.0-beta.3_aarch64.AppImage',
+		'YMCL_2.0.0-beta.3_aarch64.AppImage.sig',
+		'YMCL_2.0.0-beta.3_aarch64.AppImage.tar.gz',
+		'YMCL_2.0.0-beta.3_aarch64.AppImage.tar.gz.sig',
+		'YMCL_2.0.0-beta.3_amd64.AppImage',
+		'YMCL_2.0.0-beta.3_amd64.AppImage.sig',
+		'YMCL_2.0.0-beta.3_amd64.AppImage.tar.gz',
+		'YMCL_2.0.0-beta.3_amd64.AppImage.tar.gz.sig',
+		'YMCL_2.0.0-beta.3_amd64.deb',
+		'YMCL_2.0.0-beta.3_amd64.deb.sig',
+		'YMCL_2.0.0-beta.3_arm64.deb',
+		'YMCL_2.0.0-beta.3_arm64.deb.sig',
+		'YMCL_2.0.0-beta.3_universal.dmg',
+		'YMCL_2.0.0-beta.3_x64-setup.nsis.zip',
+		'YMCL_2.0.0-beta.3_x64-setup.nsis.zip.sig',
+		'YMCL_2.0.0-beta.3_x64_modern-setup.exe',
+		'YMCL_2.0.0-beta.3_x64_modern-setup.exe.sig',
+		'YMCL_2.0.0-beta.3_x64_nsis-setup.exe',
+		'YMCL_2.0.0-beta.3_x64_portable.zip',
+		'YMCL_universal.app.tar.gz',
+		'YMCL_universal.app.tar.gz.sig',
+	]
+	return {
+		tag_name: tag,
+		draft: false,
+		published_at: '2026-11-03T00:20:07Z',
+		assets: names.map((name) => ({
+			name,
+			size: 100,
+			state: 'uploaded',
+			digest: `sha256:${'b'.repeat(64)}`,
+			browser_download_url: `https://github.com/owner/YMCL/releases/download/${tag}/${name}`,
+		})),
+	}
+}
+
+test('final synchronization requires all published installers, updates, signatures and manifest', () => {
+	const source = fixture()
+	source.publishOnly = true
+	source.artifacts = []
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	const published = publishedRelease()
+	const validate = (value) => validatePublishedRelease(value, source.tag, source.repository)
+	assert.doesNotThrow(() => validate(published))
+	for (const removed of published.assets) {
+		assert.throws(
+			() =>
+				validate({ ...published, assets: published.assets.filter((asset) => asset !== removed) }),
+			/missing/,
+		)
+	}
+	for (const patch of [{ tag_name: 'v2.0.0-beta.2' }, { draft: true }, { published_at: null }])
+		assert.throws(() => validate({ ...published, ...patch }), /existing published release/)
+	for (const patch of [
+		{ size: 0 },
+		{ state: 'new' },
+		{ digest: null },
+		{ browser_download_url: 'https://untrusted.example/latest.json' },
+	]) {
+		assert.throws(
+			() =>
+				validate({
+					...published,
+					assets: [{ ...published.assets[0], ...patch }, ...published.assets.slice(1)],
+				}),
+			/Invalid existing release asset/,
+		)
+	}
+	assert.throws(
+		() => validate({ ...published, assets: [...published.assets, published.assets[0]] }),
+		/Invalid existing release asset/,
+	)
+	const failedBuild = fixture()
+	failedBuild.publishOnly = true
+	failedBuild.jobs[1].conclusion = 'failure'
+	assert.throws(() => validateRecoverySource(failedBuild), /successful Build/)
 })
 
 test('recovery rejects invalid tag and run inputs', () => {
@@ -88,9 +181,15 @@ test('recovery refuses incomplete, expired or substituted architecture artifacts
 		{ expired: true },
 		{ size_in_bytes: 0 },
 		{ digest: null },
-		{ workflow_run: { id: 124, head_sha: 'a'.repeat(40), repository_id: 1, head_repository_id: 1 } },
-		{ workflow_run: { id: 123, head_sha: 'c'.repeat(40), repository_id: 1, head_repository_id: 1 } },
-		{ workflow_run: { id: 123, head_sha: 'a'.repeat(40), repository_id: 2, head_repository_id: 2 } },
+		{
+			workflow_run: { id: 124, head_sha: 'a'.repeat(40), repository_id: 1, head_repository_id: 1 },
+		},
+		{
+			workflow_run: { id: 123, head_sha: 'c'.repeat(40), repository_id: 1, head_repository_id: 1 },
+		},
+		{
+			workflow_run: { id: 123, head_sha: 'a'.repeat(40), repository_id: 2, head_repository_id: 2 },
+		},
 	]) {
 		const source = fixture()
 		Object.assign(source.artifacts[0], patch)
