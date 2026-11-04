@@ -646,7 +646,7 @@ async function checkUpdates() {
 		setTimeout(checkUpdates, 5 * 60 * 1000)
 		return
 	}
-	if (!offline.value) {
+	if (!browserOffline.value) {
 		await performUpdateCheck().catch((error) => {
 			console.warn('Failed to check for launcher updates', error)
 		})
@@ -2537,7 +2537,7 @@ function showDelayedUpdatePopup() {
 
 let lastUpdateChannel = 'release'
 
-async function performUpdateCheck() {
+async function performUpdateCheck({ manual = false } = {}) {
 	const channel = await getUpdateChannel()
 	const preferences = await getUpdatePreferences()
 	updatesPaused.value = preferences.updatesPaused
@@ -2559,6 +2559,7 @@ async function performUpdateCheck() {
 
 	const publishedAt = Date.parse(update.publishedAt ?? '')
 	if (
+		!manual &&
 		channel === 'release' &&
 		!preferences.immediateUpdateFetch &&
 		!update.forceUpdate &&
@@ -2614,11 +2615,11 @@ async function manualUpdateCheck() {
 	updatesEnabled.value = true
 	updatesPaused.value = (await getUpdatePreferences()).updatesPaused
 	if (updatesPaused.value) return 'paused'
-	if (offline.value) {
+	if (browserOffline.value) {
 		return 'offline'
 	}
 
-	return await performUpdateCheck()
+	return await performUpdateCheck({ manual: true })
 }
 
 async function downloadAvailableUpdate() {

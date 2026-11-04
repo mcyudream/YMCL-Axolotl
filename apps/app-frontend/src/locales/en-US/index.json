@@ -8091,13 +8091,16 @@
 		"message": "Domains"
 	},
 	"app.settings.updates.announcements.description": {
-		"message": "See what changed in this version and browse previous releases."
+		"message": "See what changed in your installed version and browse other published releases."
 	},
 	"app.settings.updates.announcements.empty": {
 		"message": "No bundled update announcements are available."
 	},
-	"app.settings.updates.announcements.history": {
-		"message": "Version history"
+	"app.settings.updates.announcements.other-releases": {
+		"message": "Other published releases"
+	},
+	"app.settings.updates.announcements.latest-release": {
+		"message": "Latest release"
 	},
 	"app.settings.updates.announcements.title": {
 		"message": "Update announcements"
@@ -8223,7 +8226,7 @@
 		"message": "Get updates as soon as they are available"
 	},
 	"app.settings.updates.immediate-fetch-description": {
-		"message": "After the latest stable changes and fixes are released, be among the first to receive them."
+		"message": "Automatically receive stable updates immediately instead of waiting 24 hours. Manual update checks always show available updates."
 	},
 	"app.settings.updates.immediate-fetch.beta-description": {
 		"message": "Beta updates are always available immediately."

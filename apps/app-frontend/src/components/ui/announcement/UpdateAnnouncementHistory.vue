@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarIcon, HistoryIcon } from '@modrinth/assets'
+import { CalendarIcon } from '@modrinth/assets'
 import { Accordion, defineMessages, TagItem, useVIntl } from '@modrinth/ui'
 import { computed, onMounted, ref } from 'vue'
 
@@ -34,11 +34,15 @@ const messages = defineMessages({
 	},
 	description: {
 		id: 'app.settings.updates.announcements.description',
-		defaultMessage: 'See what changed in this version and browse previous releases.',
+		defaultMessage: 'See what changed in your installed version and browse other published releases.',
 	},
-	history: {
-		id: 'app.settings.updates.announcements.history',
-		defaultMessage: 'Version history',
+	otherReleases: {
+		id: 'app.settings.updates.announcements.other-releases',
+		defaultMessage: 'Other published releases',
+	},
+	latestRelease: {
+		id: 'app.settings.updates.announcements.latest-release',
+		defaultMessage: 'Latest release',
 	},
 	empty: {
 		id: 'app.settings.updates.announcements.empty',
@@ -76,7 +80,9 @@ const currentAnnouncement = computed(() => {
 	return getAnnouncementByVersion(props.currentVersion)
 })
 
-const historyAnnouncements = computed(() =>
+const latestAnnouncement = computed(() => launcherAnnouncements.value[0])
+
+const otherAnnouncements = computed(() =>
 	launcherAnnouncements.value.filter(
 		(announcement) => announcement.id !== currentAnnouncement.value?.id,
 	),
@@ -139,19 +145,18 @@ onMounted(async () => {
 		</div>
 
 		<div class="flex min-w-0 flex-col gap-3">
-			<h3 class="m-0 flex items-center gap-2 text-base font-semibold text-contrast">
-				<HistoryIcon aria-hidden="true" class="size-4 text-secondary" />
-				{{ formatMessage(messages.history) }}
+			<h3 class="m-0 text-base font-semibold text-contrast">
+				{{ formatMessage(messages.otherReleases) }}
 			</h3>
 			<p v-if="loadingRemote" class="ymcl-muted m-0">
 				{{ formatMessage(messages.loading) }}
 			</p>
-			<p v-else-if="historyAnnouncements.length === 0" class="m-0 text-sm text-secondary">
+			<p v-else-if="otherAnnouncements.length === 0" class="m-0 text-sm text-secondary">
 				{{ formatMessage(messages.empty) }}
 			</p>
 			<div v-else class="flex min-w-0 flex-col gap-2">
 				<Accordion
-					v-for="announcement in historyAnnouncements"
+					v-for="announcement in otherAnnouncements"
 					:key="announcement.id"
 					class="update-announcement-history-item hover:border-surface-4 focus-within:border-surface-4"
 					button-class="group flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent px-4 py-3 text-left"
@@ -166,6 +171,12 @@ onMounted(async () => {
 								</span>
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-secondary">
 									<TagItem class="px-1.5 py-0.5 text-xs">v{{ announcement.version }}</TagItem>
+									<TagItem
+										v-if="announcement.id === latestAnnouncement?.id"
+										class="px-1.5 py-0.5 text-xs"
+									>
+										{{ formatMessage(messages.latestRelease) }}
+									</TagItem>
 									<span v-if="announcement.publishedAt" class="flex items-center gap-1">
 										<CalendarIcon aria-hidden="true" class="size-3.5" />
 										<time :datetime="announcement.publishedAt">{{ announcement.publishedAt }}</time>

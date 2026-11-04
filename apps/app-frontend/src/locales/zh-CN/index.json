@@ -8105,13 +8105,16 @@
 		"message": "域"
 	},
 	"app.settings.updates.announcements.description": {
-		"message": "查看当前版本的更新内容和历史版本公告。"
+		"message": "查看已安装版本的更新内容和其他已发布版本的公告。"
 	},
 	"app.settings.updates.announcements.empty": {
 		"message": "当前没有内置的更新公告。"
 	},
-	"app.settings.updates.announcements.history": {
-		"message": "历史版本"
+	"app.settings.updates.announcements.other-releases": {
+		"message": "其他已发布版本"
+	},
+	"app.settings.updates.announcements.latest-release": {
+		"message": "最新发布"
 	},
 	"app.settings.updates.announcements.title": {
 		"message": "更新公告"
@@ -8237,7 +8240,7 @@
 		"message": "最新更新可用后立即获取"
 	},
 	"app.settings.updates.immediate-fetch-description": {
-		"message": "在推出最新的稳定更改、修复后，成为第一批获得这些更新的用户。"
+		"message": "立即自动获取正式版更新，无需等待 24 小时。手动检查更新始终显示可用更新。"
 	},
 	"app.settings.updates.immediate-fetch.beta-description": {
 		"message": "Beta 更新始终立即可用。"
