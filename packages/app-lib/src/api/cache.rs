@@ -154,6 +154,9 @@ pub async fn purge_cache_types(
 ) -> crate::Result<()> {
     let state = crate::State::get().await?;
     CachedEntry::purge_cache_types(cache_types, &state.pool).await?;
+    if cache_types.contains(&CacheValueType::LoaderManifest) {
+        crate::api::ymcl::mip::mirrors::clear_lookup_cache();
+    }
 
     Ok(())
 }

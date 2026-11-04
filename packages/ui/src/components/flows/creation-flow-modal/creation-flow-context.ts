@@ -434,7 +434,6 @@ export function createCreationFlowContext(
 	}
 
 	async function fetchPaperSupportedVersions() {
-		if (paperSupportedVersions.value) return
 		loaderMetadataStatus.value.paper = 'loading'
 		try {
 			paperSupportedVersions.value = await queryClient.fetchQuery({
@@ -452,7 +451,6 @@ export function createCreationFlowContext(
 	}
 
 	async function fetchPurpurSupportedVersions() {
-		if (purpurSupportedVersions.value) return
 		loaderMetadataStatus.value.purpur = 'loading'
 		try {
 			purpurSupportedVersions.value = await queryClient.fetchQuery({
@@ -520,6 +518,10 @@ export function createCreationFlowContext(
 		selectedLoaderVersion.value = null
 		selectedAdjuncts.value = []
 		showSnapshots.value = false
+		loaderVersionsCache.value = {}
+		loaderMetadataStatus.value = {}
+		paperSupportedVersions.value = null
+		purpurSupportedVersions.value = null
 		modpackSelection.value = null
 		modpackFile.value = null
 		modpackFilePath.value = null

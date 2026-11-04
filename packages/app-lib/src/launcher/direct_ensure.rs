@@ -320,6 +320,72 @@ async fn file_is_current(
     }
 }
 
+/// Restores installer-embedded or generated classpath jars from YMCL's
+/// managed library cache into the linked installation.
+async fn restore_local_classpath_library(
+    st: &State,
+    direct: &DirectLinkedLaunch,
+    library: &LinkedLibrary,
+) -> crate::Result<bool> {
+    let lib = &library.library;
+    if !lib.include_in_classpath
+        || is_native_only_library(lib)
+        || library.hint.as_deref() == Some("local")
+    {
+        return Ok(false);
+    }
+    let relative = library.classpath_relative_path()?;
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    let source_relative = daedalus::get_path_from_artifact(&lib.name)?;
+    if !safe_maven_relative_path(&relative)
+        || !safe_maven_relative_path(&source_relative)
+    {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "Refusing unsafe library path for {}",
+            lib.name
+        ))
+        .into());
+    }
+    let declared = lib
+        .downloads
+        .as_ref()
+        .and_then(|downloads| downloads.artifact.as_ref());
+    let sha1 = declared
+        .and_then(|artifact| non_empty(&artifact.sha1))
+        .or_else(|| legacy_library_sha1(lib).map(str::to_string));
+    let size = declared
+        .filter(|artifact| artifact.size > 0)
+        .map(|artifact| artifact.size as u64);
+    let destination = direct.library_path(library)?;
+    if file_is_current(&destination, sha1.as_deref(), size).await {
+        return Ok(false);
+    }
+    let source = st.directories.libraries_dir().join(source_relative);
+    if !source.is_file() {
+        return Ok(false);
+    }
+    let sha1 = match sha1 {
+        Some(sha1) => sha1,
+        None => fetch::sha1_file_async(&source).await?.1,
+    };
+    let restored = super::local_artifact::copy_verified(
+        &source,
+        &destination,
+        Some(&sha1),
+        size,
+        &st.io_semaphore,
+    )
+    .await?;
+    if restored {
+        tracing::info!(
+            library = %lib.name,
+            destination = %destination.display(),
+            "Restored local library into the linked installation"
+        );
+    }
+    Ok(restored)
+}
+
 /// Makes sure one planned file exists in the linked installation. Returns
 /// `true` when it had to be downloaded.
 async fn ensure_file(st: &State, plan: &LinkedFilePlan) -> crate::Result<bool> {
@@ -636,6 +702,7 @@ pub(crate) async fn ensure_direct_launch_dependencies(
             continue;
         }
         if !library.library.downloadable {
+            restore_local_classpath_library(st, direct, library).await?;
             continue;
         }
         if let Some(plan) = linked_classpath_plan(direct, library)? {
@@ -1185,6 +1252,144 @@ mod tests {
     // -----------------------------------------------------------------------
     // Ensure stage (real IO against a local fixture server)
     // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn local_library_restore_repairs_cleanroom_linked_classpath() {
+        let (_state_temp, state) = ensure_test_state().await;
+        let root = tempdir().unwrap();
+        let direct = direct_for(root.path());
+        let body = b"embedded-cleanroom-0.4.0";
+        let relative = "com/cleanroommc/cleanroom/0.4.0/cleanroom-0.4.0.jar";
+        let source = state.directories.libraries_dir().join(relative);
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, body).unwrap();
+        let library = linked_library(json!({
+            "name": "com.cleanroommc:cleanroom:0.4.0",
+            "downloadable": false,
+            "downloads": {"artifact": {
+                "path": relative,
+                "sha1": sha1_hex(body), "size": body.len(), "url": ""
+            }}
+        }));
+
+        ensure_direct_launch_dependencies(
+            &state,
+            &direct,
+            std::slice::from_ref(&library),
+            &minimal_version_info(),
+            std::env::consts::ARCH,
+            true,
+        )
+        .await
+        .unwrap();
+
+        let destination = direct.library_path(&library).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), body);
+        assert!(!fetch::suffixed_path(&destination, ".part").exists());
+        let classpath = super::super::args::get_linked_class_paths(
+            &direct,
+            &[library],
+            &[],
+            std::env::consts::ARCH,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            classpath,
+            io::canonicalize(destination).unwrap().to_string_lossy()
+        );
+    }
+
+    #[tokio::test]
+    async fn local_library_restore_requires_the_exact_version_and_checksum() {
+        let (_state_temp, state) = ensure_test_state().await;
+        let root = tempdir().unwrap();
+        let direct = direct_for(root.path());
+        let body = b"embedded-cleanroom-0.4.0";
+        let relative = "com/cleanroommc/cleanroom/0.4.0/cleanroom-0.4.0.jar";
+        let library = linked_library(json!({
+            "name": "com.cleanroommc:cleanroom:0.4.0",
+            "downloadable": false,
+            "downloads": {"artifact": {
+                "path": relative,
+                "sha1": sha1_hex(body), "size": body.len(), "url": ""
+            }}
+        }));
+        let other_version = state.directories.libraries_dir().join(
+            "com/cleanroommc/cleanroom/0.7.14-alpha/cleanroom-0.7.14-alpha.jar",
+        );
+        std::fs::create_dir_all(other_version.parent().unwrap()).unwrap();
+        std::fs::write(&other_version, body).unwrap();
+        assert!(
+            !restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+
+        let source = state.directories.libraries_dir().join(relative);
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, vec![b'x'; body.len()]).unwrap();
+        let destination = direct.library_path(&library).unwrap();
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::write(&destination, b"existing-library").unwrap();
+        assert!(
+            !restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"existing-library");
+        assert!(!fetch::suffixed_path(&destination, ".part").exists());
+
+        std::fs::write(&source, body).unwrap();
+        assert!(
+            restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), body);
+        std::fs::write(&source, b"corrupt-managed-copy").unwrap();
+        assert!(
+            !restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn local_library_restore_preserves_mmc_local_libraries() {
+        let (_state_temp, state) = ensure_test_state().await;
+        let root = tempdir().unwrap();
+        let direct = direct_for(root.path());
+        let body = b"locally-generated-jar";
+        let source = state
+            .directories
+            .libraries_dir()
+            .join("com/example/generated/1/generated-1.jar");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, body).unwrap();
+        let mut library = linked_library(json!({
+            "name": "com.example:generated:1",
+            "downloadable": false
+        }));
+        assert!(
+            restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            std::fs::read(direct.library_path(&library).unwrap()).unwrap(),
+            body
+        );
+
+        library.hint = Some("local".to_string());
+        assert!(
+            !restore_local_classpath_library(&state, &direct, &library)
+                .await
+                .unwrap()
+        );
+        assert!(!direct.library_path(&library).unwrap().exists());
+    }
 
     #[tokio::test]
     async fn missing_library_is_downloaded_into_linked_installation() {

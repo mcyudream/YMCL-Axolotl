@@ -28,6 +28,10 @@ static LOOKUP_CACHE: LazyLock<
     Mutex<HashMap<String, (Option<MirrorHit>, Instant)>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+pub(crate) fn clear_lookup_cache() {
+    LOOKUP_CACHE.lock().clear();
+}
+
 /// A mirror registration served by the adapter. `object_url` is absolute and
 /// regenerated per request origin by the adapter, so it stays reachable from
 /// wherever the lookup was made.

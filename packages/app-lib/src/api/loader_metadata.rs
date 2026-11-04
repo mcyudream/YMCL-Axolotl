@@ -1,6 +1,8 @@
 use crate::State;
 use crate::state::CachedLoaderManifest;
-use crate::util::fetch::{FetchSemaphore, fetch, fetch_json, fetch_official};
+use crate::util::fetch::{
+    FetchSemaphore, fetch_advanced, fetch_json, fetch_official,
+};
 use crate::util::io;
 use daedalus::minecraft::{
     Argument, ArgumentType, JavaVersion, Library, VersionType,
@@ -797,37 +799,98 @@ async fn fetch_cleanroom_manifest(
     fetch_semaphore: &FetchSemaphore,
     pool: &SqlitePool,
 ) -> crate::Result<Manifest> {
-    // CleanroomMC's own Maven is the primary source: it is the same channel
-    // their website links for downloads and, unlike the anonymous GitHub
-    // releases API, it has no per-IP rate limit to exhaust (which otherwise
-    // leaves the loader appearing unsupported).
-    match fetch_maven_metadata(
-        CLEANROOM_MAVEN_METADATA_URL,
-        fetch_semaphore,
-        pool,
-    )
-    .await
-    {
-        Ok(metadata) => return Ok(cleanroom_maven_manifest(metadata)),
-        Err(maven_error) => {
-            tracing::warn!(
-                error = %maven_error,
-                "CleanroomMC maven metadata failed; falling back to GitHub releases"
-            );
-        }
-    }
+    let maven = async {
+        fetch_maven_metadata(
+            CLEANROOM_MAVEN_METADATA_URL,
+            fetch_semaphore,
+            pool,
+        )
+        .await
+        .map(cleanroom_maven_manifest)
+    };
+    let github = async {
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let bytes =
+                crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
+                    CLEANROOM_RELEASES_URL,
+                    fetch_semaphore,
+                    pool,
+                )
+                .await?;
+            let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes)?;
+            Ok(cleanroom_manifest(releases))
+        })
+        .await
+        .map_err(|_| {
+            crate::ErrorKind::OtherError(
+                "Cleanroom GitHub release lookup timed out".to_string(),
+            )
+            .as_error()
+        })?
+    };
+    let (maven, github) = tokio::join!(maven, github);
+    reconcile_cleanroom_manifests(maven, github)
+}
 
-    // GitHub API metadata: prefer the domain CAS mirror (published admins
-    // push it) so version resolution works without GitHub access; the
-    // mirrored fetch itself falls back to the direct API.
-    let bytes = crate::api::ymcl::mip::mirrors::fetch_mirrored_or_direct(
-        CLEANROOM_RELEASES_URL,
-        fetch_semaphore,
-        pool,
-    )
-    .await?;
-    let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes)?;
-    Ok(cleanroom_manifest(releases))
+fn reconcile_cleanroom_manifests(
+    maven: crate::Result<Manifest>,
+    github: crate::Result<Manifest>,
+) -> crate::Result<Manifest> {
+    let maven = maven.and_then(validate_manifest);
+    let github = github.and_then(validate_manifest);
+    tracing::debug!(
+        maven_latest = maven
+            .as_ref()
+            .ok()
+            .and_then(|manifest| manifest.game_versions[0].loaders.first())
+            .map(|version| version.id.as_str()),
+        github_latest = github
+            .as_ref()
+            .ok()
+            .and_then(|manifest| manifest.game_versions[0].loaders.first())
+            .map(|version| version.id.as_str()),
+        "Comparing Cleanroom loader metadata sources"
+    );
+    let (mut manifest, github) = match (maven, github) {
+        (Ok(maven), Ok(github)) => (maven, Some(github)),
+        (Ok(maven), Err(error)) => {
+            tracing::warn!(error = %error, "Cleanroom GitHub releases unavailable; using Maven metadata");
+            (maven, None)
+        }
+        (Err(error), Ok(github)) => {
+            tracing::warn!(error = %error, "Cleanroom Maven metadata unavailable; using GitHub releases");
+            (github, None)
+        }
+        (Err(maven_error), Err(github_error)) => {
+            tracing::warn!(error = %github_error, "Cleanroom GitHub releases unavailable");
+            return Err(maven_error);
+        }
+    };
+    let loaders = &mut manifest.game_versions[0].loaders;
+    if let Some(github) = github {
+        let mut seen = loaders
+            .iter()
+            .map(|version| version.id.clone())
+            .collect::<HashSet<_>>();
+        loaders.extend(
+            github
+                .game_versions
+                .into_iter()
+                .flat_map(|version| version.loaders)
+                .filter(|version| seen.insert(version.id.clone())),
+        );
+    }
+    loaders.sort_by(|left, right| compare_versions(&right.id, &left.id));
+    tracing::info!(
+        loader_count = loaders.len(),
+        latest_version = loaders.first().map(|version| version.id.as_str()),
+        latest_stable = loaders
+            .iter()
+            .find(|version| version.stable)
+            .map(|version| version.id.as_str()),
+        "Resolved Cleanroom loader manifest"
+    );
+    Ok(manifest)
 }
 
 fn cleanroom_maven_manifest(metadata: MavenMetadata) -> Manifest {
@@ -1163,7 +1226,10 @@ fn grouped_manifest(
     }
 }
 
-fn scope_manifest(manifest: Manifest, game_version: &str) -> Manifest {
+pub(super) fn scope_manifest(
+    manifest: Manifest,
+    game_version: &str,
+) -> Manifest {
     let has_explicit_game_version = manifest
         .game_versions
         .iter()
@@ -1206,7 +1272,20 @@ async fn fetch_maven_metadata(
     fetch_semaphore: &FetchSemaphore,
     pool: &SqlitePool,
 ) -> crate::Result<MavenMetadata> {
-    let bytes = fetch(url, None, None, None, fetch_semaphore, pool).await?;
+    let bytes = fetch_advanced(
+        Method::GET,
+        url,
+        None,
+        None,
+        (url == CLEANROOM_MAVEN_METADATA_URL)
+            .then_some(("Cache-Control", "no-cache")),
+        None,
+        None,
+        None,
+        fetch_semaphore,
+        pool,
+    )
+    .await?;
     let xml = std::str::from_utf8(&bytes).map_err(|error| {
         crate::ErrorKind::OtherError(format!(
             "Maven metadata at {url} was not UTF-8: {error}"
@@ -3030,6 +3109,109 @@ mod tests {
         assert!(!loaders[0].stable);
         assert!(loaders[1].stable);
         assert!(!loaders[2].stable);
+    }
+
+    fn cleanroom_maven_fixture(versions: &[&str]) -> Manifest {
+        cleanroom_maven_manifest(MavenMetadata {
+            versioning: MavenVersioning {
+                release: String::new(),
+                versions: MavenVersions {
+                    values: versions
+                        .iter()
+                        .map(|version| version.to_string())
+                        .collect(),
+                },
+            },
+        })
+    }
+
+    fn cleanroom_github_fixture(versions: &[&str]) -> Manifest {
+        cleanroom_manifest(
+            versions
+                .iter()
+                .map(|version| GithubRelease {
+                    tag_name: version.to_string(),
+                    draft: false,
+                    prerelease: false,
+                    assets: vec![GithubReleaseAsset {
+                        name: format!("cleanroom-{version}-installer.jar"),
+                        browser_download_url: cleanroom_installer_url(version),
+                    }],
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn cleanroom_sources_merge_without_rolling_back_to_an_old_list() {
+        for (maven, github) in [
+            (
+                vec!["0.4.0", "0.3.15-alpha"],
+                vec!["0.7.14-alpha", "0.3.15-alpha"],
+            ),
+            (
+                vec!["0.7.14-alpha", "0.4.0", "0.3.15-alpha"],
+                vec!["0.3.15-alpha"],
+            ),
+        ] {
+            let manifest = reconcile_cleanroom_manifests(
+                Ok(cleanroom_maven_fixture(&maven)),
+                Ok(cleanroom_github_fixture(&github)),
+            )
+            .unwrap();
+            let loaders = &manifest.game_versions[0].loaders;
+            assert_eq!(
+                loaders
+                    .iter()
+                    .map(|version| version.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["0.7.14-alpha", "0.4.0", "0.3.15-alpha"]
+            );
+            assert!(!loaders[0].stable);
+            assert!(loaders[1].stable);
+            assert_eq!(
+                loaders[2].url,
+                cleanroom_maven_loader_version("0.3.15-alpha").unwrap().url
+            );
+            assert!(loaders.iter().all(|version| {
+                version.profile_source == LoaderProfileSource::Installer
+            }));
+        }
+    }
+
+    #[test]
+    fn cleanroom_source_failures_preserve_the_other_source() {
+        for maven_available in [false, true] {
+            for empty_response in [false, true] {
+                let available = Ok(cleanroom_maven_fixture(&["0.7.14-alpha"]));
+                let unavailable = if empty_response {
+                    Ok(cleanroom_github_fixture(&[]))
+                } else {
+                    Err(crate::ErrorKind::OtherError(
+                        "source unavailable".to_string(),
+                    )
+                    .as_error())
+                };
+                let (maven, github) = if maven_available {
+                    (available, unavailable)
+                } else {
+                    (unavailable, available)
+                };
+                let manifest =
+                    reconcile_cleanroom_manifests(maven, github).unwrap();
+                assert_eq!(
+                    manifest.game_versions[0].loaders[0].id,
+                    "0.7.14-alpha"
+                );
+            }
+        }
+        assert!(
+            reconcile_cleanroom_manifests(
+                Ok(cleanroom_maven_fixture(&[])),
+                Ok(cleanroom_github_fixture(&[])),
+            )
+            .is_err()
+        );
     }
 
     #[test]

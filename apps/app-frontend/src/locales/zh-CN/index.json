@@ -7870,6 +7870,18 @@
 	"app.settings.resources.purge-cache": {
 		"message": "清除缓存"
 	},
+	"app.settings.resources.purging-cache": {
+		"message": "正在清理缓存…"
+	},
+	"app.settings.resources.cache-purged": {
+		"message": "缓存已清理，下次使用时将重新获取数据。"
+	},
+	"app.settings.resources.cache-purge-failed": {
+		"message": "缓存清理失败，请重试。"
+	},
+	"app.settings.resources.cancel": {
+		"message": "取消"
+	},
 	"app.settings.resources.purge-confirm-description": {
 		"message": "继续后将清除全部缓存，这可能导致应用暂时变慢。"
 	},
