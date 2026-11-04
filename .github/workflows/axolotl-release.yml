@@ -24,14 +24,6 @@ on:
         required: false
         default: false
         type: boolean
-      update_platforms:
-        description: Update platforms to synchronize for this recovery
-        required: false
-        default: both
-        type: choice
-        options:
-          - both
-          - yudream
 
 permissions:
   contents: write
@@ -39,7 +31,6 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-  YMCL_UPDATE_PLATFORMS: ${{ inputs.update_platforms || 'both' }}
 
 concurrency:
   group: axolotl-release-${{ inputs.release_tag || github.ref_name }}
@@ -80,7 +71,6 @@ jobs:
           CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           YUDREAM_API_KEY: ${{ secrets.YUDREAM_API_KEY }}
-          SWUSTMC_API_KEY: ${{ secrets.SWUSTMC_API_KEY }}
         run: node scripts/axolotl/check-release-secrets.mjs
 
       - name: Read pinned Rust version
@@ -366,10 +356,9 @@ jobs:
             release-check/update-server-catalog.json
           node scripts/axolotl/create-update-server-catalog.test.mjs
 
-      - name: Upload and verify release on selected YMCL update platforms
+      - name: Upload and verify release on YuDream update platform
         env:
           YUDREAM_API_KEY: ${{ secrets.YUDREAM_API_KEY }}
-          SWUSTMC_API_KEY: ${{ secrets.SWUSTMC_API_KEY }}
         run: |
           node scripts/axolotl/publish-ymcl-platforms.mjs \
             release-check/update-server-catalog.json \

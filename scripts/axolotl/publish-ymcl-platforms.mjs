@@ -9,15 +9,7 @@ import { pathToFileURL } from 'node:url'
 
 export const updatePlatforms = [
 	{ origin: 'https://www.yudream.online', secret: 'YUDREAM_API_KEY' },
-	{ origin: 'https://www.swustmc.cn', secret: 'SWUSTMC_API_KEY' },
 ]
-
-export function selectedUpdatePlatforms(environment = process.env) {
-	const selection = environment.YMCL_UPDATE_PLATFORMS ?? 'both'
-	if (selection === 'both') return updatePlatforms
-	if (selection === 'yudream') return [updatePlatforms[0]]
-	throw new Error('Invalid update platform selection: expected both or yudream')
-}
 
 const pluginPath = '/api/plugins/ymcl-content'
 const expectedTargets = ['windows-x86_64']
@@ -282,7 +274,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 }
 
 export async function publishPlatforms(release, environment = process.env, fetcher = fetch) {
-	const platforms = selectedUpdatePlatforms(environment)
+	const platforms = updatePlatforms
 	const directory = await mkdtemp(join(tmpdir(), 'ymcl-release-upload-'))
 	const downloads = new Map()
 	const artifactFile = (artifact) => {

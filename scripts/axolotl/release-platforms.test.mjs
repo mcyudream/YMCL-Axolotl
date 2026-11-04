@@ -57,12 +57,11 @@ test('production secrets fail closed without printing secret values', () => {
 	)
 })
 
-test('single-site recovery keeps signing requirements and only requires its selected API key', () => {
+test('release publication requires signing and YuDream credentials only', () => {
 	const environment = {
 		CURSEFORGE_API_KEY: 'test-curseforge',
 		TAURI_SIGNING_PRIVATE_KEY: 'test-signing-key',
 		YUDREAM_API_KEY: 'test-yudream',
-		YMCL_UPDATE_PLATFORMS: 'yudream',
 	}
 	assert.doesNotThrow(() => checkReleaseSecrets(environment))
 	for (const name of ['CURSEFORGE_API_KEY', 'TAURI_SIGNING_PRIVATE_KEY', 'YUDREAM_API_KEY']) {
@@ -71,10 +70,6 @@ test('single-site recovery keeps signing requirements and only requires its sele
 	assert.throws(
 		() => checkReleaseSecrets({ ...environment, YUDREAM_API_KEY: 'test\nkey' }),
 		/multiline/,
-	)
-	assert.throws(
-		() => checkReleaseSecrets({ ...environment, YMCL_UPDATE_PLATFORMS: 'unknown' }),
-		/platform selection/,
 	)
 })
 
@@ -198,11 +193,12 @@ function platformMock({ corrupt = false, stringSizes = false } = {}) {
 	return { fetcher, state, requests, downloads: () => downloads }
 }
 
-test('uploads to both sites, shares verified downloads, and safely reuses published artifacts', async () => {
+test('uploads to YuDream and safely reuses verified published artifacts', async () => {
 	const mock = platformMock()
-	const environment = { YUDREAM_API_KEY: 'test-yudream', SWUSTMC_API_KEY: 'test-swustmc' }
+	const environment = { YUDREAM_API_KEY: 'test-yudream' }
 	await publishPlatforms(release, environment, mock.fetcher)
 	assert.equal(mock.downloads(), artifacts.length)
+	assert.deepEqual([...mock.state.keys()], ['https://www.yudream.online'])
 	for (const platform of updatePlatforms) {
 		const stored = mock.state.get(platform.origin)
 		assert.equal(stored.enabled, true)
@@ -241,7 +237,7 @@ test('failed integrity verification leaves the staged release disabled', async (
 
 test('accepts canonical string sizes from the servers and reuses staged uploads', async () => {
 	const mock = platformMock({ stringSizes: true })
-	const environment = { YUDREAM_API_KEY: 'test-yudream', SWUSTMC_API_KEY: 'test-swustmc' }
+	const environment = { YUDREAM_API_KEY: 'test-yudream' }
 	await publishPlatforms(release, environment, mock.fetcher)
 	assert.equal(mock.downloads(), artifacts.length)
 	for (const platform of updatePlatforms) mock.state.get(platform.origin).enabled = false
@@ -258,35 +254,28 @@ test('accepts canonical string sizes from the servers and reuses staged uploads'
 	)
 })
 
-test('one missing platform credential does not prevent publishing to the other site', async () => {
+test('missing YuDream credentials fail before sending requests or downloading artifacts', async () => {
 	const mock = platformMock()
 	await assert.rejects(
-		publishPlatforms(release, { YUDREAM_API_KEY: 'test-yudream' }, mock.fetcher),
-		/missing SWUSTMC_API_KEY/,
+		publishPlatforms(release, {}, mock.fetcher),
+		/missing YUDREAM_API_KEY/,
 	)
-	assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, true)
-	assert.equal(mock.state.has(updatePlatforms[1].origin), false)
+	assert.equal(mock.requests.length, 0)
+	assert.equal(mock.downloads(), 0)
 })
 
-test('explicit single-site publication never contacts the unselected platform', async () => {
+test('retired update platform rejects publication before sending credentials', async () => {
 	const mock = platformMock()
-	const environment = { YUDREAM_API_KEY: 'test-yudream', YMCL_UPDATE_PLATFORMS: 'yudream' }
-	await publishPlatforms(release, environment, mock.fetcher)
-	await publishPlatforms(release, environment, mock.fetcher)
-	assert.equal(mock.downloads(), artifacts.length)
-	assert.equal(mock.state.get(updatePlatforms[0].origin).enabled, true)
-	assert.equal(mock.state.has(updatePlatforms[1].origin), false)
-	assert.ok(mock.requests.every((request) => request.origin === updatePlatforms[0].origin))
-})
-
-test('invalid platform selection fails before sending network requests', async () => {
-	const mock = platformMock()
-	for (const selection of ['', 'swustmc', 'yudream,both', 'unknown']) {
-		await assert.rejects(
-			publishPlatforms(release, { YMCL_UPDATE_PLATFORMS: selection }, mock.fetcher),
-			/platform selection/,
-		)
-	}
+	await assert.rejects(
+		publishPlatform(
+			{ origin: 'https://www.swustmc.cn', secret: 'SWUSTMC_API_KEY' },
+			'test-private-key',
+			release,
+			async () => { throw new Error('Unexpected artifact download') },
+			mock.fetcher,
+		),
+		/Unknown publish origin/,
+	)
 	assert.equal(mock.requests.length, 0)
 	assert.equal(mock.downloads(), 0)
 })
@@ -315,7 +304,7 @@ test('downloads are rejected when the digest or expected size is wrong', async (
 
 test('network failures report the site, request, nested cause and elapsed time without keys', async () => {
 	const mock = platformMock()
-	const environment = { YUDREAM_API_KEY: 'test-private-key', SWUSTMC_API_KEY: 'test-swustmc' }
+	const environment = { YUDREAM_API_KEY: 'test-private-key' }
 	const fetcher = async (url, options) => {
 		if (url.startsWith(updatePlatforms[0].origin)) {
 			throw new TypeError('fetch failed', {
@@ -336,7 +325,6 @@ test('network failures report the site, request, nested cause and elapsed time w
 		assert.doesNotMatch(error.message, /test-private-key/)
 		return true
 	})
-	assert.equal(mock.state.get(updatePlatforms[1].origin).enabled, true)
 	assert.equal(mock.state.has(updatePlatforms[0].origin), false)
 })
 

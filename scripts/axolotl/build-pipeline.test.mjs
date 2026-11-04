@@ -291,13 +291,10 @@ test('desktop release, CI and cache warming currently build Windows only', async
 })
 
 
-test('recovery platform selection is explicit and normal releases still require both sites', async () => {
+test('release publication uses YuDream without requiring platform selection', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const selection = release.on.workflow_dispatch.inputs.update_platforms
-	assert.equal(selection.type, 'choice')
-	assert.equal(selection.default, 'both')
-	assert.deepEqual(selection.options, ['both', 'yudream'])
-	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, "${{ inputs.update_platforms || 'both' }}")
+	assert.equal(release.on.workflow_dispatch.inputs.update_platforms, undefined)
+	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, undefined)
 })
 
 
@@ -436,10 +433,10 @@ test('release refuses missing credentials and verifies the key in each productio
 		'CURSEFORGE_API_KEY',
 		'TAURI_SIGNING_PRIVATE_KEY',
 		'YUDREAM_API_KEY',
-		'SWUSTMC_API_KEY',
 	]) {
 		assert.equal(secretGuard.env[name], `\${{ secrets.${name} }}`)
 	}
+	assert.equal(secretGuard.env.SWUSTMC_API_KEY, undefined)
 	for (const job of [release.jobs.build]) {
 		assert.equal(job.env.AXOLOTL_REQUIRE_CURSEFORGE_API_KEY, '1')
 		const verification = job.steps.find((step) =>
@@ -451,7 +448,7 @@ test('release refuses missing credentials and verifies the key in each productio
 		step.run?.includes('publish-ymcl-platforms.mjs'),
 	)
 	assert.equal(publish.env.YUDREAM_API_KEY, '${{ secrets.YUDREAM_API_KEY }}')
-	assert.equal(publish.env.SWUSTMC_API_KEY, '${{ secrets.SWUSTMC_API_KEY }}')
+	assert.equal(publish.env.SWUSTMC_API_KEY, undefined)
 })
 
 test('production update defaults consistently use the YuDream platform', async () => {
