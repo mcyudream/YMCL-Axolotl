@@ -296,7 +296,11 @@ async fn resolve_instance_identity(
         .as_error()
     })?;
 
-    Ok((row.id, row.path, row.game_dir_override))
+    Ok((
+        row.id,
+        row.path,
+        crate::portable::resolve_optional(row.game_dir_override),
+    ))
 }
 
 /// Resolves the directory holding an instance's worlds, `servers.dat` and

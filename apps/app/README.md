@@ -4,6 +4,69 @@ YMCL is the Tauri desktop shell for the YMCL Minecraft launcher.
 
 Run `pnpm install` and `pnpm app:dev` from the workspace root to start a development build.
 
+## Windows portable edition
+
+Download `YMCL_<version>_x64_portable.zip`, extract the **whole** `YMCL` folder to
+a writable USB drive, and run `YMCL.exe`. The launcher, games and downloaded
+Java runtimes run from that folder; no launcher installation is needed.
+
+```text
+YMCL/
+  YMCL.exe
+  portable.txt
+  resources/blockbench-skin/
+  WebView2/
+  .Axolotl/
+    release/ or beta/     app.db and account/settings data
+    profiles/            instances, mods, saves and game configuration
+    meta/                game assets, libraries and managed Java runtimes
+    Backups/             default instance backup repository
+    webview/             WebView2 user data
+```
+
+`portable.txt` activates portable mode and creates `.Axolotl` on first use. An
+existing `.Axolotl` directory also activates it, including copies made with
+older releases. A write failure stops startup with an error instead of opening
+an unrelated system data directory. The data root is fixed in portable mode.
+Each portable folder has its own single-instance identifier, so launching it
+does not hand control to an already running installed copy or another folder.
+
+Paths to files inside this folder are stored relative to the executable's
+directory and resolved at runtime, independent of the process working directory.
+This follows HMCL's [local-directory model](https://github.com/HMCL-dev/HMCL/blob/v3.16.4/HMCL/src/main/java/org/jackhuang/hmcl/Metadata.java)
+and [relative-path storage](https://github.com/HMCL-dev/HMCL/blob/v3.16.4/HMCLCore/src/main/java/org/jackhuang/hmcl/util/PortablePath.java).
+Changing the USB drive letter does not require editing settings or reimporting
+managed instances. Automatic Java selection uses runtimes inside the portable
+folder, and missing runtimes are downloaded into `.Axolotl/meta/java_versions`.
+Initial game/Java downloads require an internet connection. Direct associations
+with external launchers, filesystem links, explicit Java overrides, hooks and
+other custom paths can still depend on files outside the USB drive.
+Remembered Yggdrasil passwords and AI provider credentials use the operating
+system's credential store; they remain on each computer and may need to be
+entered again. Minecraft account records remain in the portable database.
+
+The ZIP includes Microsoft's fixed WebView2 runtime, so a target computer does
+not need a separate WebView2 installation. Runtime data is stored in
+`.Axolotl/webview`. The packager downloads the runtime from Microsoft's official
+manifest and validates its Microsoft Authenticode signature. Fixed runtimes are
+updated by replacing the portable program files with a newer release.
+On NTFS volumes, startup grants the runtime directory the inherited
+AppContainer read/execute permissions required by [Microsoft's Windows 10
+deployment instructions](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution).
+FAT/exFAT volumes have no persistent ACLs to configure.
+
+Close both Minecraft and YMCL before safely ejecting the USB drive. For updates,
+exit YMCL, replace `YMCL.exe`, `resources/`, `WebView2/` and the marker from the new
+ZIP, and **retain the existing `.Axolotl/` directory**. Portable mode disables the
+installer updater to preserve this layout.
+
+Build the full portable ZIP on Windows x64 with `pnpm app:build:portable`. It is
+written to `target/release/bundle/portable/`. To package an already built release
+binary, run `node scripts/axolotl/package-portable.mjs`; use `--runtime <directory>`
+to supply an extracted, Microsoft-signed fixed runtime locally. Release CI reuses
+the same application executable as the installers and packages resources and the
+runtime without a second Rust build.
+
 ## Building efficiently
 
 - `pnpm app:build` produces the normal optimized release build and installers.

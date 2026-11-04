@@ -98,7 +98,7 @@ jobs:
           node scripts/axolotl/check-migrations.mjs --release
           node scripts/axolotl/brand-guard.mjs
           node scripts/axolotl/i18n-check.mjs
-          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs scripts/axolotl/windows-release.test.mjs
+          node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs scripts/axolotl/windows-release.test.mjs scripts/axolotl/package-portable.test.mjs
           rustc --edition=2024 --test packages/app-lib/build_env.rs -o "${RUNNER_TEMP}/curseforge-build-env-tests"
           "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
@@ -252,9 +252,7 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          $appName = "YMCL"
           $outDir = "target/release/bundle/nsis"
-          $buildDir = "target/portable-build"
           $publishDir = Join-Path $env:RUNNER_TEMP "release-assets"
 
           pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
@@ -269,23 +267,12 @@ jobs:
           $nativePath = Join-Path $publishDir $nativeName
           Copy-Item -Force $nativeInstallers[0].FullName $nativePath
 
-          # Reuse the binary already built by tauri-action
-          $appExe = "target/release/${appName}.exe"
-          if (Test-Path $appExe) {
-            New-Item -ItemType Directory -Force -Path "$buildDir\Axolotl" | Out-Null
-            Copy-Item -Force $appExe "$buildDir\Axolotl\"
-
-            # Create empty .Axolotl folder to trigger portable mode
-            New-Item -ItemType Directory -Force -Path "$buildDir\Axolotl\.Axolotl" | Out-Null
-
-            # Create portable zip (for manual download)
-            $zipName = "YMCL_${version}_x64_portable.zip"
-            $zipPath = Join-Path $publishDir $zipName
-            Compress-Archive -Path "$buildDir\Axolotl" -DestinationPath $zipPath -Force
-            Write-Output "Created portable zip: $zipPath"
-          } else {
-            throw "Binary not found at $appExe"
-          }
+          # Reuse the compiled binary and include resources plus a signed,
+          # app-local WebView2 runtime so the ZIP needs no installation.
+          node scripts/axolotl/package-portable.mjs --version $version --output-dir $publishDir
+          if ($LASTEXITCODE -ne 0) { throw "Portable ZIP packaging failed" }
+          node --test scripts/axolotl/package-portable.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Portable ZIP layout tests failed" }
 
       - name: Publish completed platform immediately
         uses: ./.github/actions/publish-release-assets

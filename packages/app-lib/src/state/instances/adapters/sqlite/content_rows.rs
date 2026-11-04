@@ -179,7 +179,7 @@ impl TryFrom<InstanceFileRow> for InstanceFile {
             added_at: timestamp(row.added_at),
             modified_at: timestamp(row.modified_at),
             local_mod_data: row.local_mod_data,
-            icon_path: row.icon_path,
+            icon_path: crate::portable::resolve_optional(row.icon_path),
         })
     }
 }
@@ -529,7 +529,7 @@ pub(crate) async fn upsert_instance_file(
     let added_at = file.added_at.timestamp();
     let modified_at = file.modified_at.timestamp();
     let local_mod_data = file.local_mod_data.as_deref();
-    let icon_path = file.icon_path.as_deref();
+    let icon_path = crate::portable::store_optional(file.icon_path.as_deref());
 
     sqlx::query!(
         "
@@ -927,7 +927,7 @@ pub(crate) async fn move_instance_file_in_transaction(
     .bind(size as i64)
     .bind(Utc::now().timestamp())
     .bind(local_mod_data)
-    .bind(icon_path)
+    .bind(crate::portable::store_optional(icon_path))
     .bind(instance_id)
     .bind(old_relative_path)
     .execute(&mut **tx)

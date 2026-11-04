@@ -2307,8 +2307,13 @@ async fn cleanup_pending_repository_paths(state: &State) -> crate::Result<()> {
 	.fetch_all(&state.pool)
 	.await?;
     for stored_path in paths {
-        let path = PathBuf::from(&stored_path);
-        if !path.is_absolute() || path == current {
+        let resolved = crate::portable::resolve(&stored_path);
+        let path = PathBuf::from(&resolved);
+        if !path.is_absolute()
+            || path == current
+            || (crate::portable::is_enabled()
+                && !crate::portable::contains(&resolved))
+        {
             tracing::warn!(
                 path = %path.display(),
                 "Ignoring invalid pending backup repository cleanup path"
@@ -3980,7 +3985,7 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
     let stored_path = if destination == default_repository_path(&state) {
         None
     } else {
-        Some(destination.to_string_lossy().to_string())
+        Some(crate::portable::store(&destination.to_string_lossy()))
     };
     let update_result: crate::Result<()> = async {
         let mut tx = state.pool.begin().await?;
@@ -3996,7 +4001,7 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
                  VALUES (?, ?)
                  ON CONFLICT(path) DO UPDATE SET created_at = excluded.created_at",
             )
-            .bind(source.to_string_lossy().to_string())
+            .bind(crate::portable::store(&source.to_string_lossy()))
             .bind(Utc::now().timestamp_millis())
             .execute(&mut *tx)
             .await?;
@@ -4035,7 +4040,7 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
             sqlx::query(
                 "DELETE FROM pending_backup_repository_cleanups WHERE path = ?",
             )
-            .bind(source.to_string_lossy().to_string())
+            .bind(crate::portable::store(&source.to_string_lossy()))
             .execute(&state.pool)
             .await?;
         }

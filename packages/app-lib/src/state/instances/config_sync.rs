@@ -216,10 +216,16 @@ fn config_file(
         path: instance.path.clone(),
         generated_at,
         name: instance.name.clone(),
-        icon_path: instance.icon_path.clone(),
+        icon_path: crate::portable::store_optional(
+            instance.icon_path.as_deref(),
+        ),
         update_channel: instance.update_channel.key().to_string(),
-        symlink_target: instance.symlink_target.clone(),
-        game_dir_override: instance.game_dir_override.clone(),
+        symlink_target: crate::portable::store_optional(
+            instance.symlink_target.as_deref(),
+        ),
+        game_dir_override: crate::portable::store_optional(
+            instance.game_dir_override.as_deref(),
+        ),
         groups: metadata.groups.clone(),
         content_set: InstanceConfigContentSet {
             source_kind: metadata.applied_content_set.source_kind,

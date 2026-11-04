@@ -421,6 +421,31 @@ pub async fn find_java_for_version(
     major_version: u32,
 ) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
+    if crate::portable::is_enabled() {
+        // Automatic selection must be reproducible on the next computer.
+        // An explicit per-instance Java override is still handled by launch.
+        register_managed_java_versions(&state).await?;
+        let mut candidates = JavaVersion::get_all(&state.pool).await?;
+        if let Some(default) =
+            JavaVersion::get(major_version, &state.pool).await?
+        {
+            candidates.insert(0, default);
+        }
+        for candidate in candidates {
+            if candidate.parsed_version == major_version
+                && crate::portable::contains(&candidate.path)
+                && let Ok(java) =
+                    jre::check_java_at_filepath(Path::new(&candidate.path))
+                        .await
+                && java.parsed_version == major_version
+            {
+                return Ok(Some(java));
+            }
+        }
+        // The normal install flow downloads a missing runtime into this
+        // installation's meta/java_versions directory.
+        return Ok(None);
+    }
     if let Some(configured) =
         JavaVersion::get(major_version, &state.pool).await?
     {
@@ -462,8 +487,18 @@ pub async fn find_compatible_java_for_version(
     }
 
     let state = State::get().await?;
-    let mut jres = get_available_jres(false, false, false).await?;
+    let mut jres = if crate::portable::is_enabled() {
+        Vec::new()
+    } else {
+        get_available_jres(false, false, false).await?
+    };
     jres.extend(JavaVersion::get_all(&state.pool).await?);
+    if crate::portable::is_enabled() {
+        jres.retain(|java| {
+            crate::portable::contains(&java.path)
+                && Path::new(&java.path).is_file()
+        });
+    }
     Ok(closest_compatible_java(jres.iter(), major_version))
 }
 

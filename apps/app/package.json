@@ -3,6 +3,7 @@
 	"scripts": {
 		"tauri": "tauri",
 		"build": "tauri build --config tauri-release.conf.json",
+		"build:portable": "node ../../scripts/axolotl/package-portable.mjs --build",
 		"dev": "node dev.mjs",
 		"dev:test": "node dev.mjs --test-data",
 		"test": "cargo nextest run --all-targets --no-fail-fast",

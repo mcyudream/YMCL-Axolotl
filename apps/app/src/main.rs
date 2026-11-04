@@ -505,7 +505,7 @@ fn is_dev() -> bool {
 
 #[tauri::command]
 fn are_updates_enabled() -> bool {
-    true
+    !portable::is_portable_mode()
 }
 
 #[cfg(feature = "updater")]
@@ -628,9 +628,19 @@ fn raise_file_descriptor_limit() {
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
-    // Initialize portable mode first (checks .YMCL folder and sets THESEUS_CONFIG_DIR)
+    // Select portable storage before any threads or WebView2 processes start.
     // SAFETY: Called at the start of main() before any threads or tokio runtime are spawned
-    let _portable = unsafe { portable::init_portable_mode() };
+    if let Err(error) = unsafe { portable::init_portable_mode() } {
+        let _ = DialogBuilder::message()
+            .set_level(MessageLevel::Error)
+            .set_title("YMCL portable mode / 便携模式")
+            .set_text(format!(
+                "Cannot initialize portable mode. Check that the drive is connected and writable.\n无法初始化便携模式，请检查 U 盘已连接且目录可写。\n\n{error}"
+            ))
+            .alert()
+            .show();
+        std::process::exit(1);
+    }
 
     // macOS limits the per-process file descriptor count to 256 by default,
     // which the launcher's download concurrency exhausts during installs.
@@ -708,7 +718,10 @@ fn main() {
     std::mem::forget(rt);
     tauri::async_runtime::set(handle);
 
-    let tauri_context = tauri::generate_context!();
+    let mut tauri_context = tauri::generate_context!();
+    let identifier =
+        portable::app_identifier(&tauri_context.config().identifier);
+    tauri_context.config_mut().identifier = identifier;
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
 

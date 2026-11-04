@@ -65,7 +65,7 @@ impl DiscoveredJava {
                     parsed_version: row.get::<i64, _>("major_version") as u32,
                     version: row.get("full_version"),
                     architecture: row.get("architecture"),
-                    path: row.get("path"),
+                    path: crate::portable::resolve(row.get("path")),
                     distribution: row.get("distribution"),
                 },
                 file_size: row.get("file_size"),
@@ -94,7 +94,7 @@ impl DiscoveredJava {
                 distribution = $7
             ",
         )
-        .bind(&self.java.path)
+        .bind(crate::portable::store(&self.java.path))
         .bind(self.java.parsed_version as i64)
         .bind(&self.java.version)
         .bind(&self.java.architecture)
@@ -112,7 +112,7 @@ impl DiscoveredJava {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> crate::Result<()> {
         sqlx::query("DELETE FROM discovered_javas WHERE path = $1")
-            .bind(path)
+            .bind(crate::portable::store(path))
             .execute(exec)
             .await?;
 
@@ -147,7 +147,7 @@ impl DiscoveredJava {
                     distribution = $7
                 ",
             )
-            .bind(&entry.java.path)
+            .bind(crate::portable::store(&entry.java.path))
             .bind(entry.java.parsed_version as i64)
             .bind(&entry.java.version)
             .bind(&entry.java.architecture)

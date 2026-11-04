@@ -358,14 +358,18 @@ impl Settings {
             accent_color: AccentColor::from_string(&res.accent_color),
             locale: res.locale,
             default_game_language,
-            backup_repository_path,
+            backup_repository_path: crate::portable::resolve_optional(
+                backup_repository_path,
+            ),
             default_page: DefaultPage::from_string(&res.default_page),
             collapsed_navigation: res.collapsed_navigation == 1,
             hide_nametag_skins_page: res.hide_nametag_skins_page == 1,
             advanced_rendering: res.advanced_rendering == 1,
             native_decorations: res.native_decorations == 1,
             toggle_sidebar: res.toggle_sidebar == 1,
-            custom_background_path: res.custom_background_path,
+            custom_background_path: crate::portable::resolve_optional(
+                res.custom_background_path,
+            ),
             custom_background_blur: res.custom_background_blur as u32,
             custom_background_opacity: res.custom_background_opacity as u32,
             transparent_background: res.transparent_background == 1,
@@ -456,6 +460,20 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
     {
+        let custom_background_path = crate::portable::store_optional(
+            self.custom_background_path.as_deref(),
+        );
+        let backup_repository_path = crate::portable::store_optional(
+            self.backup_repository_path.as_deref(),
+        );
+        let custom_dir = self
+            .custom_dir
+            .as_deref()
+            .filter(|_| !crate::portable::is_enabled());
+        let prev_custom_dir = self
+            .prev_custom_dir
+            .as_deref()
+            .filter(|_| !crate::portable::is_enabled());
         let max_concurrent_writes = self.max_concurrent_writes as i32;
         let max_concurrent_downloads =
             self.max_concurrent_downloads.clamp(1, 256) as i32;
@@ -593,8 +611,8 @@ impl Settings {
             self.hooks.pre_launch,
             self.hooks.wrapper,
             self.hooks.post_exit,
-            self.custom_dir,
-            self.prev_custom_dir,
+            custom_dir,
+            prev_custom_dir,
             self.migrated,
             self.toggle_sidebar,
             feature_flags,
@@ -603,7 +621,7 @@ impl Settings {
             self.pending_update_toast_for_version,
             self.auto_download_updates,
             accent_color,
-            self.custom_background_path,
+            custom_background_path,
             custom_background_blur,
             custom_background_opacity,
             version,
@@ -640,7 +658,7 @@ impl Settings {
 
         sqlx::query("UPDATE settings SET default_game_language = ?, backup_repository_path = ? WHERE id = 0")
             .bind(&self.default_game_language)
-            .bind(self.backup_repository_path.as_deref())
+            .bind(backup_repository_path.as_deref())
             .execute(exec).await?;
 
         sqlx::query("UPDATE settings SET close_behavior = ? WHERE id = 0")

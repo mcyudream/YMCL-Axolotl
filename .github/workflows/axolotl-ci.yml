@@ -42,7 +42,7 @@ jobs:
       - run: node scripts/axolotl/brand-guard.mjs
       - run: node scripts/axolotl/i18n-check.mjs
       - run: node scripts/axolotl/downgrade-app-db.test.mjs
-      - run: node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs
+      - run: node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/package-portable.test.mjs
       - run: cargo fmt --all --check
 
   desktop:
@@ -104,6 +104,14 @@ jobs:
         run: cargo test --package axolotl-seed-map-native --locked
       - name: Test version metadata writes
         run: cargo test --package theseus writing_version_info_creates_missing_parent_directory
+      - name: Test portable storage and Windows ZIP contents
+        run: |
+          cargo test --package theseus --lib portable::
+          if ($LASTEXITCODE -ne 0) { throw "Portable storage tests failed" }
+          cargo test --package theseus --test portable_paths
+          if ($LASTEXITCODE -ne 0) { throw "Portable directory move test failed" }
+          node --test scripts/axolotl/package-portable.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Portable ZIP tests failed" }
       - run: cargo check --package ymcl_gui --features updater
       - name: Build modern Windows installer
         if: runner.os == 'Windows'
@@ -129,6 +137,9 @@ jobs:
             throw "Expected one native NSIS installer, found $($installers.Count)"
           }
           Write-Output "Built native NSIS installer: $($installers[0].Name)"
+      - name: Package Windows portable edition from the same binary
+        if: runner.os == 'Windows'
+        run: node scripts/axolotl/package-portable.mjs
 
   website:
     needs: guardrails

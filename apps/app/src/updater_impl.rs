@@ -443,6 +443,11 @@ pub async fn enqueue_update_for_installation<R: Runtime>(
     webview: Webview<R>,
     rid: ResourceId,
 ) -> Result<()> {
+    if crate::portable::is_portable_mode() {
+        return Err(theseus::ErrorKind::InputError(
+            "Update portable YMCL by replacing the program files from the portable ZIP; keep the .Axolotl data directory".into(),
+        ).as_error().into());
+    }
     let pending_data = webview.state::<PendingUpdateData>().inner();
 
     let update = webview.resources_table().get::<Update>(rid)?;

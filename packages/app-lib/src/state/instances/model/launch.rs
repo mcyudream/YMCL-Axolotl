@@ -68,7 +68,7 @@ impl InstanceLaunchOverridesData {
     ) -> InstanceLaunchOverrides {
         InstanceLaunchOverrides {
             instance_id,
-            java_path: self.java_path,
+            java_path: crate::portable::resolve_optional(self.java_path),
             extra_launch_args: self.extra_launch_args,
             custom_env_vars: self.custom_env_vars,
             memory: self.memory,
@@ -84,7 +84,9 @@ impl InstanceLaunchOverridesData {
 impl From<&InstanceLaunchOverrides> for InstanceLaunchOverridesData {
     fn from(overrides: &InstanceLaunchOverrides) -> Self {
         Self {
-            java_path: overrides.java_path.clone(),
+            java_path: crate::portable::store_optional(
+                overrides.java_path.as_deref(),
+            ),
             extra_launch_args: overrides.extra_launch_args.clone(),
             custom_env_vars: overrides.custom_env_vars.clone(),
             memory: overrides.memory,

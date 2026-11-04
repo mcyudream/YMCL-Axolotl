@@ -8,6 +8,7 @@
 		"app:dev": "turbo run dev --filter=@modrinth/app",
 		"app:dev:test": "pnpm --filter @modrinth/app dev:test",
 		"app:build": "turbo run build --filter=@modrinth/app",
+		"app:build:portable": "pnpm --filter @modrinth/app build:portable",
 		"app:prepare": "node scripts/axolotl/prepare-build.mjs",
 		"app:build:debug": "pnpm --filter @modrinth/app tauri build --debug --no-bundle --config tauri-release.conf.json",
 		"build": "turbo run build --continue",

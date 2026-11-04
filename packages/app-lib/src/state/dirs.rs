@@ -66,8 +66,11 @@ impl DirectoryInfo {
             ))
         })?;
 
-        let config_dir =
-            config_dir.map_or_else(|| settings_dir.clone(), PathBuf::from);
+        let config_dir = if crate::portable::is_enabled() {
+            settings_dir.clone()
+        } else {
+            config_dir.map_or_else(|| settings_dir.clone(), PathBuf::from)
+        };
 
         Ok(Self {
             settings_dir,
@@ -316,6 +319,18 @@ impl DirectoryInfo {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
     {
+        if crate::portable::is_enabled() {
+            // A pending move copied from another installation must never move
+            // USB data into a path belonging to another computer.
+            if settings.custom_dir.is_some()
+                || settings.prev_custom_dir.is_some()
+            {
+                settings.custom_dir = None;
+                settings.prev_custom_dir = None;
+                settings.update(exec).await?;
+            }
+            return Ok(());
+        }
         let app_dir = DirectoryInfo::initial_settings_dir_path(app_identifier)
             .ok_or(crate::ErrorKind::FSError(
                 "Could not find valid config dir".to_string(),

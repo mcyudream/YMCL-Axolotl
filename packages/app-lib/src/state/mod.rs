@@ -889,6 +889,7 @@ impl State {
         let pool = db::connect(&app_identifier).await?;
 
         legacy_converter::migrate_legacy_data(&pool).await?;
+        crate::portable::normalize_database_paths(&pool).await?;
 
         tracing::info!("Fetching app settings");
         let mut settings = Settings::get(&pool).await?;

@@ -82,10 +82,13 @@ pub(crate) struct DirectLinkFields {
 impl DirectLinkFields {
     fn apply_to(&self, instance: &mut Instance) {
         instance.linked_launcher = self.launcher.clone();
-        instance.linked_launcher_root = self.launcher_root.clone();
-        instance.linked_dot_minecraft = self.dot_minecraft.clone();
+        instance.linked_launcher_root =
+            crate::portable::resolve_optional(self.launcher_root.clone());
+        instance.linked_dot_minecraft =
+            crate::portable::resolve_optional(self.dot_minecraft.clone());
         instance.linked_version_id = self.version_id.clone();
-        instance.linked_version_json_path = self.version_json_path.clone();
+        instance.linked_version_json_path =
+            crate::portable::resolve_optional(self.version_json_path.clone());
         instance.linked_game_dir_mode = self.game_dir_mode.clone();
     }
 }
@@ -149,10 +152,13 @@ pub(crate) async fn set_direct_link_fields(
     tx: &mut Transaction<'_, Sqlite>,
 ) -> crate::Result<()> {
     let launcher = fields.launcher.as_deref();
-    let launcher_root = fields.launcher_root.as_deref();
-    let dot_minecraft = fields.dot_minecraft.as_deref();
+    let launcher_root =
+        crate::portable::store_optional(fields.launcher_root.as_deref());
+    let dot_minecraft =
+        crate::portable::store_optional(fields.dot_minecraft.as_deref());
     let version_id = fields.version_id.as_deref();
-    let version_json_path = fields.version_json_path.as_deref();
+    let version_json_path =
+        crate::portable::store_optional(fields.version_json_path.as_deref());
     let game_dir_mode = fields.game_dir_mode.as_deref();
 
     sqlx::query(
@@ -195,15 +201,19 @@ impl TryFrom<InstanceRow> for Instance {
             ),
             update_channel: ReleaseChannel::from_key(&row.update_channel),
             name: row.name,
-            icon_path: row.icon_path,
-            symlink_target: row.symlink_target,
+            icon_path: crate::portable::resolve_optional(row.icon_path),
+            symlink_target: crate::portable::resolve_optional(
+                row.symlink_target,
+            ),
             linked_launcher: None,
             linked_launcher_root: None,
             linked_dot_minecraft: None,
             linked_version_id: None,
             linked_version_json_path: None,
             linked_game_dir_mode: None,
-            game_dir_override: row.game_dir_override,
+            game_dir_override: crate::portable::resolve_optional(
+                row.game_dir_override,
+            ),
             created: timestamp(row.created),
             modified: timestamp(row.modified),
             last_played: row.last_played.and_then(optional_timestamp),
@@ -650,7 +660,12 @@ where
     .fetch_optional(exec)
     .await?;
 
-    Ok(row.map(|r| (r.path, r.game_dir_override)))
+    Ok(row.map(|r| {
+        (
+            r.path,
+            crate::portable::resolve_optional(r.game_dir_override),
+        )
+    }))
 }
 
 /// Look up the game-dir override for an instance matched by its relative
@@ -673,7 +688,9 @@ where
     .fetch_optional(exec)
     .await?;
 
-    Ok(row.and_then(|r| r.game_dir_override))
+    Ok(crate::portable::resolve_optional(
+        row.and_then(|r| r.game_dir_override),
+    ))
 }
 
 pub(crate) async fn get_instance_display_info<'e, E>(
@@ -1166,9 +1183,12 @@ pub(crate) async fn insert_instance(
     let launcher_feature_version = instance.launcher_feature_version.as_str();
     let update_channel = instance.update_channel.key();
     let name = instance.name.as_str();
-    let icon_path = instance.icon_path.as_deref();
-    let symlink_target = instance.symlink_target.as_deref();
-    let game_dir_override = instance.game_dir_override.as_deref();
+    let icon_path =
+        crate::portable::store_optional(instance.icon_path.as_deref());
+    let symlink_target =
+        crate::portable::store_optional(instance.symlink_target.as_deref());
+    let game_dir_override =
+        crate::portable::store_optional(instance.game_dir_override.as_deref());
     let created = instance.created.timestamp();
     let modified = instance.modified.timestamp();
     let last_played = instance.last_played.map(|value| value.timestamp());
@@ -1236,9 +1256,12 @@ pub(crate) async fn update_instance(
     let launcher_feature_version = instance.launcher_feature_version.as_str();
     let update_channel = instance.update_channel.key();
     let name = instance.name.as_str();
-    let icon_path = instance.icon_path.as_deref();
-    let symlink_target = instance.symlink_target.as_deref();
-    let game_dir_override = instance.game_dir_override.as_deref();
+    let icon_path =
+        crate::portable::store_optional(instance.icon_path.as_deref());
+    let symlink_target =
+        crate::portable::store_optional(instance.symlink_target.as_deref());
+    let game_dir_override =
+        crate::portable::store_optional(instance.game_dir_override.as_deref());
     let modified = instance.modified.timestamp();
     let last_played = instance.last_played.map(|value| value.timestamp());
     let pinned_at = instance.pinned_at.map(|value| value.timestamp());

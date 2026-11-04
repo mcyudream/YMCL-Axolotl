@@ -38,7 +38,7 @@ impl JavaVersion {
             parsed_version: row.get::<i64, _>("major_version") as u32,
             version: row.get("full_version"),
             architecture: row.get("architecture"),
-            path: row.get("path"),
+            path: crate::portable::resolve(row.get("path")),
             distribution: row.get("distribution"),
         }))
     }
@@ -70,7 +70,7 @@ impl JavaVersion {
                 parsed_version: row.get::<i64, _>("major_version") as u32,
                 version: row.get("full_version"),
                 architecture: row.get("architecture"),
-                path: row.get("path"),
+                path: crate::portable::resolve(row.get("path")),
                 distribution: row.get("distribution"),
             })
             .collect())
@@ -91,7 +91,7 @@ impl JavaVersion {
                 parsed_version: x.major_version as u32,
                 version: x.full_version,
                 architecture: x.architecture,
-                path: x.path,
+                path: crate::portable::resolve(&x.path),
                 distribution: x.distribution,
             })
             .collect())
@@ -102,6 +102,7 @@ impl JavaVersion {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> crate::Result<()> {
         let major_version = self.parsed_version as i32;
+        let path = crate::portable::store(&self.path);
 
         sqlx::query!(
             "
@@ -116,7 +117,7 @@ impl JavaVersion {
             major_version,
             self.version,
             self.architecture,
-            self.path,
+            path,
             self.distribution,
         )
             .execute(exec)
@@ -138,7 +139,7 @@ impl JavaVersion {
             ",
         )
         .bind(major_version as i64)
-        .bind(path)
+        .bind(crate::portable::store(path))
         .execute(exec)
         .await?;
 
@@ -164,7 +165,7 @@ impl JavaVersion {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> crate::Result<()> {
         sqlx::query("DELETE FROM java_default_versions WHERE path = $1")
-            .bind(path)
+            .bind(crate::portable::store(path))
             .execute(exec)
             .await?;
 
@@ -175,6 +176,7 @@ impl JavaVersion {
         path: &str,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> crate::Result<()> {
+        let path = crate::portable::store(path);
         sqlx::query!("DELETE FROM java_versions WHERE path = $1", path)
             .execute(exec)
             .await?;
@@ -187,8 +189,8 @@ impl JavaVersion {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> crate::Result<()> {
         sqlx::query("UPDATE java_versions SET path = $1 WHERE path = $2")
-            .bind(new_path)
-            .bind(old_path)
+            .bind(crate::portable::store(new_path))
+            .bind(crate::portable::store(old_path))
             .execute(exec)
             .await?;
 

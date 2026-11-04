@@ -22,6 +22,14 @@ pub async fn get() -> crate::Result<Settings> {
 pub async fn set(mut settings: Settings) -> crate::Result<()> {
     let state = State::get().await?;
     let current = Settings::get(&state.pool).await?;
+    if crate::portable::is_enabled()
+        && (settings.custom_dir.is_some() || settings.prev_custom_dir.is_some())
+    {
+        return Err(crate::ErrorKind::InputError(
+            "The data directory is fixed in portable mode".into(),
+        )
+        .into());
+    }
     settings.telemetry = current.telemetry;
     settings.telemetry_consent_version = current.telemetry_consent_version;
     settings.discord_rpc = current.discord_rpc;
