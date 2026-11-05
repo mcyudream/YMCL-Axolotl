@@ -203,7 +203,6 @@
 </template>
 
 <script setup lang="ts">
-import ContentRefreshStatus from '@/components/ui/instance_content/ContentRefreshStatus.vue'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	BookOpenIcon,
@@ -249,12 +248,14 @@ import { useRouter } from 'vue-router'
 
 import DependencyGraphModal from '@/components/instance/dependencies/DependencyGraphModal.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
+import ContentRefreshStatus from '@/components/ui/instance_content/ContentRefreshStatus.vue'
 import ContentToggleDependenciesModal from '@/components/ui/modal/ContentToggleDependenciesModal.vue'
 import ShareModalWrapper from '@/components/ui/modal/ShareModalWrapper.vue'
 import { postUpgradeNoticeQueryKey, usePostUpgradeNotice } from '@/composables/usePostUpgradeNotice'
 import { useWorldDatapacks } from '@/composables/useWorldDatapacks'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version, get_version_many } from '@/helpers/cache.js'
+import { dependencyRefMatchesContentItem } from '@/helpers/content-dependencies'
 import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
 import { lookupContentWikiIds, translateContentItemTitles } from '@/helpers/content-search'
 import { type CurseForgeFile, getCurseForgeChangelog } from '@/helpers/curseforge'
@@ -1434,23 +1435,6 @@ async function handleUploadFiles() {
 	}
 }
 
-function dependencyRefMatchesContentItem(
-	reference: { provider: 'modrinth' | 'curseforge' | 'local'; projectId: string },
-	item: ContentItem,
-) {
-	const itemProjectId = item.project?.id ?? ''
-	if (reference.provider === 'curseforge') {
-		// CurseForge content items carry either a bare numeric id or a
-		// `curseforge:<id>` prefixed one depending on where they were built.
-		const normalized = itemProjectId.startsWith('curseforge:')
-			? itemProjectId.slice('curseforge:'.length)
-			: itemProjectId
-		return normalized === reference.projectId
-	}
-	// Modrinth and local edges both reference the project id directly.
-	return itemProjectId === reference.projectId
-}
-
 const toggleDependenciesModal = ref<InstanceType<typeof ContentToggleDependenciesModal> | null>(
 	null,
 )
@@ -2561,7 +2545,9 @@ async function initProjects(cacheBehaviour?: CacheBehaviour) {
 	debugState('initProjects start', { instanceId, cacheBehaviour, generation })
 	let contentData: InstanceContentData | null
 	try {
-		contentData = await loadInstanceContentData(instanceId, cacheBehaviour, undefined, { progressive: true })
+		contentData = await loadInstanceContentData(instanceId, cacheBehaviour, undefined, {
+			progressive: true,
+		})
 	} catch (error) {
 		if (isCurrentContentRequest(instanceId, generation)) {
 			handleError(error as Error)
@@ -2960,7 +2946,7 @@ provideContentManager({
 
 type UnlistenFn = () => void
 
-const initialContentReady = loadInitialContent()
+void loadInitialContent()
 
 function getInstallRevision() {
 	return installRevisionByInstance.value.get(props.instance.id) ?? 0
