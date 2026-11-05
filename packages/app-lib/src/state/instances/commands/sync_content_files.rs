@@ -304,9 +304,6 @@ async fn enrich_local_metadata(
         let Some(project_type) = project_type_for_file(file) else {
             continue;
         };
-        // Re-extract metadata written before dependency extraction existed:
-        // legacy JSON parses with `dependencies: None` and needs one pass
-        // through the updated extractor.
         let extract_metadata = project_type == ProjectType::Mod
             && file
                 .local_mod_data
@@ -317,8 +314,7 @@ async fn enrich_local_metadata(
                     >(json)
                     .ok()
                 })
-                .and_then(|metadata| metadata.dependencies)
-                .is_none();
+                .is_none_or(|metadata| metadata.needs_refresh());
         let extract_icon = file.icon_path.is_none()
             && matches!(
                 project_type,
