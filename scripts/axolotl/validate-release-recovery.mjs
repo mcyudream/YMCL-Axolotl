@@ -15,7 +15,12 @@ const recoveryPaths = new Set([
 	'.github/workflows/axolotl-release.yml',
 	'.github/actions/publish-release-assets/action.yml',
 	'.github/actions/setup-release-build/action.yml',
-	'.github/workflows/prepare-release-cache.yml',
+	'scripts/axolotl/package-portable.mjs',
+	'scripts/axolotl/package-portable.test.mjs',
+	'scripts/axolotl/restore-windows-release-binary.mjs',
+	'packages/app-lib/tests/portable_paths.rs',
+	'apps/app/README.md',
+	'CONTRIBUTING.md',
 	'scripts/axolotl/build-pipeline.test.mjs',
 	'scripts/axolotl/validate-release-recovery.mjs',
 	'scripts/axolotl/validate-release-recovery.test.mjs',
@@ -55,6 +60,7 @@ export function validateRecoverySource({
 	run,
 	jobs,
 	sourceChangedPaths,
+	repackageOnly = false,
 }) {
 	validateRecoveryInputs(tag, sourceRunId)
 	const taggedSource =
@@ -78,24 +84,57 @@ export function validateRecoverySource({
 		throw new Error(`Recovery cannot change release source files: ${unexpectedPaths.join(', ')}`)
 	for (const name of requiredJobs) {
 		const matches = jobs.filter((job) => job.name === name)
+		const packagingFailure =
+			repackageOnly &&
+			name === 'Build (Windows x64)' &&
+			matches[0]?.conclusion === 'failure' &&
+			matches[0].steps?.filter((step) => step.conclusion === 'failure').length === 1 &&
+			matches[0].steps.some(
+				(step) =>
+					step.name === 'Prepare Windows distribution variants' && step.conclusion === 'failure',
+			)
 		if (
 			matches.length !== 1 ||
 			matches[0].status !== 'completed' ||
-			matches[0].conclusion !== 'success'
+			(matches[0].conclusion !== 'success' && !packagingFailure)
 		)
 			throw new Error(`Source run must have one successful ${name} job`)
+		if (repackageOnly && name === 'Build (Windows x64)') {
+			for (const step of [
+				'Verify the production binary contains the CurseForge key',
+				'Stage release assets before rebundling',
+				'Name the signed Windows modern installer',
+				'Publish Windows installer and updater immediately',
+			]) {
+				if (
+					!matches[0].steps?.some(
+						(candidate) => candidate.name === step && candidate.conclusion === 'success',
+					)
+				)
+					throw new Error(`Repackaging requires successful ${step}`)
+			}
+		}
 	}
 }
 
-export function validatePublishedRelease(release, tag, repository) {
+export function validatePublishedRelease(
+	release,
+	tag,
+	repository,
+	{ requireVariants = true } = {},
+) {
 	const version = tag.replace(/^v/, '')
 	if (release.tag_name !== tag || release.draft || !release.published_at)
 		throw new Error('Publish-only recovery requires the existing published release')
 	const required = new Set()
 	for (const [filename, signed] of [
 		[`YMCL_${version}_x64_modern-setup.exe`, true],
-		[`YMCL_${version}_x64_nsis-setup.exe`, false],
-		[`YMCL_${version}_x64_portable.zip`, false],
+		...(requireVariants
+			? [
+					[`YMCL_${version}_x64_nsis-setup.exe`, false],
+					[`YMCL_${version}_x64_portable.zip`, false],
+				]
+			: []),
 		[`YMCL_${version}_x64-setup.nsis.zip`, true],
 	]) {
 		required.add(filename)
@@ -142,6 +181,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	const sourceRunId = process.env.SOURCE_RUN_ID
 	const publishOnly = process.env.PUBLISH_ONLY === 'true'
 	const rebuild = process.env.REBUILD_RELEASE === 'true'
+	const repackageOnly = process.env.REPACKAGE_ONLY === 'true'
+	if (repackageOnly && (rebuild || publishOnly))
+		throw new Error('Repackaging cannot rebuild or use publish-only mode')
 	validateReleaseTag(tag)
 	if (!process.env.GH_TOKEN || !process.env.GITHUB_REPOSITORY)
 		throw new Error('Recovery requires GitHub credentials and repository context')
@@ -179,12 +221,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 				run.event === 'workflow_dispatch' && /^[a-f0-9]{40}$/.test(run.head_sha ?? '')
 					? git('diff', '--name-only', releaseSha, run.head_sha, '--').split('\n').filter(Boolean)
 					: undefined,
+			repackageOnly,
 		})
 		validatePublishedRelease(
 			await readGitHub(`/releases/tags/${encodeURIComponent(tag)}`),
 			tag,
 			process.env.GITHUB_REPOSITORY,
+			{ requireVariants: !repackageOnly },
 		)
-		console.log(`Validated signed Windows assets for ${tag} at ${releaseSha}; publication only`)
+		console.log(
+			`Validated signed Windows assets for ${tag} at ${releaseSha}; ${repackageOnly ? 'repackaging only' : 'publication only'}`,
+		)
 	}
 }

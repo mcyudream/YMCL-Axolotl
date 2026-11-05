@@ -41,11 +41,19 @@ export function selectRuntime(manifest, architecture = 'x64') {
 	throw new Error(`No fixed WebView2 runtime for ${architecture}`)
 }
 
+export function windowsPowerShellEnvironment(environment = process.env) {
+	// A Node child of pwsh inherits PS7 modules. Windows PowerShell must construct
+	// its own module path, or Get-AuthenticodeSignature cannot load its module.
+	return Object.fromEntries(
+		Object.entries(environment).filter(([key]) => key.toUpperCase() !== 'PSMODULEPATH'),
+	)
+}
+
 function powershell(script, environment = {}, timeout = 120_000) {
 	return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
 		encoding: 'utf8',
 		stdio: ['ignore', 'pipe', 'pipe'],
-		env: { ...process.env, ...environment },
+		env: windowsPowerShellEnvironment({ ...process.env, ...environment }),
 		timeout,
 	})
 }

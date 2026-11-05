@@ -4,7 +4,43 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { archivePortable, selectRuntime, stagePortable } from './package-portable.mjs'
+import {
+	archivePortable,
+	selectRuntime,
+	stagePortable,
+	windowsPowerShellEnvironment,
+} from './package-portable.mjs'
+
+test('Windows PowerShell rebuilds its module path when launched through Node from pwsh', () => {
+	const source = {
+		Path: 'tools',
+		PSModulePath: 'PowerShell 7 modules',
+		PSMODULEPATH: 'other',
+		YMCL_PORTABLE_ZIP: 'portable.zip',
+	}
+	const environment = windowsPowerShellEnvironment(source)
+	assert.deepEqual(environment, { Path: 'tools', YMCL_PORTABLE_ZIP: 'portable.zip' })
+	assert.equal(source.PSModulePath, 'PowerShell 7 modules')
+	if (process.platform === 'win32') {
+		const command = execFileSync(
+			'powershell.exe',
+			[
+				'-NoProfile',
+				'-NonInteractive',
+				'-Command',
+				'$ErrorActionPreference = "Stop"; (Get-Command Get-AuthenticodeSignature).Name',
+			],
+			{
+				encoding: 'utf8',
+				env: windowsPowerShellEnvironment({
+					...process.env,
+					PSModulePath: 'Z:\\nonexistent-ps7-modules',
+				}),
+			},
+		)
+		assert.equal(command.trim(), 'Get-AuthenticodeSignature')
+	}
+})
 
 test('fixed runtime comes from Microsoft and matches the requested architecture', () => {
 	const release = (version) => ({

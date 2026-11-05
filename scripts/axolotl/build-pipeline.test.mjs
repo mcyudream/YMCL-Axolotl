@@ -177,7 +177,7 @@ test('completed platforms publish independently while update manifests require t
 	)
 	assert.equal(build.with.tagName, undefined)
 	assert.equal(build.with.releaseId, undefined)
-	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['preflight', 'build'])
+	assert.deepEqual(release.jobs['verify-and-publish'].needs, ['preflight', 'build', 'repackage'])
 	const publish = parse(
 		await readFile(join(root, '.github/actions/publish-release-assets/action.yml'), 'utf8'),
 	)
@@ -208,7 +208,7 @@ test('manual recovery validates source artifacts and skips successful platform c
 	for (const name of ['build'])
 		assert.equal(
 			release.jobs[name].if,
-			"github.event_name != 'workflow_dispatch' || inputs.rebuild",
+			"(github.event_name != 'workflow_dispatch' || inputs.rebuild) && !inputs.repackage_only",
 		)
 	for (const name of ['verify-and-publish']) {
 		assert.match(release.jobs[name].if, /!cancelled\(\)/)
@@ -245,8 +245,12 @@ test('manual publication reuses Windows assets and generates the missing update 
 			`return ${condition.slice(3, -3)}`,
 		)(
 			{ event_name: event },
-			{ rebuild },
-			{ preflight: { result: preflight }, build: { result: build } },
+			{ rebuild, repackage_only: false },
+			{
+				preflight: { result: preflight },
+				build: { result: build },
+				repackage: { result: 'skipped' },
+			},
 			() => false,
 		)
 	assert.equal(evaluate(), true)

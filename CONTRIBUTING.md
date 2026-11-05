@@ -151,6 +151,8 @@ git push origin v1.2.3
 5. 上传已验证的产物，更新清单校验完成后将稳定版设为最新版本，并发布到 YuDream 更新平台。
 6. 更新网站下载信息；配置 CNB 令牌时，将发布标签、安装包、更新清单和 Release 信息镜像到 CNB。
 
+如果安装包已发布、绿色包阶段失败，可手动运行 `Axolotl release`，填写原标签和 `source_run_id`，勾选 `repackage_only`。流程要求原运行已通过生产二进制校验且仅分发打包失败，并校验发布资产 SHA-256；从现有安装包恢复程序与资源，只补打原生安装包和绿色 ZIP，不重编译或覆盖更新包。
+
 绿色 ZIP 完整解压后运行 `YMCL.exe`。`.Axolotl` 保存启动器数据、实例和下载的 Java，`WebView2` 保存随包运行时；更新绿色版时保留 `.Axolotl`。
 
 > 注意：自动更新公钥已固化在客户端中，私钥只保存在 GitHub Actions Secrets 中，切勿提交到仓库。

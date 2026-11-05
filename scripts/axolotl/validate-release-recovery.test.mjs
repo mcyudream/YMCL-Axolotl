@@ -25,7 +25,11 @@ function fixture() {
 			head_branch: 'v2.0.0-beta.3',
 			head_sha: releaseSha,
 		},
-		jobs: ['Release preflight', 'Build (Windows x64)'].map((name) => ({ name, status: 'completed', conclusion: 'success' })),
+		jobs: ['Release preflight', 'Build (Windows x64)'].map((name) => ({
+			name,
+			status: 'completed',
+			conclusion: 'success',
+		})),
 	}
 }
 
@@ -36,7 +40,53 @@ test('recovery accepts a verified Windows build and only packaging workflow chan
 	assert.doesNotThrow(() => validateRecoverySource(source))
 })
 
+test('packaging recovery requires a verified published binary and a failure limited to distribution packaging', () => {
+	const source = fixture()
+	source.repackageOnly = true
+	source.changedPaths.push('scripts/axolotl/package-portable.mjs')
+	source.jobs[1].conclusion = 'failure'
+	source.jobs[1].steps = [
+		'Verify the production binary contains the CurseForge key',
+		'Stage release assets before rebundling',
+		'Name the signed Windows modern installer',
+		'Publish Windows installer and updater immediately',
+	].map((name) => ({ name, conclusion: 'success' }))
+	source.jobs[1].steps.push({
+		name: 'Prepare Windows distribution variants',
+		conclusion: 'failure',
+	})
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	assert.throws(
+		() => validateRecoverySource({ ...source, repackageOnly: false }),
+		/successful Build/,
+	)
+	for (const step of source.jobs[1].steps.slice(0, 4)) {
+		step.conclusion = 'failure'
+		assert.throws(() => validateRecoverySource(source), /successful/)
+		step.conclusion = 'success'
+	}
+	source.jobs[1].steps[4].name = 'Build release assets'
+	assert.throws(() => validateRecoverySource(source), /successful Build/)
 
+	const published = publishedRelease()
+	published.assets = published.assets.filter(
+		(asset) => !/_x64_(nsis-setup\.exe|portable\.zip)$/.test(asset.name),
+	)
+	assert.doesNotThrow(() =>
+		validatePublishedRelease(published, source.tag, source.repository, { requireVariants: false }),
+	)
+	assert.throws(() => validatePublishedRelease(published, source.tag, source.repository), /missing/)
+	published.assets = published.assets.filter(
+		(asset) => !asset.name.endsWith('_modern-setup.exe.sig'),
+	)
+	assert.throws(
+		() =>
+			validatePublishedRelease(published, source.tag, source.repository, {
+				requireVariants: false,
+			}),
+		/missing/,
+	)
+})
 
 test('rebuild allows CI-only repairs before assets exist and preserves published releases', () => {
 	const source = fixture()
@@ -100,13 +150,15 @@ function publishedRelease() {
 		tag_name: tag,
 		draft: false,
 		published_at: '2026-11-03T00:20:07Z',
-		assets: names.filter((name) => /_x64[-_]/.test(name)).map((name) => ({
-			name,
-			size: 100,
-			state: 'uploaded',
-			digest: `sha256:${'b'.repeat(64)}`,
-			browser_download_url: `https://github.com/owner/YMCL/releases/download/${tag}/${name}`,
-		})),
+		assets: names
+			.filter((name) => /_x64[-_]/.test(name))
+			.map((name) => ({
+				name,
+				size: 100,
+				state: 'uploaded',
+				digest: `sha256:${'b'.repeat(64)}`,
+				browser_download_url: `https://github.com/owner/YMCL/releases/download/${tag}/${name}`,
+			})),
 	}
 }
 

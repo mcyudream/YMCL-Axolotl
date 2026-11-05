@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      repackage_only:
+        description: Reuse a verified published binary to finish native and portable packaging
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -64,6 +69,7 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           PUBLISH_ONLY: ${{ inputs.publish_only && 'true' || 'false' }}
           REBUILD_RELEASE: ${{ inputs.rebuild && 'true' || 'false' }}
+          REPACKAGE_ONLY: ${{ inputs.repackage_only && 'true' || 'false' }}
         run: node scripts/axolotl/validate-release-recovery.mjs
 
       - name: Require production build and publish secrets
@@ -134,7 +140,7 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     needs: preflight
-    if: github.event_name != 'workflow_dispatch' || inputs.rebuild
+    if: (github.event_name != 'workflow_dispatch' || inputs.rebuild) && !inputs.repackage_only
     strategy:
       fail-fast: false
       matrix:
@@ -277,10 +283,49 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  repackage:
+    name: Repackage verified Windows binary
+    needs: preflight
+    if: github.event_name == 'workflow_dispatch' && inputs.repackage_only
+    runs-on: windows-2025
+    steps:
+      - name: Check out packaging repairs
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-release-build
+        with:
+          runner: windows-2025
+          bundle-only: 'true'
+      - name: Restore the verified published executable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/axolotl/restore-windows-release-binary.mjs
+      - name: Verify the restored production binary
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: node scripts/axolotl/verify-embedded-curseforge-key.mjs target/release/YMCL.exe
+      - name: Finish native installer and portable ZIP
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $publishDir = Join-Path $env:RUNNER_TEMP 'release-assets'
+          New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+          pnpm --filter @modrinth/app tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json
+          if ($LASTEXITCODE -ne 0) { throw 'Native NSIS bundling failed' }
+          $installers = @(Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one native installer' }
+          Copy-Item $installers[0].FullName (Join-Path $publishDir "YMCL_${version}_x64_nsis-setup.exe")
+          node scripts/axolotl/package-portable.mjs --version $version --output-dir $publishDir
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP packaging failed' }
+          node --test scripts/axolotl/package-portable.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP tests failed' }
+      - uses: ./.github/actions/publish-release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   verify-and-publish:
     name: Verify complete update and publish mirrors
-    needs: [preflight, build]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild && needs.build.result == 'skipped')) }}
+    needs: [preflight, build, repackage]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.build.result == 'success' || needs.repackage.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild && !inputs.repackage_only && needs.build.result == 'skipped')) }}
     runs-on: ubuntu-24.04
     env:
       UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}

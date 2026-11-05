@@ -9,7 +9,7 @@ inputs:
     required: false
     default: ''
   bundle-only:
-    description: Prepare bundling resources without restoring compiled Rust dependencies or building Java agents.
+    description: Prepare bundling tools for binaries and resources restored from a published installer.
     required: false
     default: 'false'
 runs:
@@ -140,7 +140,3 @@ runs:
       run: |
         read -ra targets <<< "$BUILD_TARGETS"
         pnpm app:prepare "${targets[@]}"
-    - name: Prepare resources for bundling existing binaries
-      if: inputs.bundle-only == 'true'
-      shell: bash
-      run: node scripts/axolotl/prepare-build-resources.mjs blockbench
