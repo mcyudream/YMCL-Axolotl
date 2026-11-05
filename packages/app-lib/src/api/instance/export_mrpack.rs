@@ -2,8 +2,12 @@ use super::content::get_projects;
 use super::get::get;
 use super::paths::get_full_path;
 use crate::api::content_search::original_content_relative_path;
+use crate::api::pack::import::{
+    detect_loader, normalize_imported_loader_version,
+};
 use crate::event::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
+use crate::launcher::DirectLinkedLaunch;
 use crate::pack::install_from::{
     EnvType, PackDependency, PackFile, PackFileHash, PackFormat,
 };
@@ -115,7 +119,7 @@ pub async fn build_publish_archive(
     let archive_dir = std::env::temp_dir();
     let archive_path = archive_dir
         .join(format!("ymcl-publish-{}.mrpack", uuid::Uuid::new_v4()));
-    write_pack_archive(
+    let result = write_pack_archive(
         instance_id,
         &archive_path,
         included_export_candidates,
@@ -126,7 +130,11 @@ pub async fn build_publish_archive(
         ExportFormat::Modrinth,
         None,
     )
-    .await?;
+    .await;
+    if let Err(error) = result {
+        let _ = tokio::fs::remove_file(&archive_path).await;
+        return Err(error);
+    }
     Ok(archive_path)
 }
 
@@ -389,7 +397,7 @@ async fn curseforge_manifest(
     description: Option<String>,
     projects: Vec<(String, ContentFile)>,
 ) -> crate::Result<(serde_json::Value, HashSet<String>)> {
-    let loader = metadata.applied_content_set.loader;
+    let (loader, loader_version) = resolve_export_loader(metadata)?;
     let loaders = if loader == ModLoader::Vanilla {
         Vec::new()
     } else {
@@ -400,9 +408,7 @@ async fn curseforge_manifest(
             ModLoader::Quilt => "quilt",
             _ => return Err(crate::ErrorKind::InputError("This loader cannot be represented by the CurseForge format; use a generic ZIP".into()).into()),
         };
-        let version = metadata
-            .applied_content_set
-            .loader_version
+        let version = loader_version
             .as_deref()
             .filter(|version| !version.is_empty())
             .ok_or_else(|| {
@@ -603,7 +609,10 @@ fn mrpack_loader_dependency(
     loader: ModLoader,
     loader_version: Option<String>,
 ) -> crate::Result<Option<(PackDependency, String)>> {
-    Ok(match (loader, loader_version) {
+    Ok(match (
+		loader,
+		loader_version.filter(|version| !version.trim().is_empty()),
+	) {
         (ModLoader::Forge, Some(v)) => Some((PackDependency::Forge, v)),
         (ModLoader::NeoForge, Some(v)) => Some((PackDependency::NeoForge, v)),
         (ModLoader::Fabric, Some(v)) => Some((PackDependency::FabricLoader, v)),
@@ -624,11 +633,58 @@ fn mrpack_loader_dependency(
         (ModLoader::Vanilla, _) => None,
         _ => {
             return Err(crate::ErrorKind::OtherError(
-                "Loader version mismatch".to_string(),
+				format!(
+					"Cannot export {}: the installed loader version is missing",
+					loader.as_str()
+				),
             )
             .into())
         }
     })
+}
+
+/// Reads linked installations through the launch resolver without persisting
+/// their externally managed loader versions into YMCL's display metadata.
+pub(crate) fn resolve_export_loader(
+    metadata: &InstanceMetadata,
+) -> crate::Result<(ModLoader, Option<String>)> {
+    let direct = match DirectLinkedLaunch::from_instance(&metadata.instance)? {
+        Some(direct) => Some(direct),
+        None => DirectLinkedLaunch::from_game_dir_override(&metadata.instance)?,
+    };
+    let content_set = &metadata.applied_content_set;
+    let Some(direct) = direct else {
+        return Ok((content_set.loader, content_set.loader_version.clone()));
+    };
+    let resolved = direct.resolve()?;
+    let document = json!({ "libraries": resolved.merged.libraries });
+    let detected = detect_loader(&serde_json::to_string(&document)?, &document);
+    let Some((loader, version)) = detected else {
+        if content_set.loader == ModLoader::Vanilla {
+            return Ok((ModLoader::Vanilla, None));
+        }
+        return Err(crate::ErrorKind::InputError(format!(
+			"Cannot determine the installed {} version from the linked instance's version files",
+			content_set.loader.as_str()
+		))
+		.into());
+    };
+    let loader = ModLoader::try_from_string(&loader)?;
+    if content_set.loader == ModLoader::Cleanroom && loader == ModLoader::Forge
+    {
+        return Err(crate::ErrorKind::InputError(
+			"The linked Cleanroom instance has no Cleanroom loader library in its version files".into(),
+		)
+		.into());
+    }
+    let version = version.map(|version| {
+        normalize_imported_loader_version(
+            loader.as_str(),
+            &content_set.game_version,
+            &version,
+        )
+    });
+    Ok((loader, version))
 }
 
 #[tracing::instrument(skip_all)]
@@ -663,10 +719,10 @@ async fn create_mrpack_json_inner(
     on_progress: &mut impl FnMut(f64),
 ) -> crate::Result<PackFormat> {
     let mut dependencies = HashMap::new();
-    if let Some((dependency, version)) = mrpack_loader_dependency(
-        metadata.applied_content_set.loader,
-        metadata.applied_content_set.loader_version.clone(),
-    )? {
+    let (loader, loader_version) = resolve_export_loader(metadata)?;
+    if let Some((dependency, version)) =
+        mrpack_loader_dependency(loader, loader_version)?
+    {
         dependencies.insert(dependency, version);
     }
     dependencies.insert(
@@ -942,9 +998,154 @@ mod tests {
 
     #[cfg(not(feature = "tauri"))]
     #[tokio::test]
+    async fn linked_cleanroom_exports_and_publish_archives_use_installed_version()
+     {
+        let state = global_state().await;
+        let minecraft = TempDir::new().unwrap();
+        let export_dir = TempDir::new().unwrap();
+        let export_target = export_dir.path().join("cleanroom.mrpack");
+        let base = minecraft.path().join("versions/1.12.2");
+        let version_dir = minecraft.path().join("versions/export-cleanroom");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::write(
+            base.join("1.12.2.json"),
+            r#"{"id":"1.12.2","mainClass":"net.minecraft.client.main.Main"}"#,
+        )
+        .unwrap();
+        let version_json = version_dir.join("export-cleanroom.json");
+        let mut document = serde_json::json!({
+            "id": "export-cleanroom",
+            "inheritsFrom": "1.12.2",
+            "libraries": [
+                {"name": "net.minecraftforge:forge:1.12.2-14.23.5.2864"},
+                {"name": "com.cleanroommc:cleanroom:0.6.8-alpha"}
+            ]
+        });
+        std::fs::write(&version_json, document.to_string()).unwrap();
+        std::fs::write(version_dir.join("options.txt"), b"lang:zh_cn").unwrap();
+        let instance = crate::state::create_direct_link_instance(
+            CreateDirectLinkInstance {
+                name: None,
+                launcher_type:
+                    crate::api::pack::import::ImportLauncherType::Generic,
+                base_path: minecraft.path().to_path_buf(),
+                instance_folder: "versions/export-cleanroom".into(),
+                instance_path: None,
+                game_dir_mode: None,
+            },
+            &state,
+        )
+        .await
+        .unwrap();
+
+        for version in ["0.6.8-alpha", "0.6.9-alpha"] {
+            document["libraries"][1]["name"] = serde_json::json!(format!(
+                "com.cleanroommc:cleanroom:{version}"
+            ));
+            std::fs::write(&version_json, document.to_string()).unwrap();
+            super::export_mrpack(
+                &instance.id,
+                export_target.clone(),
+                vec!["options.txt".into()],
+                Some("1.0.0".into()),
+                None,
+                None,
+            )
+            .await
+            .expect("linked Cleanroom exports its installed loader version");
+            let publish_target = super::build_publish_archive(
+                &instance.id,
+                vec!["options.txt".into()],
+                Some("1.0.0".into()),
+                serde_json::json!({"formatVersion": 1}),
+            )
+            .await
+            .expect("linked Cleanroom publishes its installed loader version");
+            for (target, is_publish) in
+                [(&export_target, false), (&publish_target, true)]
+            {
+                let mut archive =
+                    zip::ZipArchive::new(std::fs::File::open(target).unwrap())
+                        .unwrap();
+                let manifest: serde_json::Value = serde_json::from_reader(
+                    archive.by_name("modrinth.index.json").unwrap(),
+                )
+                .unwrap();
+                assert_eq!(manifest["dependencies"]["minecraft"], "1.12.2");
+                assert_eq!(manifest["dependencies"]["cleanroom"], version);
+                assert!(manifest["dependencies"].get("forge").is_none());
+                assert_eq!(archive.by_name("mip.json").is_ok(), is_publish);
+                assert!(archive.by_name("overrides/options.txt").is_ok());
+            }
+            std::fs::remove_file(publish_target).unwrap();
+        }
+        let metadata = super::get(&instance.id).await.unwrap().unwrap();
+        assert_eq!(metadata.applied_content_set.loader_version, None);
+        assert!(
+            metadata
+                .loader_components
+                .iter()
+                .all(|c| c.version.is_none())
+        );
+        let cleanroom =
+            document["libraries"].as_array_mut().unwrap().pop().unwrap();
+        std::fs::write(
+            base.join("1.12.2.json"),
+            serde_json::json!({
+                "id": "1.12.2", "libraries": [cleanroom.clone()]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(&version_json, document.to_string()).unwrap();
+        assert_eq!(
+            super::resolve_export_loader(&metadata).unwrap(),
+            (ModLoader::Cleanroom, Some("0.6.9-alpha".into()))
+        );
+        std::fs::write(base.join("1.12.2.json"), r#"{"id":"1.12.2"}"#).unwrap();
+        document["patches"] = serde_json::json!([{
+            "id": "cleanroom", "priority": 30000, "libraries": [cleanroom]
+        }]);
+        std::fs::write(&version_json, document.to_string()).unwrap();
+        let mut hmcl = metadata.clone();
+        hmcl.instance.linked_launcher = Some("hmcl".into());
+        assert_eq!(
+            super::resolve_export_loader(&hmcl).unwrap(),
+            (ModLoader::Cleanroom, Some("0.6.9-alpha".into()))
+        );
+        document.as_object_mut().unwrap().remove("patches");
+        std::fs::write(&version_json, document.to_string()).unwrap();
+        let error = super::resolve_export_loader(&metadata).unwrap_err();
+        assert!(error.to_string().contains("no Cleanroom loader library"));
+        let existing_archive = std::fs::read(&export_target).unwrap();
+        let error = super::export_mrpack(
+            &instance.id,
+            export_target.clone(),
+            vec!["options.txt".into()],
+            Some("1.0.0".into()),
+            None,
+            None,
+        )
+        .await
+        .expect_err("an unreadable loader must not replace an existing export");
+        assert!(error.to_string().contains("no Cleanroom loader library"));
+        assert_eq!(std::fs::read(export_target).unwrap(), existing_archive);
+        assert_eq!(std::fs::read_dir(export_dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(not(feature = "tauri"))]
+    #[tokio::test]
     async fn direct_link_instances_can_export_generic_files() {
         let state = global_state().await;
         let minecraft = TempDir::new().unwrap();
+        let base = minecraft.path().join("versions/1.20.1");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(
+            base.join("1.20.1.json"),
+            r#"{"id":"1.20.1","mainClass":"net.minecraft.client.main.Main"}"#,
+        )
+        .unwrap();
         let version_dir = minecraft.path().join("versions/export-demo");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(

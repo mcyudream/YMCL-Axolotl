@@ -431,8 +431,8 @@ fn extract_version_from_id(id: &str) -> Option<String> {
     None
 }
 
-///参考自PCL启动器
-fn detect_loader(
+/// Identifies the primary loader from an external version document.
+pub(crate) fn detect_loader(
     content: &str,
     json: &Value,
 ) -> Option<(String, Option<String>)> {

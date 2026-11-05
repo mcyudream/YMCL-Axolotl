@@ -35,6 +35,9 @@ pub(crate) mod generic;
 pub mod hmcl;
 pub mod hmcl_config;
 mod instance_json;
+pub(crate) use instance_json::{
+    detect_loader, normalize_imported_loader_version,
+};
 pub mod mmc;
 mod modrinth_app;
 mod pcl;

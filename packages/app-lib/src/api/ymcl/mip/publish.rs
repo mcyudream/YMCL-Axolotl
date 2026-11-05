@@ -620,12 +620,10 @@ async fn mirror_github_resources(
     // pick up tags published since the last mirror.
     let mut targets: Vec<(String, &str, bool)> = Vec::new();
     if let Ok(Some(metadata)) = crate::api::instance::get(instance_id).await
-        && metadata.applied_content_set.loader
-            == crate::state::ModLoader::Cleanroom
+        && let Ok((crate::state::ModLoader::Cleanroom, loader_version)) =
+            crate::api::instance::resolve_export_loader(&metadata)
     {
-        if let Some(loader_version) = metadata
-            .applied_content_set
-            .loader_version
+        if let Some(loader_version) = loader_version
             .as_deref()
             .filter(|version| !version.is_empty())
         {
@@ -1066,9 +1064,11 @@ pub async fn push_delta(
     let metadata = crate::api::instance::get(instance_id).await?;
     let game = metadata
         .as_ref()
-        .map(|metadata| &metadata.applied_content_set)
-        .map(|content_set| {
-            let loader_key = match content_set.loader {
+        .map(|metadata| -> crate::Result<serde_json::Value> {
+            let content_set = &metadata.applied_content_set;
+            let (loader, loader_version) =
+                crate::api::instance::resolve_export_loader(metadata)?;
+            let loader_key = match loader {
                 crate::state::ModLoader::Forge => Some("forge"),
                 crate::state::ModLoader::NeoForge => Some("neoforge"),
                 crate::state::ModLoader::Fabric => Some("fabric-loader"),
@@ -1076,14 +1076,14 @@ pub async fn push_delta(
                 crate::state::ModLoader::Cleanroom => Some("cleanroom"),
                 _ => None,
             };
-            let loader = loader_key
-                .zip(content_set.loader_version.clone())
-                .map(|(loader_type, loader_version)| {
+            let loader = loader_key.zip(loader_version).map(
+                |(loader_type, loader_version)| {
                     serde_json::json!({
                         "type": loader_type,
                         "version": loader_version,
                     })
-                });
+                },
+            );
             let mut game = serde_json::json!({
                 "minecraft": content_set.game_version.clone(),
                 "loader": loader,
@@ -1091,8 +1091,9 @@ pub async fn push_delta(
             if let Some(min_major) = min_java {
                 game["java"] = serde_json::json!({ "minMajor": min_major });
             }
-            game
-        });
+            Ok(game)
+        })
+        .transpose()?;
     let mut delta = serde_json::json!({
         "baseVersion": diff.base_version,
         "version": version,

@@ -69,6 +69,7 @@ pub use self::core_components::{
     preview_core_jar, remove_core_component, replace_core_jar,
     restore_core_component, set_core_component_enabled,
 };
+pub(crate) use self::export_mrpack::resolve_export_loader;
 pub use self::export_mrpack::{
     ExportFormat, build_publish_archive, create_mrpack_json, export_mrpack,
     export_pack, get_pack_export_candidates,
