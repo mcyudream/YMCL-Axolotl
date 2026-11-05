@@ -28,6 +28,48 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.1.3',
+		version: '2.1.3',
+		publishedAt: '2026-11-04',
+		title: {
+			'en-US': 'YMCL 2.1.3',
+			'zh-CN': 'YMCL 2.1.3',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Added a Windows portable ZIP with WebView2 included. Extract it to a USB drive to keep the launcher, instances, and downloaded Java runtimes together and run without installing the launcher.',
+					'zh-CN':
+						'新增内置 WebView2 的 Windows 绿色 ZIP，解压到 U 盘即可运行，启动器、实例和下载的 Java 可保存在同一目录，无需安装启动器。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed missing dependency relationships in legacy Forge and Cleanroom mods, including dependencies provided by bundled mods.',
+					'zh-CN': '修复旧版 Forge 和 Cleanroom 模组的依赖关系缺失，以及未识别模组内置依赖的问题。',
+				},
+				{
+					'en-US':
+						'Fixed bundled dependencies being treated as compatible when their versions do not meet a mod requirement.',
+					'zh-CN': '修复内置依赖版本不满足模组要求时仍被判断为兼容的问题。',
+				},
+				{
+					'en-US':
+						'Updated database recovery mappings for recent settings, domains, and instance metadata.',
+					'zh-CN': '补齐近期设置、域和实例元数据的数据库回退映射。',
+				},
+			],
+		},
+		notes: {
+			'en-US':
+				'For the portable edition, extract the entire ZIP and run YMCL.exe. Keep the .Axolotl directory when replacing the launcher with a newer version.',
+			'zh-CN':
+				'使用绿色版时请完整解压 ZIP，再运行 YMCL.exe；手动替换新版启动器时，请保留 .Axolotl 数据目录。',
+		},
+	},
+	{
 		id: 'launcher-2.1.2',
 		version: '2.1.2',
 		publishedAt: '2026-11-04',
