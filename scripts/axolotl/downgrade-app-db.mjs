@@ -111,6 +111,26 @@ const REVERTIBLE_SCHEMA = {
 			'sync_feature_settings',
 		],
 	},
+	20260915120000: { tables: ['ymcl_state', 'ymcl_domains'] },
+	20260915130000: { tables: ['ymcl_sessions'] },
+	20260917120000: { columns: [{ table: 'settings', column: 'ignore_ssl_errors' }] },
+	20261023120000: {
+		columns: [
+			{ table: 'ymcl_domains', column: 'site_json' },
+			{ table: 'ymcl_domains', column: 'kind' },
+		],
+	},
+	20261102201000: {
+		columns: [
+			{ table: 'settings', column: 'backup_repository_path' },
+			{ table: 'settings', column: 'default_game_language' },
+		],
+		tables: ['pending_backup_repository_cleanups'],
+	},
+	20261102203000: {
+		tables: ['instance_content_refresh_files', 'instance_content_refreshes'],
+	},
+	20261102204000: { tables: ['instance_schematic_sources'] },
 }
 
 function fail(message) {

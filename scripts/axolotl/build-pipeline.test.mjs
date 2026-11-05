@@ -76,35 +76,26 @@ test('normal frontend builds remain checked and do not refresh remote source dat
 	assert.match(scripts['contributors:sync'], /sync-contributors\.mjs/)
 })
 
-test('release compiles the frontend before drafting a release or starting platform jobs', async () => {
-	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const steps = release.jobs.preflight.steps
-	const install = steps.findIndex((step) => step.run?.includes('pnpm install --frozen-lockfile'))
-	const build = steps.findIndex((step) =>
-		step.run?.includes('pnpm turbo run build --filter=@modrinth/app-frontend'),
-	)
-	const draft = steps.findIndex((step) => step.run?.includes('gh release create'))
-	assert.ok(install >= 0 && build > install && draft > build)
-	assert.equal(release.jobs.build.needs, 'preflight')
-})
-
-test('Windows installer variants reuse an LTO binary and preserve parallel optimization', async () => {
+test('CI builds the app once and leaves distribution packaging to releases', async () => {
 	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	for (const job of [ci.jobs.desktop, release.jobs.build]) {
-		const commands = job.steps.map((step) => step.run ?? '').join('\n')
-		assert.match(
-			commands,
-			/tauri bundle --config tauri-release\.conf\.json --config tauri-native\.conf\.json/,
-		)
-		assert.doesNotMatch(commands, /tauri build[^\n]*tauri-native/)
-		assert.equal(job.env.CARGO_INCREMENTAL, '0')
-	}
-	assert.equal(
-		release.jobs.build.env.CARGO_PROFILE_RELEASE_LTO,
-		'thin',
+	const commands = ci.jobs.desktop.steps.map((step) => step.run ?? '').join('\n')
+	assert.match(commands, /tauri build --no-bundle --config tauri-release\.conf\.json/)
+	assert.doesNotMatch(commands, /cargo check|turbo run build|tauri bundle|package-portable\.mjs/)
+	assert.ok(release.jobs.build.steps.some((step) => step.run?.includes('package-portable.mjs')))
+	const preflight = release.jobs.preflight.steps.map((step) => step.run ?? '').join('\n')
+	assert.doesNotMatch(preflight, /turbo run build/)
+	assert.match(preflight, /downgrade-app-db\.test\.mjs/)
+})
+
+test('Windows installer variants reuse one release binary', async () => {
+	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
+	const commands = release.jobs.build.steps.map((step) => step.run ?? '').join('\n')
+	assert.match(
+		commands,
+		/tauri bundle --config tauri-release\.conf\.json --config tauri-native\.conf\.json/,
 	)
-	assert.ok(ci.jobs.desktop.steps.some((step) => step.run?.includes('turbo run build')))
+	assert.doesNotMatch(commands, /tauri build[^\n]*tauri-native/)
 })
 
 test('native Windows installers do not publish stale modern updater signatures', async () => {
@@ -134,57 +125,37 @@ test('native Windows installers do not publish stale modern updater signatures',
 	assert.doesNotMatch(variants.run, /gh release (upload|delete-asset)/)
 })
 
-test('release and branch cache warming use matching LTO profiles, targets and setup', async () => {
+test('CI and releases share Windows dependency caches without caching embedded secrets', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const warm = parse(
-		await readFile(join(root, '.github/workflows/prepare-release-cache.yml'), 'utf8'),
-	)
+	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
 	const setup = parse(
 		await readFile(join(root, '.github/actions/setup-release-build/action.yml'), 'utf8'),
 	)
-	assert.deepEqual(warm.jobs.warm.strategy.matrix.include, [
-		...release.jobs.build.strategy.matrix.include,
-	])
-	for (const job of [release.jobs.build, warm.jobs.warm]) {
-		assert.equal(
-			job.env.CARGO_PROFILE_RELEASE_LTO,
-			'thin',
-		)
+	assert.equal(ci.jobs.desktop['runs-on'], release.jobs.build.strategy.matrix.include[0].runner)
+	for (const job of [ci.jobs.desktop, release.jobs.build]) {
+		assert.equal(job.env.CARGO_PROFILE_RELEASE_LTO, 'thin')
 		assert.equal(job.env.CARGO_INCREMENTAL, '0')
 		const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
 		assert.equal(checkout.with['fetch-depth'], 1)
 		assert.equal(checkout.with.submodules, 'recursive')
-		const step = job.steps.find((step) => step.uses === './.github/actions/setup-release-build')
-		const inputs = { runner: '${{ matrix.runner }}' }
-		if (job.strategy.matrix.include.some((entry) => entry.targets)) {
-			inputs.targets = '${{ matrix.targets }}'
-		}
-		assert.deepEqual(step.with, inputs)
+		assert.ok(job.steps.some((step) => step.uses === './.github/actions/setup-release-build'))
 	}
 	const cache = setup.runs.steps.find((step) => step.uses?.startsWith('Swatinem/rust-cache@'))
 	assert.match(cache.with['shared-key'], /release-lto/)
 	assert.equal(cache.with['cache-workspace-crates'], false)
 	assert.equal(cache.with['cache-on-failure'], true)
 	assert.equal(cache.env?.CARGO_PROFILE_RELEASE_LTO, undefined)
-	const defaultBranch =
-		"github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
-	assert.ok(cache.with['save-if'].includes(defaultBranch))
+	assert.match(cache.with['save-if'], /github\.event\.repository\.default_branch/)
 	assert.match(cache.with['save-if'], /refs\/tags\/v/)
-	assert.equal(warm.on.push.branches, undefined)
-	assert.equal(warm.jobs.warm.if, defaultBranch)
-	assert.equal(warm.permissions.contents, 'read')
-	const preflightCheckout = release.jobs.preflight.steps.find((step) =>
+	const checkout = release.jobs.preflight.steps.find((step) =>
 		step.uses?.startsWith('actions/checkout@'),
 	)
-	assert.equal(preflightCheckout.with['fetch-depth'], 0)
-	assert.equal(preflightCheckout.with.submodules, undefined)
-	assert.ok(warm.jobs.warm.steps.some((step) => step.run?.includes('tauri bundle --no-sign')))
+	assert.equal(checkout.with['fetch-depth'], 0)
+	assert.equal(checkout.with.submodules, undefined)
 	assert.ok(
 		release.jobs.build.steps.some((step) => step.with?.args?.includes('--locked --timings')),
 	)
 })
-
-
 
 test('completed platforms publish independently while update manifests require the complete release', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
@@ -259,8 +230,19 @@ test('manual recovery validates source artifacts and skips successful platform c
 test('manual publication reuses Windows assets and generates the missing update manifest', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const condition = release.jobs['verify-and-publish'].if
-	const evaluate = ({ event = 'workflow_dispatch', rebuild = false, preflight = 'success', build = 'skipped' } = {}) =>
-		Function('github', 'inputs', 'needs', 'cancelled', `return ${condition.slice(3, -3)}`)(
+	const evaluate = ({
+		event = 'workflow_dispatch',
+		rebuild = false,
+		preflight = 'success',
+		build = 'skipped',
+	} = {}) =>
+		Function(
+			'github',
+			'inputs',
+			'needs',
+			'cancelled',
+			`return ${condition.slice(3, -3)}`,
+		)(
 			{ event_name: event },
 			{ rebuild },
 			{ preflight: { result: preflight }, build: { result: build } },
@@ -278,26 +260,11 @@ test('manual publication reuses Windows assets and generates the missing update 
 	assert.ok(!steps.some((step) => step.name === 'Download existing update manifest'))
 })
 
-test('desktop release, CI and cache warming currently build Windows only', async () => {
-	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
-	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
-	const warm = parse(await readFile(join(root, '.github/workflows/prepare-release-cache.yml'), 'utf8'))
-	assert.deepEqual(ci.jobs.desktop.strategy.matrix.os, ['windows-latest'])
-	for (const job of [release.jobs.build, warm.jobs.warm])
-		assert.deepEqual(job.strategy.matrix.include.map((entry) => entry.runner), ['windows-2025'])
-	for (const name of ['build-macos', 'rebuild-macos-arm', 'bundle-macos'])
-		assert.equal(release.jobs[name], undefined)
-	assert.equal(release.on.workflow_dispatch.inputs.rebuild_macos_arm, undefined)
-})
-
-
 test('release publication uses YuDream without requiring platform selection', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	assert.equal(release.on.workflow_dispatch.inputs.update_platforms, undefined)
 	assert.equal(release.env.YMCL_UPDATE_PLATFORMS, undefined)
 })
-
-
 
 test('stable website metadata updates the default branch from a tag checkout', async () => {
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
@@ -429,11 +396,7 @@ test('release refuses missing credentials and verifies the key in each productio
 	const secretGuard = release.jobs.preflight.steps.find((step) =>
 		step.run?.includes('check-release-secrets.mjs'),
 	)
-	for (const name of [
-		'CURSEFORGE_API_KEY',
-		'TAURI_SIGNING_PRIVATE_KEY',
-		'YUDREAM_API_KEY',
-	]) {
+	for (const name of ['CURSEFORGE_API_KEY', 'TAURI_SIGNING_PRIVATE_KEY', 'YUDREAM_API_KEY']) {
 		assert.equal(secretGuard.env[name], `\${{ secrets.${name} }}`)
 	}
 	assert.equal(secretGuard.env.SWUSTMC_API_KEY, undefined)

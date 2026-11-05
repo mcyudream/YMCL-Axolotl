@@ -98,13 +98,11 @@ jobs:
           node scripts/axolotl/check-migrations.mjs --release
           node scripts/axolotl/brand-guard.mjs
           node scripts/axolotl/i18n-check.mjs
+          node scripts/axolotl/downgrade-app-db.test.mjs
           node --test scripts/axolotl/build-pipeline.test.mjs scripts/axolotl/prepare-build-resources.test.mjs scripts/axolotl/release-platforms.test.mjs scripts/axolotl/validate-release-recovery.test.mjs scripts/axolotl/windows-release.test.mjs scripts/axolotl/package-portable.test.mjs
           rustc --edition=2024 --test packages/app-lib/build_env.rs -o "${RUNNER_TEMP}/curseforge-build-env-tests"
           "${RUNNER_TEMP}/curseforge-build-env-tests"
           cargo fmt --all --check
-
-      - name: Compile production frontend before starting platform jobs
-        run: pnpm turbo run build --filter=@modrinth/app-frontend
 
       - name: Prepare draft release
         if: ${{ !inputs.publish_only }}

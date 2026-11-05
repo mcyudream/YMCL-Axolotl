@@ -105,7 +105,7 @@ node scripts/axolotl/downgrade-app-db.mjs --suffix pr538 --to 20260903120000 --a
 
 - 只认识登记在案的迁移结构。遇到未登记的迁移会**拒绝执行**，因为删掉记录却留下它建的列/表，会让重新安装该构建时因对象重复而失败；确认无碍时用 `--allow-unmapped` 显式放行。
 - 若某个已登记迁移对应的列在库里不存在，说明登记的表结构与数据库不符（版本号被复用、列被改名等），脚本同样拒绝执行。
-- 新增**列**的迁移时，请在 `scripts/axolotl/downgrade-app-db.mjs` 的 `REVERTIBLE_COLUMNS` 里登记它建的每一列，否则越过它的降级会被拒绝。只做数据增删（DELETE/UPDATE）的迁移也要登记一个空数组——它没有列可删，但登记了才不会挡住降级。新增**表**的迁移目前没有登记机制，只能手工处理。
+- 新增列或表的迁移时，请在 `scripts/axolotl/downgrade-app-db.mjs` 的 `REVERTIBLE_SCHEMA` 里登记 `columns` / `tables`，表按依赖关系逆序排列。仅移动数据且可安全越过的迁移登记空对象；不能安全撤销的结构重建保持未登记，脚本会明确拒绝回退。运行 `node scripts/axolotl/downgrade-app-db.test.mjs` 验证映射。
 
 该脚本依赖 Node 内置的 `node:sqlite`，并要求 Windows（解析默认数据目录需要 `APPDATA`；其他平台请用 `--db` 指定路径）。
 
@@ -119,6 +119,16 @@ YMCL 的产品改动主要位于：
 - 上述包所需的共享 UI 与资源包
 
 本仓库**不包含** Modrinth 网站、Labrinth API 或其运营服务源码。桌面端保留对 Modrinth 公共 API 的客户端兼容；如果需要参考上游实现，请仅手动挑选与 YMCL 产品相关的改动，避免直接合并无关代码。
+
+## CI
+
+默认开发分支是 `ymcl-dev`。自动检查按实际改动分开运行：
+
+- **Axolotl desktop CI**：迁移保护、品牌与国际化检查、构建脚本测试、Rust 格式与相关回归测试，并编译一次 Windows 应用。Tauri 构建同时完成前端类型检查；普通提交不生成安装包或下载完整 WebView2。
+- **Axolotl website CI**：只在网站、共享前端包或依赖配置变化时构建网站。
+- **Axolotl release**：推送版本标签后生成签名更新包、两种 Windows 安装包和内置 WebView2 的绿色 ZIP，并发布到 GitHub 和更新平台。
+
+缓存由实际构建恢复和保存；桌面 CI 与发版共享依赖缓存，不再另开预热构建。模型目录同步保留手动触发。CNB 发布镜像仅在配置令牌后执行。
 
 ## 发布新版本
 
@@ -135,12 +145,12 @@ git push origin v1.2.3
 
 **自动发布工作流执行步骤**：
 1. 将标签版本写入桌面应用构建配置。
-2. 在 GitHub 托管的 Windows、macOS 和 Linux runner 上并行构建安装包。
+2. 在 Windows runner 上编译一次应用，再从同一二进制生成现代安装包、原生 NSIS 安装包和绿色 ZIP。
 3. 使用仓库 Secrets 中的 Tauri 私钥生成签名更新包。
-4. 生成并校验包含全部桌面平台的 `latest.json`。
-5. 校验成功后将草稿 Release 转为正式发布。
-6. GitHub Release 发布完成后，将安装包、更新清单和 Release 信息镜像到 CNB。
+4. 生成并校验 Windows 自动更新清单 `latest.json`。
+5. 上传已验证的产物，更新清单校验完成后将稳定版设为最新版本，并发布到 YuDream 更新平台。
+6. 更新网站下载信息；配置 CNB 令牌时，将发布标签、安装包、更新清单和 Release 信息镜像到 CNB。
 
-源码分支和标签也由 GitHub Actions 在 push 和删除事件后直接同步到 CNB。CNB 仓库不运行定时同步或标签流水线，避免在 GitHub 构建尚未完成时占用 CNB 构建时长。
+绿色 ZIP 完整解压后运行 `YMCL.exe`。`.Axolotl` 保存启动器数据、实例和下载的 Java，`WebView2` 保存随包运行时；更新绿色版时保留 `.Axolotl`。
 
 > 注意：自动更新公钥已固化在客户端中，私钥只保存在 GitHub Actions Secrets 中，切勿提交到仓库。

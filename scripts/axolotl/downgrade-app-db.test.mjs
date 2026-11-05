@@ -269,6 +269,58 @@ console.log('resolving the settings directory')
 	check('and says which flag to pass', result.output.includes('--channel'))
 }
 
+// --- recent schemas can be downgraded and upgraded again ----------------------
+
+console.log('recent schema round trip')
+{
+	const file = path.join(directory, 'recent.db')
+	sampleDatabase(file)
+	const recent = fs
+		.readdirSync(migrationsDir)
+		.filter((name) => name.endsWith('.sql') && Number(name.slice(0, 14)) >= 20260917120000)
+		.sort()
+	const database = new DatabaseSync(file)
+	database.exec(`
+		CREATE TABLE ymcl_domains (id TEXT PRIMARY KEY, origin TEXT NOT NULL);
+		INSERT INTO ymcl_domains VALUES ('example', 'https://example.com');
+		CREATE TABLE instances (id TEXT PRIMARY KEY);
+		CREATE TABLE instance_files (id TEXT PRIMARY KEY);
+	`)
+	for (const name of recent) {
+		database.exec(fs.readFileSync(path.join(migrationsDir, name), 'utf8'))
+		database
+			.prepare(
+				`INSERT INTO _sqlx_migrations
+			(version, description, success, checksum, execution_time) VALUES (?, ?, TRUE, X'00', 0)`,
+			)
+			.run(Number(name.slice(0, 14)), name)
+	}
+	database.close()
+
+	const result = run(['--db', file, '--to', '20260917120000', '--apply'])
+	check('all recent schema is reverted', result.status === 0, result.output)
+	check('only older migration records remain', migrations(file).join() === String(CLOSE_BEHAVIOR))
+	check('older settings data is preserved', columns(file, 'settings').includes('close_behavior'))
+	check(
+		'new settings columns are removed',
+		!columns(file, 'settings').includes('ignore_ssl_errors'),
+	)
+	check('new domain columns are removed', !columns(file, 'ymcl_domains').includes('kind'))
+	const restored = new DatabaseSync(file)
+	check(
+		'existing domain data is preserved',
+		restored.prepare('SELECT origin FROM ymcl_domains').get().origin === 'https://example.com',
+	)
+	for (const name of recent) {
+		restored.exec(fs.readFileSync(path.join(migrationsDir, name), 'utf8'))
+	}
+	restored.close()
+	check(
+		'the same migrations apply again without duplicate schema',
+		columns(file, 'settings').includes('default_game_language'),
+	)
+}
+
 // --- keeping the migration mapping honest -------------------------------------
 
 console.log('keeping the migration mapping honest')
