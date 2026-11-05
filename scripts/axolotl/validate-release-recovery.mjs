@@ -82,8 +82,35 @@ export function validateRecoverySource({
 	const unexpectedPaths = changedPaths.filter((path) => !recoveryPaths.has(path))
 	if (unexpectedPaths.length)
 		throw new Error(`Recovery cannot change release source files: ${unexpectedPaths.join(', ')}`)
+	const repackages = jobs.filter((job) => job.name === 'Repackage verified Windows binary')
+	const verifiedRepackage =
+		run.event === 'workflow_dispatch' &&
+		repackages.length === 1 &&
+		repackages[0].status === 'completed' &&
+		repackages[0].conclusion === 'success' &&
+		[
+			'Restore the verified published executable',
+			'Verify the restored production binary',
+			'Finish native installer and portable ZIP',
+		].every((name) =>
+			repackages[0].steps?.some((step) => step.name === name && step.conclusion === 'success'),
+		)
 	for (const name of requiredJobs) {
-		const matches = jobs.filter((job) => job.name === name)
+		const matches = jobs.filter(
+			(job) =>
+				job.name === name ||
+				(verifiedRepackage &&
+					name === 'Build (Windows x64)' &&
+					job.name === 'Build (${{ matrix.name }})'),
+		)
+		if (
+			name === 'Build (Windows x64)' &&
+			verifiedRepackage &&
+			matches.length === 1 &&
+			matches[0].status === 'completed' &&
+			matches[0].conclusion === 'skipped'
+		)
+			continue
 		const packagingFailure =
 			repackageOnly &&
 			name === 'Build (Windows x64)' &&

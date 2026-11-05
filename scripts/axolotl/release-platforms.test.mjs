@@ -19,21 +19,21 @@ const tag = `v${version}`
 const signature = Buffer.from('test signature').toString('base64')
 const bytes = Buffer.from('test release binary')
 const sha256 = createHash('sha256').update(bytes).digest('hex')
-const artifacts = [
-	[`YMCL_${version}_x64-setup.nsis.zip`, ['windows-x86_64']],
-].map(([filename, targetPlatforms]) => ({
-	filename,
-	targetPlatforms,
-	kind: 'updater',
-	variant: 'tauri',
-	platform: targetPlatforms[0],
-	architecture: filename.includes('universal') ? 'universal' : 'x86_64',
-	signatureFilename: `${filename}.sig`,
-	signature,
-	size: bytes.length,
-	sha256,
-	downloadUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/download/${tag}/${filename}`,
-}))
+const artifacts = [[`YMCL_${version}_x64-setup.nsis.zip`, ['windows-x86_64']]].map(
+	([filename, targetPlatforms]) => ({
+		filename,
+		targetPlatforms,
+		kind: 'updater',
+		variant: 'tauri',
+		platform: targetPlatforms[0],
+		architecture: filename.includes('universal') ? 'universal' : 'x86_64',
+		signatureFilename: `${filename}.sig`,
+		signature,
+		size: bytes.length,
+		sha256,
+		downloadUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/download/${tag}/${filename}`,
+	}),
+)
 const release = {
 	version,
 	channel: 'beta',
@@ -106,7 +106,12 @@ test('release preparation requires all signed update targets and trusted downloa
 			/published/,
 		)
 		await assert.rejects(
-			prepareRelease({ ...catalog, artifacts: [{ ...artifacts[0], targetPlatforms: [] }] }, metadata, tag, directory),
+			prepareRelease(
+				{ ...catalog, artifacts: [{ ...artifacts[0], targetPlatforms: [] }] },
+				metadata,
+				tag,
+				directory,
+			),
 			/Missing updater target/,
 		)
 		await assert.rejects(
@@ -135,7 +140,7 @@ test('release preparation requires all signed update targets and trusted downloa
 	}
 })
 
-function platformMock({ corrupt = false, stringSizes = false } = {}) {
+function platformMock({ corrupt = false, stringSizes = false, portableUrl } = {}) {
 	const state = new Map()
 	const requests = []
 	let downloads = 0
@@ -163,7 +168,18 @@ function platformMock({ corrupt = false, stringSizes = false } = {}) {
 				? Response.json({ code: 200, data: record })
 				: Response.json({}, { status: 404 })
 		}
-		if (options.body instanceof FormData) {
+		if (options.method === 'POST' && pathname.endsWith('/artifacts')) {
+			const artifact = JSON.parse(options.body)
+			record.artifacts = [
+				...record.artifacts.filter((item) => item.filename !== artifact.filename),
+				{
+					...artifact,
+					hostedLocally: false,
+					fileKey: null,
+					downloadUrl: portableUrl ?? artifact.downloadUrl,
+				},
+			]
+		} else if (options.body instanceof FormData) {
 			assert.equal(record.enabled, false)
 			const body = options.body
 			assert.deepEqual(Buffer.from(await body.get('file').arrayBuffer()), bytes)
@@ -192,6 +208,39 @@ function platformMock({ corrupt = false, stringSizes = false } = {}) {
 	}
 	return { fetcher, state, requests, downloads: () => downloads }
 }
+
+test('portable downloads register the versioned GitHub URL without a second large upload', async () => {
+	const portable = {
+		filename: `YMCL_${version}_x64_portable.zip`,
+		kind: 'portable',
+		variant: 'portable',
+		platform: 'windows',
+		architecture: 'x86_64',
+		targetPlatforms: [],
+		size: 390_923_099,
+		sha256: 'b'.repeat(64),
+		downloadUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/download/${tag}/YMCL_${version}_x64_portable.zip`,
+	}
+	const value = { ...release, artifacts: [...artifacts, portable] }
+	const mock = platformMock()
+	await publishPlatforms(value, { YUDREAM_API_KEY: 'test-key' }, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	const published = mock.state.get(updatePlatforms[0].origin)
+	const stored = published.artifacts.find((artifact) => artifact.kind === 'portable')
+	assert.equal(stored.downloadUrl, portable.downloadUrl)
+	assert.equal(stored.sha256, portable.sha256)
+	assert.equal(stored.size, portable.size)
+	assert.equal(stored.hostedLocally, false)
+	assert.ok(published.artifacts.find((artifact) => artifact.kind === 'updater').hostedLocally)
+	await publishPlatforms(value, { YUDREAM_API_KEY: 'test-key' }, mock.fetcher)
+	assert.equal(mock.downloads(), artifacts.length)
+	const invalid = platformMock({ portableUrl: 'https://untrusted.example/portable.zip' })
+	await assert.rejects(
+		publishPlatforms(value, { YUDREAM_API_KEY: 'test-key' }, invalid.fetcher),
+		/portable download URL or metadata mismatch/,
+	)
+	assert.equal(invalid.state.get(updatePlatforms[0].origin).enabled, false)
+})
 
 test('uploads to YuDream and safely reuses verified published artifacts', async () => {
 	const mock = platformMock()
@@ -256,10 +305,7 @@ test('accepts canonical string sizes from the servers and reuses staged uploads'
 
 test('missing YuDream credentials fail before sending requests or downloading artifacts', async () => {
 	const mock = platformMock()
-	await assert.rejects(
-		publishPlatforms(release, {}, mock.fetcher),
-		/missing YUDREAM_API_KEY/,
-	)
+	await assert.rejects(publishPlatforms(release, {}, mock.fetcher), /missing YUDREAM_API_KEY/)
 	assert.equal(mock.requests.length, 0)
 	assert.equal(mock.downloads(), 0)
 })
@@ -271,7 +317,9 @@ test('retired update platform rejects publication before sending credentials', a
 			{ origin: 'https://www.swustmc.cn', secret: 'SWUSTMC_API_KEY' },
 			'test-private-key',
 			release,
-			async () => { throw new Error('Unexpected artifact download') },
+			async () => {
+				throw new Error('Unexpected artifact download')
+			},
 			mock.fetcher,
 		),
 		/Unknown publish origin/,

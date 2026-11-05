@@ -7,9 +7,7 @@ import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 
-export const updatePlatforms = [
-	{ origin: 'https://www.yudream.online', secret: 'YUDREAM_API_KEY' },
-]
+export const updatePlatforms = [{ origin: 'https://www.yudream.online', secret: 'YUDREAM_API_KEY' }]
 
 const pluginPath = '/api/plugins/ymcl-content'
 const expectedTargets = ['windows-x86_64']
@@ -83,7 +81,8 @@ export async function prepareRelease(catalog, release, tag, signaturesDirectory)
 			if (artifact.kind === 'updater') {
 				if (!signature) throw new Error(`Missing updater signature for ${artifact.filename}`)
 				for (const target of artifact.targetPlatforms ?? []) {
-					if (!expectedTargets.includes(target)) throw new Error(`Unsupported updater target ${target}`)
+					if (!expectedTargets.includes(target))
+						throw new Error(`Unsupported updater target ${target}`)
 					if (targets.has(target)) throw new Error(`Duplicate updater target ${target}`)
 					targets.add(target)
 				}
@@ -117,7 +116,7 @@ function matchesArtifact(actual, expected) {
 		actual.platform === expected.platform &&
 		actual.architecture === expected.architecture &&
 		(actual.variant ?? '') === (expected.variant ?? '') &&
-		(actual.signature ?? null) === expected.signature &&
+		(actual.signature ?? null) === (expected.signature ?? null) &&
 		JSON.stringify(actual.targetPlatforms ?? []) === JSON.stringify(expected.targetPlatforms ?? [])
 	)
 }
@@ -211,7 +210,13 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 			existing.notes !== release.notes ||
 			existing.artifacts?.length !== release.artifacts.length ||
 			!release.artifacts.every((expected) =>
-				existing.artifacts.some((actual) => matchesArtifact(actual, expected)),
+				existing.artifacts.some(
+					(actual) =>
+						matchesArtifact(actual, expected) &&
+						(expected.kind !== 'portable' ||
+							actual.hostedLocally ||
+							actual.downloadUrl === expected.downloadUrl),
+				),
 			)
 		) {
 			throw new Error(`${origin}: refusing to overwrite an already published version`)
@@ -221,9 +226,25 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		let staged = await request(admin, { method: 'POST', body: { ...metadata, enabled: false } })
 		for (const artifact of expectedArtifacts) {
 			const previous = staged.artifacts?.find(
-				(actual) => matchesArtifact(actual, artifact) && actual.hostedLocally,
+				(actual) =>
+					matchesArtifact(actual, artifact) &&
+					(actual.hostedLocally ||
+						(artifact.kind === 'portable' && actual.downloadUrl === artifact.downloadUrl)),
 			)
 			if (previous) continue
+			if (artifact.kind === 'portable') {
+				// The bundled WebView2 runtime makes the portable ZIP exceed the
+				// platform's upload limit. Its existing URL-artifact API keeps the
+				// versioned GitHub download and digest; updater bytes stay local.
+				staged = await request(`${releasePath}/artifacts`, {
+					method: 'POST',
+					body: { ...artifact, id: artifact.filename, mode: 'url' },
+				})
+				const registered = staged.artifacts?.find((actual) => matchesArtifact(actual, artifact))
+				if (!registered || registered.downloadUrl !== artifact.downloadUrl)
+					throw new Error(`${origin}: portable download URL or metadata mismatch`)
+				continue
+			}
 			const file = await artifactFile(artifact)
 			const body = new FormData()
 			body.append('file', await openAsBlob(file), artifact.filename)
@@ -246,6 +267,12 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		}
 		const artifacts = expectedArtifacts.map((expected) => {
 			const actual = staged.artifacts.find((candidate) => matchesArtifact(candidate, expected))
+			if (
+				expected.kind === 'portable' &&
+				!actual?.fileKey &&
+				actual?.downloadUrl === expected.downloadUrl
+			)
+				return actual
 			if (!actual?.fileKey) throw new Error(`${origin}: artifact is not hosted locally`)
 			return {
 				...actual,

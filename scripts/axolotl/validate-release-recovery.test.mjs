@@ -116,6 +116,34 @@ test('recovery accepts repaired build runs only when their source still matches 
 	assert.throws(() => validateRecoverySource(source), /exact tag and commit/)
 })
 
+test('publication recovery accepts a successful verified repackage without compiling again', () => {
+	const source = fixture()
+	Object.assign(source.run, {
+		event: 'workflow_dispatch',
+		head_branch: 'ymcl-dev',
+		head_sha: 'c'.repeat(40),
+	})
+	source.sourceChangedPaths = ['scripts/axolotl/package-portable.mjs']
+	source.jobs[1].conclusion = 'skipped'
+	source.jobs[1].name = 'Build (${{ matrix.name }})'
+	source.jobs.push({
+		name: 'Repackage verified Windows binary',
+		status: 'completed',
+		conclusion: 'success',
+		steps: [
+			'Restore the verified published executable',
+			'Verify the restored production binary',
+			'Finish native installer and portable ZIP',
+		].map((name) => ({ name, conclusion: 'success' })),
+	})
+	assert.doesNotThrow(() => validateRecoverySource(source))
+	for (const step of source.jobs[2].steps) {
+		step.conclusion = 'failure'
+		assert.throws(() => validateRecoverySource(source), /successful Build/)
+		step.conclusion = 'success'
+	}
+})
+
 function publishedRelease() {
 	const tag = 'v2.0.0-beta.3'
 	const names = [
