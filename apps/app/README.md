@@ -67,10 +67,10 @@ to supply an extracted, Microsoft-signed fixed runtime locally. Release CI reuse
 the same application executable as the installers and packages resources and the
 runtime without a second Rust build.
 
-`Axolotl desktop CI` builds this ZIP for pushes to `ymcl-dev` and `main`, pull
-requests, and manual runs. Download the `YMCL-Windows-x64-portable` artifact from
-the run's summary; CI keeps it for 14 days. Tagged releases publish the same ZIP
-alongside the Windows installers as `YMCL_<version>_x64_portable.zip`.
+`Axolotl desktop CI` compiles and tests the Windows app on `ymcl-dev` and pull
+requests. Tagged releases generate the full ZIP alongside the Windows installers
+as `YMCL_<version>_x64_portable.zip`; ordinary CI runs skip distribution packaging
+and the WebView2 download.
 
 ## Building efficiently
 
@@ -90,8 +90,8 @@ Normal Tauri builds also prepare shared resources automatically. Java agents liv
 
 Release jobs restore pnpm/npm packages, Cargo dependencies, Gradle/JDK downloads, Java agents, Blockbench resources, frontend build results, Linux package downloads, and Tauri packaging tools. Linux package installation and signature/checksum verification are retained. Build checkouts are shallow; only release preflight fetches history for its guardrails.
 
-`Prepare release caches` builds the same full-LTO profiles and platform matrix on `main` when dependencies or build configuration change. It warms installer tools without signing or publishing. Published jobs reuse these dependency artifacts, but never cache workspace Rust outputs that may embed release secrets. Windows installer variants still reuse one compiled application binary.
+Desktop CI and releases use the same Windows runner, ThinLTO profile, dependency cache and resource setup. Cache preparation happens during these real builds; there is no separate cache-warming workflow. Workspace Rust outputs that may embed release secrets are excluded from the shared cache. Windows installer variants reuse one compiled application binary.
 
-The first cold build still downloads and compiles dependencies: prewarming moves that work ahead of the release, at the cost of an extra CI build when its inputs change. To prepare a release after a long idle period or an evicted cache, run `Prepare release caches` manually on `main` and wait for it to finish before tagging. GitHub allows tags to restore default-branch caches, but not caches created by other tags. Cargo timing reports are written to `target/cargo-timings/`; compare real release runs before claiming an end-to-end speedup.
+The first cold build still downloads and compiles dependencies. GitHub allows tags to restore default-branch caches, but not caches created by other tags. Cargo timing reports are written to `target/cargo-timings/`; compare real release runs before claiming an end-to-end speedup.
 
 For Windows distribution variants, build the modern installer once and then use `tauri bundle --config tauri-release.conf.json --config tauri-native.conf.json`. Both installers reuse the same updater-enabled executable; do not change compile-time features or application configuration between build and bundle. Published workflows keep release signing and updater verification enabled.
