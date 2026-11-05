@@ -67,6 +67,11 @@ to supply an extracted, Microsoft-signed fixed runtime locally. Release CI reuse
 the same application executable as the installers and packages resources and the
 runtime without a second Rust build.
 
+`Axolotl desktop CI` builds this ZIP for pushes to `ymcl-dev` and `main`, pull
+requests, and manual runs. Download the `YMCL-Windows-x64-portable` artifact from
+the run's summary; CI keeps it for 14 days. Tagged releases publish the same ZIP
+alongside the Windows installers as `YMCL_<version>_x64_portable.zip`.
+
 ## Building efficiently
 
 - `pnpm app:build` produces the normal optimized release build and installers.

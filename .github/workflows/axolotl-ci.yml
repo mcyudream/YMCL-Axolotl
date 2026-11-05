@@ -2,7 +2,7 @@ name: Axolotl desktop CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ymcl-dev]
     paths-ignore:
       - 'apps/telemetry-dashboard/**'
       - 'apps/telemetry-worker/**'
@@ -105,6 +105,7 @@ jobs:
       - name: Test version metadata writes
         run: cargo test --package theseus writing_version_info_creates_missing_parent_directory
       - name: Test portable storage and Windows ZIP contents
+        shell: pwsh
         run: |
           cargo test --package theseus --lib portable::
           if ($LASTEXITCODE -ne 0) { throw "Portable storage tests failed" }
@@ -140,6 +141,15 @@ jobs:
       - name: Package Windows portable edition from the same binary
         if: runner.os == 'Windows'
         run: node scripts/axolotl/package-portable.mjs
+      - name: Upload Windows portable edition
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: YMCL-Windows-x64-portable
+          path: target/release/bundle/portable/YMCL_*_x64_portable.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   website:
     needs: guardrails
