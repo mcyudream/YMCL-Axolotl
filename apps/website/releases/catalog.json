@@ -1,6 +1,45 @@
 {
-  "updated_at": "2026-11-04T12:58:24.598Z",
+  "updated_at": "2026-11-04T16:25:02.521Z",
   "announcements": [
+    {
+      "id": "launcher-2.1.2",
+      "version": "2.1.2",
+      "publishedAt": "2026-11-04",
+      "title": {
+        "en-US": "YMCL 2.1.2",
+        "zh-CN": "YMCL 2.1.2"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added progress, success, and failure feedback when clearing the app cache.",
+            "zh-CN": "清除应用缓存新增清理中、成功和失败反馈。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed the Cleanroom version list showing only outdated 0.3.x releases when newer versions are available.",
+            "zh-CN": "修复已有新版可用时，Cleanroom 版本列表仍只显示旧版 0.3.x 的问题。"
+          },
+          {
+            "en-US": "Fixed Cleanroom failing to launch from an external Minecraft directory because its core library was missing.",
+            "zh-CN": "修复使用外部 Minecraft 目录时，因缺少 Cleanroom 核心库而无法启动的问题。"
+          },
+          {
+            "en-US": "Fixed instance creation continuing to use cached loader lists after clearing the app cache.",
+            "zh-CN": "修复清除应用缓存后，创建实例仍使用旧加载器列表的问题。"
+          },
+          {
+            "en-US": "Fixed manual update checks missing available updates because of delayed delivery or an incorrect offline status.",
+            "zh-CN": "修复手动检查更新受延迟推送或错误离线状态影响，无法发现可用更新的问题。"
+          },
+          {
+            "en-US": "Fixed the update log labeling newer releases as historical versions.",
+            "zh-CN": "修复更新日志将较新版本显示为历史版本的问题。"
+          }
+        ]
+      }
+    },
     {
       "id": "launcher-2.1.1",
       "version": "2.1.1",

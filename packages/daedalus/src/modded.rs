@@ -16,7 +16,7 @@ pub const CURRENT_NEOFORGE_FORMAT_VERSION: usize = 1;
 /// Current OptiFine manifest cache format.
 pub const CURRENT_OPTIFINE_FORMAT_VERSION: usize = 1;
 /// Current Cleanroom manifest cache format.
-pub const CURRENT_CLEANROOM_FORMAT_VERSION: usize = 1;
+pub const CURRENT_CLEANROOM_FORMAT_VERSION: usize = 2;
 /// Current LiteLoader manifest cache format.
 pub const CURRENT_LITELOADER_FORMAT_VERSION: usize = 2;
 /// Current Legacy Fabric manifest cache format.
@@ -707,6 +707,11 @@ mod tests {
         assert_eq!(loader_manifest_metadata("quilt").format_version, 2);
         assert_eq!(loader_manifest_metadata("forge").format_version, 3);
         assert_eq!(loader_manifest_metadata("neo").format_version, 1);
+        assert_eq!(loader_manifest_metadata("cleanroom").format_version, 2);
+        assert_eq!(
+            loader_manifest_metadata("cleanroom").cache_key,
+            "cleanroom-v2"
+        );
         assert_eq!(loader_manifest_metadata("babric").format_version, 2);
         assert_eq!(loader_manifest_metadata("babric").cache_key, "babric-v2");
         assert_eq!(

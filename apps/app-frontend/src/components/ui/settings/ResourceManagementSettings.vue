@@ -5,16 +5,18 @@ import {
 	defineMessages,
 	IconButton,
 	injectNotificationManager,
+	NewButton,
+	NewModal,
 	Slider,
 	StyledInput,
 	Toggle,
 	useVIntl,
 } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
-import ConfirmModalWrapper from '@/components/ui/modal/ConfirmModalWrapper.vue'
 import { purge_cache_types } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
 import { syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
@@ -39,7 +41,8 @@ const props = defineProps({
 	},
 })
 
-const { handleError } = injectNotificationManager()
+const { addNotification, handleError } = injectNotificationManager()
+const queryClient = useQueryClient()
 const themeStore = useTheming()
 const ymclStore = useYmclStore()
 const settings = ref(await get())
@@ -47,6 +50,8 @@ const missingContentScannerSettings = ref(getMissingContentScannerSettings())
 const minecraftDirectories = ref(loadMinecraftDirectories())
 const minecraftDirectoryError = ref(null)
 const purgeCacheConfirmModal = ref(null)
+const purgeCacheStatus = ref('idle')
+const purgingCache = computed(() => purgeCacheStatus.value === 'pending')
 const { formatMessage } = useVIntl()
 
 const isPortable = ref(false)
@@ -180,6 +185,19 @@ const messages = defineMessages({
 	},
 	appCache: { id: 'app.settings.resources.app-cache', defaultMessage: 'App cache' },
 	purgeCache: { id: 'app.settings.resources.purge-cache', defaultMessage: 'Purge cache' },
+	purgingCache: {
+		id: 'app.settings.resources.purging-cache',
+		defaultMessage: 'Clearing cache…',
+	},
+	cachePurged: {
+		id: 'app.settings.resources.cache-purged',
+		defaultMessage: 'Cache cleared. Data will be fetched again when needed.',
+	},
+	cachePurgeFailed: {
+		id: 'app.settings.resources.cache-purge-failed',
+		defaultMessage: 'Could not clear the cache. Please try again.',
+	},
+	cancel: { id: 'app.settings.resources.cancel', defaultMessage: 'Cancel' },
 	appCacheDescription: {
 		id: 'app.settings.resources.app-cache-description',
 		defaultMessage:
@@ -687,30 +705,48 @@ watch(
 )
 
 async function purgeCache() {
-	await purge_cache_types([
-		'project',
-		'project_v3',
-		'curseforge_project',
-		'version',
-		'user',
-		'team',
-		'organization',
-		'file',
-		'loader_manifest',
-		'minecraft_manifest',
-		'categories',
-		'report_types',
-		'loaders',
-		'game_versions',
-		'donation_platforms',
-		'file_hash',
-		'file_update',
-		'search_results',
-		'search_results_v3',
-	]).catch(handleError)
+	if (purgingCache.value) return
+	purgeCacheStatus.value = 'pending'
+	try {
+		await queryClient.cancelQueries()
+		await purge_cache_types([
+			'project',
+			'project_v3',
+			'curseforge_project',
+			'version',
+			'version_v3',
+			'user',
+			'team',
+			'organization',
+			'file',
+			'loader_manifest',
+			'minecraft_manifest',
+			'categories',
+			'report_types',
+			'loaders',
+			'game_versions',
+			'donation_platforms',
+			'file_hash',
+			'file_update',
+			'search_results',
+			'search_results_v3',
+			'modpack_files',
+			'project_versions',
+		])
+		await queryClient.invalidateQueries({ refetchType: 'none' })
+		purgeCacheStatus.value = 'success'
+		await nextTick()
+		purgeCacheConfirmModal.value?.hide()
+		addNotification({ text: formatMessage(messages.cachePurged), type: 'success' })
+	} catch (error) {
+		purgeCacheStatus.value = 'error'
+		handleError(error)
+	}
 }
 
 function handlePurgeCacheClick() {
+	if (purgingCache.value) return
+	purgeCacheStatus.value = 'idle'
 	if (themeStore.getFeatureFlag('skip_non_essential_warnings')) {
 		void purgeCache()
 		return
@@ -784,15 +820,25 @@ function validateMinecraftDirectory(value) {
 
 <template>
 	<div class="flex flex-col gap-6">
-		<ConfirmModalWrapper
+		<NewModal
 			ref="purgeCacheConfirmModal"
-			:title="formatMessage(messages.purgeConfirmTitle)"
-			:description="formatMessage(messages.purgeConfirmDescription)"
-			:has-to-type="false"
-			:proceed-label="formatMessage(messages.purgeCache)"
-			:show-ad-on-close="false"
-			@proceed="purgeCache"
-		/>
+			:header="formatMessage(messages.purgeConfirmTitle)"
+			:disable-close="purgingCache"
+			max-width="550px"
+		>
+			<p class="m-0">{{ formatMessage(messages.purgeConfirmDescription) }}</p>
+			<p v-if="purgeCacheStatus === 'error'" role="alert" class="m-0 mt-3 text-red">
+				{{ formatMessage(messages.cachePurgeFailed) }}
+			</p>
+			<template #actions>
+				<NewButton :disabled="purgingCache" @click="purgeCacheConfirmModal?.hide()">
+					{{ formatMessage(messages.cancel) }}
+				</NewButton>
+				<NewButton type="colored" :loading="purgingCache" @click="purgeCache">
+					{{ formatMessage(purgingCache ? messages.purgingCache : messages.purgeCache) }}
+				</NewButton>
+			</template>
+		</NewModal>
 
 		<SettingsSection v-if="props.scope === 'storage-backups'">
 			<SettingsRow stacked>
@@ -877,12 +923,20 @@ function validateMinecraftDirectory(value) {
 						{{ formatMessage(messages.appCache) }}
 					</span>
 				</template>
-				<template #description>{{ formatMessage(messages.appCacheDescription) }}</template>
+				<template #description>
+					{{ formatMessage(messages.appCacheDescription) }}
+					<p v-if="purgeCacheStatus === 'success'" role="status" class="m-0 mt-2 text-green">
+						{{ formatMessage(messages.cachePurged) }}
+					</p>
+					<p v-else-if="purgeCacheStatus === 'error'" role="alert" class="m-0 mt-2 text-red">
+						{{ formatMessage(messages.cachePurgeFailed) }}
+					</p>
+				</template>
 				<template #control>
-					<button id="purge-cache" class="btn min-w-max" @click="handlePurgeCacheClick">
+					<NewButton id="purge-cache" :loading="purgingCache" @click="handlePurgeCacheClick">
 						<TrashIcon />
-						{{ formatMessage(messages.purgeCache) }}
-					</button>
+						{{ formatMessage(purgingCache ? messages.purgingCache : messages.purgeCache) }}
+					</NewButton>
 				</template>
 			</SettingsRow>
 			<SettingsRow>

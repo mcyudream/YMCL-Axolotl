@@ -7868,6 +7868,18 @@
 	"app.settings.resources.purge-cache": {
 		"message": "Purge cache"
 	},
+	"app.settings.resources.purging-cache": {
+		"message": "Clearing cache…"
+	},
+	"app.settings.resources.cache-purged": {
+		"message": "Cache cleared. Data will be fetched again when needed."
+	},
+	"app.settings.resources.cache-purge-failed": {
+		"message": "Could not clear the cache. Please try again."
+	},
+	"app.settings.resources.cancel": {
+		"message": "Cancel"
+	},
 	"app.settings.resources.purge-confirm-description": {
 		"message": "If you proceed, your entire cache will be purged. This may slow down the app temporarily."
 	},
