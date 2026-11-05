@@ -34,6 +34,33 @@ test('domain homes are opt-in and tolerate missing or malformed manifests', () =
 	}
 })
 
+test('mixed media preserves old image configurations and video copy through normalization', () => {
+	const home = normalizeDomainHomeLanding({
+		slides: [
+			{ id: 'image', image: '/one.png' },
+			{ id: 'video', video: '/movie.mp4', title: ' 视频 ', description: ' 介绍 ' },
+			{ id: 'last', image: '/two.png' },
+		],
+	})
+	assert.deepEqual(
+		home.slides.map((slide) => [slide.id, slide.image, slide.video]),
+		[
+			['image', '/one.png', ''],
+			['video', '', '/movie.mp4'],
+			['last', '/two.png', ''],
+		],
+	)
+	assert.equal(home.slides[1].title, '视频')
+	assert.equal(home.slides[1].description, '介绍')
+	assert.deepEqual(normalizeDomainHomeLanding(home), home)
+	assert.deepEqual(
+		normalizeDomainHomeLanding({
+			slides: [{ video: 'file:///tmp/movie.mp4' }, { video: 'javascript:alert(1)' }],
+		}).slides,
+		[],
+	)
+})
+
 test('shareable media supports remote and relative domain URLs', () => {
 	for (const url of [
 		'https://cdn.example/scene.webp',

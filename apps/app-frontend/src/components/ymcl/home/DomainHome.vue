@@ -8,9 +8,10 @@ import {
 } from '@modrinth/assets'
 import { defineMessages, useVIntl } from '@modrinth/ui'
 import { useDocumentVisibility, usePreferredReducedMotion } from '@vueuse/core'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 import DomainImg from '@/components/ymcl/DomainImg.vue'
+import { resolveDomainImageUrl } from '@/helpers/ymcl-domain-image'
 import { useYmclStore } from '@/store/ymcl'
 
 import {
@@ -22,6 +23,7 @@ import DomainHomeFocus from './DomainHomeFocus.vue'
 import DomainHomeLaunch from './DomainHomeLaunch.vue'
 import DomainHomeMusic from './DomainHomeMusic.vue'
 import DomainHomeProfile from './DomainHomeProfile.vue'
+import { releaseDomainHomeVideo, useDomainHomeCarousel } from './use-domain-home-carousel'
 
 const props = withDefaults(
 	defineProps<{
@@ -45,11 +47,37 @@ const slides = computed(() => {
 	const theme = store.manifest?.theme as { background?: { url?: string } } | undefined
 	const image = theme?.background?.url
 	return image && isDomainHomeMediaUrl(image)
-		? [{ id: 'domain-theme', image, title: '', description: '' }]
+		? [{ id: 'domain-theme', image, video: '', title: '', description: '' }]
 		: []
 })
-const slideIndex = ref(0)
-const currentSlide = computed(() => slides.value[slideIndex.value])
+const hovering = ref(false)
+const focusWithin = ref(false)
+const visibility = useDocumentVisibility()
+const reducedMotion = usePreferredReducedMotion()
+const video = ref<HTMLVideoElement>()
+const {
+	index: slideIndex,
+	currentSlide,
+	paused,
+	currentFailed,
+	loopVideo,
+	changeSlide,
+	onVideoEnded,
+	onVideoError,
+} = useDomainHomeCarousel({
+	slides,
+	interval: () => config.value.interval,
+	active: () => props.active,
+	visible: () => visibility.value === 'visible',
+	interacting: () => hovering.value || focusWithin.value,
+	reducedMotion: () => reducedMotion.value === 'reduce',
+	video,
+})
+const videoSource = computed(() =>
+	currentFailed.value
+		? null
+		: resolveDomainImageUrl(currentSlide.value?.video, store.activeDomain?.origin),
+)
 const copy = computed(() => ({
 	title:
 		(config.value.copyMode === 'individual' && currentSlide.value?.title) ||
@@ -60,12 +88,6 @@ const copy = computed(() => ({
 		config.value.description ||
 		store.manifest?.domain?.description,
 }))
-const paused = ref(false)
-const hovering = ref(false)
-const focusWithin = ref(false)
-const visibility = useDocumentVisibility()
-const reducedMotion = usePreferredReducedMotion()
-let timer: ReturnType<typeof setInterval> | undefined
 
 const messages = defineMessages({
 	home: { id: 'app.ymcl.landing.home', defaultMessage: 'Domain home' },
@@ -76,52 +98,6 @@ const messages = defineMessages({
 	slide: { id: 'app.ymcl.landing.slide', defaultMessage: 'Background {index} of {total}' },
 	pause: { id: 'app.ymcl.landing.pause', defaultMessage: 'Pause slideshow' },
 	resume: { id: 'app.ymcl.landing.resume', defaultMessage: 'Resume slideshow' },
-})
-
-function clearTimer() {
-	if (timer !== undefined) clearInterval(timer)
-	timer = undefined
-}
-function changeSlide(index: number) {
-	if (!slides.value.length) return
-	slideIndex.value = (index + slides.value.length) % slides.value.length
-}
-watch(
-	() => slides.value.map((slide) => `${slide.id}:${slide.image}`).join('\n'),
-	() => {
-		slideIndex.value = 0
-	},
-)
-watch(
-	[
-		() => props.active,
-		() => slides.value.length,
-		() => config.value.interval,
-		paused,
-		hovering,
-		focusWithin,
-		visibility,
-		reducedMotion,
-		slideIndex,
-	],
-	() => {
-		clearTimer()
-		if (
-			!props.active ||
-			slides.value.length < 2 ||
-			paused.value ||
-			hovering.value ||
-			focusWithin.value ||
-			visibility.value !== 'visible' ||
-			reducedMotion.value === 'reduce'
-		)
-			return
-		timer = setInterval(() => changeSlide(slideIndex.value + 1), config.value.interval * 1000)
-	},
-	{ immediate: true },
-)
-onUnmounted(() => {
-	clearTimer()
 })
 
 function onFocusOut(event: FocusEvent) {
@@ -145,6 +121,25 @@ function onFocusOut(event: FocusEvent) {
 				class="domain-home-background"
 				:class="{ 'is-current': index === slideIndex }"
 			/>
+			<Transition
+				name="domain-home-video"
+				@before-leave="(element) => (element as HTMLVideoElement).pause()"
+				@after-leave="(element) => releaseDomainHomeVideo(element as HTMLVideoElement)"
+			>
+				<video
+					v-if="videoSource"
+					ref="video"
+					:key="`${currentSlide?.id}:${videoSource}`"
+					:src="videoSource"
+					:loop="loopVideo"
+					muted
+					playsinline
+					preload="metadata"
+					class="domain-home-background is-current"
+					@ended="onVideoEnded"
+					@error="onVideoError"
+				/>
+			</Transition>
 		</div>
 		<div class="domain-home-shade" aria-hidden="true" />
 		<header class="domain-home-header shrink-0">
@@ -190,7 +185,7 @@ function onFocusOut(event: FocusEvent) {
 		</div>
 
 		<nav
-			v-if="slides.length > 1"
+			v-if="slides.length > 1 || currentSlide?.video"
 			class="domain-home-carousel shrink-0"
 			:aria-label="formatMessage(messages.home)"
 			@mouseenter="hovering = true"
@@ -199,6 +194,7 @@ function onFocusOut(event: FocusEvent) {
 			@focusout="onFocusOut"
 		>
 			<button
+				v-if="slides.length > 1"
 				type="button"
 				class="domain-home-circle"
 				:aria-label="formatMessage(messages.previous)"
@@ -206,7 +202,7 @@ function onFocusOut(event: FocusEvent) {
 			>
 				<ChevronLeftIcon />
 			</button>
-			<div class="domain-home-dots">
+			<div v-if="slides.length > 1" class="domain-home-dots">
 				<button
 					v-for="(slide, index) in slides"
 					:key="slide.id"
@@ -219,6 +215,7 @@ function onFocusOut(event: FocusEvent) {
 				</button>
 			</div>
 			<button
+				v-if="slides.length > 1"
 				type="button"
 				class="domain-home-circle"
 				:aria-label="formatMessage(messages.next)"
@@ -227,7 +224,6 @@ function onFocusOut(event: FocusEvent) {
 				<ChevronRightIcon />
 			</button>
 			<button
-				v-if="reducedMotion !== 'reduce'"
 				type="button"
 				class="domain-home-circle"
 				:aria-label="formatMessage(paused ? messages.resume : messages.pause)"
@@ -290,6 +286,10 @@ function onFocusOut(event: FocusEvent) {
 }
 .domain-home-background.is-current {
 	opacity: 1;
+}
+.domain-home-background.domain-home-video-enter-from,
+.domain-home-background.domain-home-video-leave-to {
+	opacity: 0;
 }
 .domain-home-shade {
 	background:

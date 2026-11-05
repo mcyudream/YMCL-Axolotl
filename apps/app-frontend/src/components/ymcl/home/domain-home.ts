@@ -2,6 +2,7 @@
 export interface DomainHomeSlide {
 	id: string
 	image: string
+	video: string
 	title: string
 	description: string
 }
@@ -67,12 +68,19 @@ export function normalizeDomainHomeLanding(value: unknown): DomainHomeLanding {
 	const slides: DomainHomeSlide[] = []
 	for (const [index, value] of (Array.isArray(source.slides) ? source.slides : []).entries()) {
 		const slide = record(value)
-		const image = text(slide.image)
-		if (!isDomainHomeMediaUrl(image) || slides.length >= DOMAIN_HOME_MAX_SLIDES) continue
+		const video = text(slide.video)
+		const image = video ? '' : text(slide.image)
+		if (!isDomainHomeMediaUrl(video || image) || slides.length >= DOMAIN_HOME_MAX_SLIDES) continue
 		let id = text(slide.id) || `slide-${index}`
 		while (ids.has(id)) id += '-duplicate'
 		ids.add(id)
-		slides.push({ id, image, title: text(slide.title), description: text(slide.description) })
+		slides.push({
+			id,
+			image,
+			video,
+			title: text(slide.title),
+			description: text(slide.description),
+		})
 	}
 	return {
 		enabled: source.enabled === true,
