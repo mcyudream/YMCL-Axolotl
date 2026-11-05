@@ -1,6 +1,37 @@
 {
-  "updated_at": "2026-11-05T03:58:50.011Z",
+  "updated_at": "2026-11-05T05:53:43.684Z",
   "announcements": [
+    {
+      "id": "launcher-2.1.4",
+      "version": "2.1.4",
+      "publishedAt": "2026-11-04",
+      "title": {
+        "en-US": "YMCL 2.1.4",
+        "zh-CN": "YMCL 2.1.4"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added mixed image and video carousels to domain homepages, advancing to the next slide when a video finishes.",
+            "zh-CN": "域首页新增图片与视频混合轮播，视频播放完毕后自动切换到下一项。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed loader version mismatch errors when publishing or exporting externally linked instances, including Cleanroom 0.6.8-alpha.",
+            "zh-CN": "修复外部关联实例发布或导出 mrpack 时误报加载器版本不匹配的问题，支持正确读取 Cleanroom 0.6.8-alpha 等实际安装版本。"
+          },
+          {
+            "en-US": "Fixed Windows portable downloads missing from the update platform after release.",
+            "zh-CN": "修复 Windows 绿色版发布后未显示在更新平台下载列表中的问题。"
+          }
+        ]
+      },
+      "notes": {
+        "en-US": "Domain homepage video carousels require YMCL domain adapter 0.21.0 or later.",
+        "zh-CN": "域首页视频轮播需要域服务端的 YMCL 适配插件升级至 0.21.0 或更高版本。"
+      }
+    },
     {
       "id": "launcher-2.1.3",
       "version": "2.1.3",
