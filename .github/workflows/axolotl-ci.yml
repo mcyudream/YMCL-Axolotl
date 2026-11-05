@@ -79,7 +79,11 @@ jobs:
       - name: Test mod dependency presentation
         working-directory: apps/app-frontend
         run: node --test src/helpers/content-dependencies.test.ts
-      - name: Build Windows app and type-check frontend
-        # The Tauri beforeBuildCommand compiles the frontend once. Installers and
-        # the WebView2 portable archive are produced only by the release workflow.
-        run: pnpm --filter @modrinth/app tauri build --no-bundle --config tauri-release.conf.json
+      - name: Build and type-check desktop frontend
+        run: pnpm exec turbo run build --filter=@modrinth/app-frontend
+        env:
+          TAURI_ENV_PLATFORM: windows
+      - name: Check Windows desktop app
+        # Reuse the test profile. Optimized binaries, installers and the WebView2
+        # portable archive are produced only by the release workflow.
+        run: cargo check --locked --package ymcl_gui --features updater

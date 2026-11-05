@@ -110,13 +110,20 @@ async fn portable_child() {
         );
         let settings = Settings::get(&pool).await.unwrap();
         assert_eq!(
-            settings.custom_background_path.as_deref(),
-            background.to_str()
+            settings
+                .custom_background_path
+                .as_deref()
+                .map(PathBuf::from),
+            Some(background.clone())
         );
         assert_eq!(
-            settings.backup_repository_path.as_deref(),
-            backups.to_str()
+            settings
+                .backup_repository_path
+                .as_deref()
+                .map(PathBuf::from),
+            Some(backups)
         );
+        assert_eq!(std::fs::read_to_string(background).unwrap(), "background");
         assert_eq!(std::fs::read_to_string(&world).unwrap(), "world data");
         JavaVersion::remove_default_for_path(&runtime.path, &pool)
             .await

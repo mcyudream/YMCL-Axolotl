@@ -124,7 +124,7 @@ YMCL 的产品改动主要位于：
 
 默认开发分支是 `ymcl-dev`。自动检查按实际改动分开运行：
 
-- **Axolotl desktop CI**：迁移保护、品牌与国际化检查、构建脚本测试、Rust 格式与相关回归测试，并编译一次 Windows 应用。Tauri 构建同时完成前端类型检查；普通提交不生成安装包或下载完整 WebView2。
+- **Axolotl desktop CI**：迁移保护、品牌与国际化检查、构建脚本测试、Rust 格式与相关回归测试，构建并检查前端类型，再用测试编译配置检查 Windows 应用。普通提交不执行发布优化、生成安装包或下载完整 WebView2。
 - **Axolotl website CI**：只在网站、共享前端包或依赖配置变化时构建网站。
 - **Axolotl release**：推送版本标签后生成签名更新包、两种 Windows 安装包和内置 WebView2 的绿色 ZIP，并发布到 GitHub 和更新平台。
 

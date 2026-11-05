@@ -76,12 +76,13 @@ test('normal frontend builds remain checked and do not refresh remote source dat
 	assert.match(scripts['contributors:sync'], /sync-contributors\.mjs/)
 })
 
-test('CI builds the app once and leaves distribution packaging to releases', async () => {
+test('CI checks the app and leaves optimized builds and packaging to releases', async () => {
 	const ci = parse(await readFile(join(root, '.github/workflows/axolotl-ci.yml'), 'utf8'))
 	const release = parse(await readFile(join(root, '.github/workflows/axolotl-release.yml'), 'utf8'))
 	const commands = ci.jobs.desktop.steps.map((step) => step.run ?? '').join('\n')
-	assert.match(commands, /tauri build --no-bundle --config tauri-release\.conf\.json/)
-	assert.doesNotMatch(commands, /cargo check|turbo run build|tauri bundle|package-portable\.mjs/)
+	assert.match(commands, /cargo check --locked --package ymcl_gui --features updater/)
+	assert.match(commands, /turbo run build --filter=@modrinth\/app-frontend/)
+	assert.doesNotMatch(commands, /tauri build|tauri bundle|package-portable\.mjs/)
 	assert.ok(release.jobs.build.steps.some((step) => step.run?.includes('package-portable.mjs')))
 	const preflight = release.jobs.preflight.steps.map((step) => step.run ?? '').join('\n')
 	assert.doesNotMatch(preflight, /turbo run build/)

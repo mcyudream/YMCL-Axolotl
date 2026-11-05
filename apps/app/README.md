@@ -67,7 +67,7 @@ to supply an extracted, Microsoft-signed fixed runtime locally. Release CI reuse
 the same application executable as the installers and packages resources and the
 runtime without a second Rust build.
 
-`Axolotl desktop CI` compiles and tests the Windows app on `ymcl-dev` and pull
+`Axolotl desktop CI` checks and tests the Windows app on `ymcl-dev` and pull
 requests. Tagged releases generate the full ZIP alongside the Windows installers
 as `YMCL_<version>_x64_portable.zip`; ordinary CI runs skip distribution packaging
 and the WebView2 download.
@@ -90,7 +90,7 @@ Normal Tauri builds also prepare shared resources automatically. Java agents liv
 
 Release jobs restore pnpm/npm packages, Cargo dependencies, Gradle/JDK downloads, Java agents, Blockbench resources, frontend build results, Linux package downloads, and Tauri packaging tools. Linux package installation and signature/checksum verification are retained. Build checkouts are shallow; only release preflight fetches history for its guardrails.
 
-Desktop CI and releases use the same Windows runner, ThinLTO profile, dependency cache and resource setup. Cache preparation happens during these real builds; there is no separate cache-warming workflow. Workspace Rust outputs that may embed release secrets are excluded from the shared cache. Windows installer variants reuse one compiled application binary.
+Desktop CI and releases use the same Windows runner, dependency cache and resource setup. Ordinary CI checks use the test profile; only releases compile optimized ThinLTO binaries. Cache preparation happens during these real builds; there is no separate cache-warming workflow. Workspace Rust outputs that may embed release secrets are excluded from the shared cache. Windows installer variants reuse one compiled application binary.
 
 The first cold build still downloads and compiles dependencies. GitHub allows tags to restore default-branch caches, but not caches created by other tags. Cargo timing reports are written to `target/cargo-timings/`; compare real release runs before claiming an end-to-end speedup.
 
