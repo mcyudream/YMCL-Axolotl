@@ -180,6 +180,8 @@ async fn write_pack_archive(
     let mut file = File::create(export_path)
         .await
         .map_err(|e| IOError::with_path(e, export_path))?;
+    let archive_path = io::canonicalize(export_path)?;
+    let destination = destination.and_then(|path| io::canonicalize(path).ok());
     let mut writer = ZipFileWriter::with_tokio(&mut file);
     let version_id = version_id.unwrap_or("1.0.0".to_string());
     let loading_bar = init_loading(
@@ -270,8 +272,8 @@ async fn write_pack_archive(
         };
         if !metadata.is_file()
             || remote_paths.contains(&exported_path)
-            || path == export_path
-            || destination == Some(path)
+            || path == &archive_path
+            || destination.as_ref() == Some(path)
             || !is_export_candidate_included(
                 relative_path.as_str(),
                 &included_export_candidates,
@@ -1174,7 +1176,9 @@ mod tests {
         .await
         .unwrap();
 
-        let export_target = version_dir.join("out.zip");
+        let alias_dir = version_dir.join("export-path");
+        std::fs::create_dir(&alias_dir).unwrap();
+        let export_target = alias_dir.join("..").join("out.zip");
         std::fs::write(&export_target, b"old archive must not be included")
             .unwrap();
         std::fs::write(version_dir.join("options.txt"), b"lang:en_us").unwrap();
@@ -1194,17 +1198,33 @@ mod tests {
         assert!(archive.by_name("options.txt").is_ok());
         assert!(archive.by_name("out.zip").is_err());
         assert_eq!(archive.len(), 1);
-        for (format, filename, manifest) in [
-            (ExportFormat::Modrinth, "out.mrpack", "modrinth.index.json"),
-            (ExportFormat::Curseforge, "curseforge.zip", "manifest.json"),
+        for (format, folder, filename, manifest) in [
+            (
+                ExportFormat::Modrinth,
+                "mrpack-export",
+                "out.mrpack",
+                "modrinth.index.json",
+            ),
+            (
+                ExportFormat::Curseforge,
+                "curseforge-export",
+                "out.zip",
+                "manifest.json",
+            ),
         ] {
-            let target = version_dir.join(filename);
+            let export_folder = version_dir.join(folder);
+            std::fs::create_dir(&export_folder).unwrap();
+            std::fs::write(export_folder.join("options.txt"), b"lang:en_us")
+                .unwrap();
+            let target = export_folder.join(filename);
+            std::fs::write(&target, b"old archive must not be included")
+                .unwrap();
             tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 super::export_pack(
                     &instance.id,
                     target.clone(),
-                    vec!["options.txt".into()],
+                    vec![folder.into()],
                     None,
                     None,
                     None,
@@ -1218,7 +1238,12 @@ mod tests {
                 zip::ZipArchive::new(std::fs::File::open(target).unwrap())
                     .unwrap();
             assert!(archive.by_name(manifest).is_ok());
-            assert!(archive.by_name("overrides/options.txt").is_ok());
+            assert!(
+                archive
+                    .by_name(&format!("overrides/{folder}/options.txt"))
+                    .is_ok()
+            );
+            assert_eq!(archive.len(), 2);
         }
     }
 }
