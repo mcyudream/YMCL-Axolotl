@@ -14,6 +14,7 @@ pub mod icon;
 mod legacy_forge;
 pub mod manifest;
 mod mcmod_info;
+pub(crate) mod release_constraints;
 mod toml_mod;
 
 use bytes::Bytes;

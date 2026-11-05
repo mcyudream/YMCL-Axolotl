@@ -531,7 +531,32 @@ async fn refresh_snapshot_dependencies(
         return Ok(());
     }
     let _instance_lock = state.lock_instance_content(instance_id).await;
+    let replacements = if backfill.rejected_pairs.is_empty() {
+        HashMap::new()
+    } else {
+        let existing = content_rows::get_content_dependency_edges(
+            &content_set.id,
+            &state.pool,
+        )
+        .await?;
+        dependency_parent_replacements(&existing, &backfill.rejected_pairs)
+    };
+    if backfill.edges.is_empty()
+        && backfill.backfilled_entry_ids.is_empty()
+        && replacements.is_empty()
+    {
+        return Ok(());
+    }
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    for (parent_entry_id, retained) in &replacements {
+        content_rows::replace_content_dependency_edges_for_parent(
+            &content_set.id,
+            parent_entry_id,
+            retained,
+            &mut tx,
+        )
+        .await?;
+    }
     for edge in &backfill.edges {
         content_rows::upsert_content_dependency_edge_in_transaction(
             edge, &mut tx,
@@ -1039,12 +1064,44 @@ fn normalized_content_path(path: &str) -> String {
 struct DependencyBackfill {
     edges: Vec<crate::state::instances::ContentDependencyEdge>,
     backfilled_entry_ids: HashSet<String>,
+    rejected_pairs: HashSet<(String, String)>,
 }
 
 impl DependencyBackfill {
     fn is_empty(&self) -> bool {
-        self.edges.is_empty() && self.backfilled_entry_ids.is_empty()
+        self.edges.is_empty()
+            && self.backfilled_entry_ids.is_empty()
+            && self.rejected_pairs.is_empty()
     }
+}
+
+fn dependency_parent_replacements(
+    existing: &[crate::state::instances::ContentDependencyEdge],
+    rejected_pairs: &HashSet<(String, String)>,
+) -> HashMap<String, Vec<crate::state::instances::ContentDependencyEdge>> {
+    let is_rejected =
+        |edge: &crate::state::instances::ContentDependencyEdge| {
+            edge.dependency_kind
+                == crate::state::instances::ContentDependencyKind::Required
+                && rejected_pairs.contains(&(
+                    edge.parent_entry_id.clone(),
+                    edge.child_entry_id.clone(),
+                ))
+        };
+    let mut replacements = HashMap::<String, Vec<_>>::new();
+    for edge in existing.iter().filter(|edge| is_rejected(edge)) {
+        replacements
+            .entry(edge.parent_entry_id.clone())
+            .or_default();
+    }
+    for edge in existing {
+        if let Some(retained) = replacements.get_mut(&edge.parent_entry_id)
+            && !is_rejected(edge)
+        {
+            retained.push(edge.clone());
+        }
+    }
+    replacements
 }
 
 fn dependency_parents_with_evidence(
@@ -1464,15 +1521,16 @@ fn backfill_local_dependency_edges(
         })
         .map(|edge| (edge.parent_entry_id.clone(), edge.child_entry_id.clone()))
         .collect::<HashSet<_>>();
-    let mut entry_id_by_mod_id = HashMap::new();
+    let mut entry_ids_by_mod_id = HashMap::<&str, Vec<&str>>::new();
     for entry in entries {
         let Some(metadata) = local_metadata_by_entry.get(&entry.id) else {
             continue;
         };
         for mod_id in metadata.mod_ids() {
-            entry_id_by_mod_id
+            entry_ids_by_mod_id
                 .entry(mod_id)
-                .or_insert(entry.id.as_str());
+                .or_default()
+                .push(entry.id.as_str());
         }
     }
 
@@ -1483,49 +1541,86 @@ fn backfill_local_dependency_edges(
         let Some(dependencies) = metadata.dependencies.as_ref() else {
             continue;
         };
+        let mut checked_children = HashSet::new();
         for dependency in dependencies {
-            let Some(child_entry_id) =
-                entry_id_by_mod_id.get(dependency.mod_id.as_str())
-            else {
-                continue;
-            };
-            if *child_entry_id == entry.id {
-                continue;
-            }
-            if !linked_pairs
-                .insert((entry.id.clone(), (*child_entry_id).to_string()))
+            for child_entry_id in entry_ids_by_mod_id
+                .get(dependency.mod_id.as_str())
+                .into_iter()
+                .flatten()
             {
-                continue;
+                if *child_entry_id == entry.id
+                    || !checked_children.insert(*child_entry_id)
+                {
+                    continue;
+                }
+                let Some(child_metadata) =
+                    local_metadata_by_entry.get(*child_entry_id)
+                else {
+                    continue;
+                };
+                let satisfies_all = dependencies
+                    .iter()
+                    .filter(|required| {
+                        child_metadata
+                            .mod_ids()
+                            .any(|id| id == required.mod_id)
+                    })
+                    .all(|required| {
+                        required.version_range.as_deref().is_none_or(|range| {
+                            child_metadata
+                                .version_for_mod(&required.mod_id)
+                                .is_some_and(|version| {
+                                    crate::mod_metadata::release_constraints::matches_release_constraint(range, version)
+                                })
+                        })
+                    });
+                if !satisfies_all {
+                    let is_rejected =
+                        |edge: &crate::state::instances::ContentDependencyEdge| {
+                            edge.parent_entry_id == entry.id
+                                && edge.child_entry_id == *child_entry_id
+                                && edge.dependency_kind
+                                    == crate::state::instances::ContentDependencyKind::Required
+                        };
+                    backfill.edges.retain(|edge| !is_rejected(edge));
+                    if existing.iter().any(is_rejected) {
+                        backfill.rejected_pairs.insert((
+                            entry.id.clone(),
+                            (*child_entry_id).to_string(),
+                        ));
+                    }
+                    continue;
+                }
+                if !linked_pairs
+                    .insert((entry.id.clone(), (*child_entry_id).to_string()))
+                {
+                    continue;
+                }
+                let now = chrono::Utc::now();
+                let parent =
+                    embedded_dependency_ref(&entry.id, metadata, refs_by_entry);
+                let child = embedded_dependency_ref(
+                    child_entry_id,
+                    child_metadata,
+                    refs_by_entry,
+                );
+                backfill.edges.push(crate::state::instances::ContentDependencyEdge {
+                    id: format!("content-dependency:{}", uuid::Uuid::new_v4()),
+                    content_set_id: content_set.id.clone(),
+                    parent_entry_id: entry.id.clone(),
+                    child_entry_id: (*child_entry_id).to_string(),
+                    evidence_provider: ContentProvider::Local,
+                    parent_provider: parent.provider,
+                    child_provider: child.provider,
+                    dependency_kind: crate::state::instances::ContentDependencyKind::Required,
+                    parent_project_id: parent.project_id,
+                    parent_release_id: parent.release_id,
+                    child_project_id: child.project_id,
+                    child_release_id: child.release_id,
+                    created_at: now,
+                    modified_at: now,
+                });
             }
-            let Some(child_metadata) =
-                local_metadata_by_entry.get(*child_entry_id)
-            else {
-                continue;
-            };
-            let now = chrono::Utc::now();
-            let parent =
-                embedded_dependency_ref(&entry.id, metadata, refs_by_entry);
-            let child = embedded_dependency_ref(
-                child_entry_id,
-                child_metadata,
-                refs_by_entry,
-            );
-            backfill.edges.push(crate::state::instances::ContentDependencyEdge {
-                id: format!("content-dependency:{}", uuid::Uuid::new_v4()),
-                content_set_id: content_set.id.clone(),
-                parent_entry_id: entry.id.clone(),
-                child_entry_id: (*child_entry_id).to_string(),
-                evidence_provider: ContentProvider::Local,
-                parent_provider: parent.provider,
-                child_provider: child.provider,
-                dependency_kind: crate::state::instances::ContentDependencyKind::Required,
-                parent_project_id: parent.project_id,
-                parent_release_id: parent.release_id,
-                child_project_id: child.project_id,
-                child_release_id: child.release_id,
-                created_at: now,
-                modified_at: now,
-            });
         }
     }
 }
@@ -1820,6 +1915,248 @@ mod tests {
         }
     }
 
+    fn bundled_dependency_metadata(
+        dependencies: serde_json::Value,
+    ) -> HashMap<String, crate::mod_metadata::LocalModMetadata> {
+        HashMap::from([
+            (
+                "parent".to_string(),
+                serde_json::from_value(serde_json::json!({
+                    "mod_id": "parent", "dependencies": dependencies,
+                }))
+                .unwrap(),
+            ),
+            (
+                "child".to_string(),
+                serde_json::from_value(serde_json::json!({
+                    "mod_id": "main", "version": "1.0",
+                    "additional_mods": [
+                        {"mod_id": "first", "version": "2.5"},
+                        {"mod_id": "second", "version": "3.5"}
+                    ],
+                    "dependencies": [],
+                }))
+                .unwrap(),
+            ),
+        ])
+    }
+
+    #[test]
+    fn embedded_dependencies_use_bundled_alias_versions() {
+        let entries =
+            vec![dependency_entry("parent"), dependency_entry("child")];
+        for (primary_version, alias_version, expected) in [
+            ("1.0", "2.5", true),
+            ("2.5", "7.0", false),
+            ("2.5", "1.0", false),
+            ("7.0", "2.5", true),
+        ] {
+            let mut metadata = bundled_dependency_metadata(serde_json::json!([
+                {"mod_id": "first", "version_range": "[2,3)"}
+            ]));
+            let child = metadata.get_mut("child").unwrap();
+            child.version = Some(primary_version.to_string());
+            child.additional_mods[0].version = Some(alias_version.to_string());
+            let mut backfill = DependencyBackfill::default();
+            backfill_local_dependency_edges(
+                &entries,
+                &HashMap::new(),
+                &[],
+                &dependency_content_set(),
+                &metadata,
+                &mut backfill,
+            );
+            assert_eq!(
+                backfill.edges.len(),
+                usize::from(expected),
+                "primary {primary_version}, alias {alias_version}"
+            );
+            if expected {
+                assert_eq!(backfill.edges[0].child_project_id, "local:main");
+                assert_eq!(backfill.edges[0].child_release_id, primary_version);
+            }
+        }
+        let mut metadata = bundled_dependency_metadata(serde_json::json!([
+            {"mod_id": "first", "version_range": "[2,3)"}
+        ]));
+        let compatible = metadata["child"].clone();
+        metadata.get_mut("child").unwrap().additional_mods[0].version =
+            Some("7.0".to_string());
+        metadata.insert("compatible".to_string(), compatible);
+        for candidates in [["child", "compatible"], ["compatible", "child"]] {
+            let entries = vec![
+                dependency_entry("parent"),
+                dependency_entry(candidates[0]),
+                dependency_entry(candidates[1]),
+            ];
+            let mut backfill = DependencyBackfill::default();
+            backfill_local_dependency_edges(
+                &entries,
+                &HashMap::new(),
+                &[],
+                &dependency_content_set(),
+                &metadata,
+                &mut backfill,
+            );
+            assert_eq!(backfill.edges.len(), 1);
+            assert_eq!(backfill.edges[0].child_entry_id, "compatible");
+        }
+    }
+
+    #[test]
+    fn embedded_dependencies_require_all_bundled_constraints() {
+        let entries =
+            vec![dependency_entry("parent"), dependency_entry("child")];
+        for dependencies in [
+            serde_json::json!([
+                {"mod_id": "first", "version_range": "[2,3)"},
+                {"mod_id": "first", "version_range": "[3,4)"}
+            ]),
+            serde_json::json!([
+                {"mod_id": "main", "version_range": "[1,2)"},
+                {"mod_id": "first", "version_range": "[3,4)"}
+            ]),
+            serde_json::json!([
+                {"mod_id": "first", "version_range": "[2,3)"},
+                {"mod_id": "second", "version_range": "[4,5)"}
+            ]),
+        ] {
+            for reverse in [false, true] {
+                let mut declarations = dependencies.as_array().unwrap().clone();
+                if reverse {
+                    declarations.reverse();
+                }
+                let metadata = bundled_dependency_metadata(
+                    serde_json::Value::Array(declarations),
+                );
+                let mut backfill = DependencyBackfill::default();
+                backfill_local_dependency_edges(
+                    &entries,
+                    &HashMap::new(),
+                    &[],
+                    &dependency_content_set(),
+                    &metadata,
+                    &mut backfill,
+                );
+                assert!(
+                    backfill.is_empty(),
+                    "all constraints must hold regardless of order: {dependencies}, reverse={reverse}"
+                );
+            }
+        }
+        let metadata = bundled_dependency_metadata(serde_json::json!([
+            {"mod_id": "main", "version_range": "[1,2)"},
+            {"mod_id": "first", "version_range": "[2,3)"},
+            {"mod_id": "second", "version_range": "[3,4)"},
+            {"mod_id": "first", "version_range": "[2,4)"}
+        ]));
+        let mut backfill = DependencyBackfill::default();
+        backfill_local_dependency_edges(
+            &entries,
+            &HashMap::new(),
+            &[],
+            &dependency_content_set(),
+            &metadata,
+            &mut backfill,
+        );
+        assert_eq!(backfill.edges.len(), 1);
+    }
+
+    #[test]
+    fn incompatible_bundled_constraints_remove_only_rejected_required_edges() {
+        let entries =
+            vec![dependency_entry("parent"), dependency_entry("child")];
+        let mut metadata = bundled_dependency_metadata(serde_json::json!([
+            {"mod_id": "first", "version_range": "[2,3)"}
+        ]));
+        let mut seed = DependencyBackfill::default();
+        backfill_local_dependency_edges(
+            &entries,
+            &HashMap::new(),
+            &[],
+            &dependency_content_set(),
+            &metadata,
+            &mut seed,
+        );
+        metadata.get_mut("child").unwrap().additional_mods[0].version =
+            Some("7.0".to_string());
+        for provider in [
+            ContentProvider::Local,
+            ContentProvider::Modrinth,
+            ContentProvider::CurseForge,
+        ] {
+            let mut incompatible = seed.edges[0].clone();
+            incompatible.evidence_provider = provider;
+            let mut included = incompatible.clone();
+            included.id = "included".to_string();
+            included.dependency_kind =
+                crate::state::instances::ContentDependencyKind::Include;
+            let mut valid = incompatible.clone();
+            valid.id = "valid-other-child".to_string();
+            valid.child_entry_id = "other-child".to_string();
+            valid.evidence_provider = ContentProvider::CurseForge;
+            let mut unrelated = incompatible.clone();
+            unrelated.id = "unrelated-parent".to_string();
+            unrelated.parent_entry_id = "other-parent".to_string();
+            unrelated.evidence_provider = ContentProvider::Modrinth;
+            let existing =
+                vec![incompatible.clone(), included, valid, unrelated];
+            let existing_facts = serde_json::to_value(&existing).unwrap();
+            let mut backfill = DependencyBackfill {
+                edges: vec![incompatible.clone()],
+                ..Default::default()
+            };
+            backfill_local_dependency_edges(
+                &entries,
+                &HashMap::new(),
+                &existing,
+                &dependency_content_set(),
+                &metadata,
+                &mut backfill,
+            );
+            assert!(backfill.edges.is_empty());
+            assert!(!backfill.is_empty());
+            assert_eq!(
+                backfill.rejected_pairs,
+                HashSet::from([("parent".to_string(), "child".to_string())])
+            );
+            let replacements = dependency_parent_replacements(
+                &existing,
+                &backfill.rejected_pairs,
+            );
+            assert_eq!(replacements.len(), 1);
+            assert_eq!(
+                serde_json::to_value(&replacements["parent"]).unwrap(),
+                serde_json::to_value(&existing[1..3]).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&existing).unwrap(),
+                existing_facts
+            );
+            assert!(
+                dependency_parent_replacements(
+                    &existing[1..],
+                    &backfill.rejected_pairs,
+                )
+                .is_empty(),
+                "no replacement when the rejected relation is already gone"
+            );
+            let mut fresh = DependencyBackfill {
+                edges: vec![incompatible],
+                ..Default::default()
+            };
+            backfill_local_dependency_edges(
+                &entries,
+                &HashMap::new(),
+                &[],
+                &dependency_content_set(),
+                &metadata,
+                &mut fresh,
+            );
+            assert!(fresh.is_empty());
+        }
+    }
+
     #[test]
     fn embedded_dependencies_supplement_provider_edges_and_resolve_bundled_ids()
     {
@@ -2098,6 +2435,7 @@ mod tests {
                                     backfilled_entry_ids: HashSet::from([
                                         "third".to_string(),
                                     ]),
+                                    ..Default::default()
                                 }),
                             )
                         }
