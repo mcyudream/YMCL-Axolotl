@@ -736,7 +736,7 @@ pub async fn restore_pack_member_default(
 					ownership_kind: ContentOwnershipKind::PackManaged,
 					manual_operation_kind: crate::state::instances::ManualDownloadOperationKind::ContentUpdate,
 					game_version: Some(content_set.game_version),
-					mod_loader_type: curseforge_loader_type(content_set.loader),
+					mod_loader_type: content_set.loader.curseforge_loader_type(),
 					world_name: None,
 					install_dependencies: false,
 					excluded_dependency_project_ids: Vec::new(),
@@ -876,20 +876,6 @@ async fn content_mutation_target(
         )
         .into()
     })
-}
-
-fn curseforge_loader_type(loader: crate::state::ModLoader) -> Option<u32> {
-    match loader {
-        crate::state::ModLoader::Forge | crate::state::ModLoader::Cleanroom => {
-            Some(1)
-        }
-        crate::state::ModLoader::LiteLoader => Some(3),
-        crate::state::ModLoader::Fabric
-        | crate::state::ModLoader::LegacyFabric => Some(4),
-        crate::state::ModLoader::Quilt => Some(5),
-        crate::state::ModLoader::NeoForge => Some(6),
-        _ => None,
-    }
 }
 
 #[tracing::instrument]

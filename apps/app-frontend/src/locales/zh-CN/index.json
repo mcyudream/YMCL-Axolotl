@@ -2998,6 +2998,12 @@
 	"app.instance.mods.bulk-update.resolving-versions": {
 		"message": "正在解析版本……"
 	},
+	"app.instance.mods.check-updates": {
+		"message": "检查 Mod 和资源更新"
+	},
+	"app.instance.mods.checking-updates": {
+		"message": "正在检查更新……"
+	},
 	"app.instance.mods.content-refresh-warning.body": {
 		"message": "本地内容仍然完整且可正常管理，名称、图标或更新信息可能暂时不可用。"
 	},
@@ -3024,6 +3030,9 @@
 	},
 	"app.instance.mods.missing-files-warning.title": {
 		"message": "整合包文件缺失"
+	},
+	"app.instance.mods.no-updates": {
+		"message": "未发现已识别 Mod 和资源的兼容更新。"
 	},
 	"app.instance.mods.orphaned-dependencies.body": {
 		"message": "以下前置已不再被其他内容需要，且不会被自动删除：{list}"
@@ -3117,6 +3126,12 @@
 	},
 	"app.instance.mods.update-added-content.description": {
 		"message": "仅更新整合包安装后添加的内容，不会更改整合包自带文件。"
+	},
+	"app.instance.mods.updates-available": {
+		"message": "发现 {count, number} 个 Mod 或资源可更新。"
+	},
+	"app.instance.mods.updates-checked": {
+		"message": "{name} 的更新检查已完成"
 	},
 	"app.instance.never-played": {
 		"message": "从未游玩"
@@ -6269,7 +6284,7 @@
 		"message": "主操作台"
 	},
 	"app.onboarding.instance-tabs.description": {
-		"message": "内容会随后台扫描逐步显示。设置中可启用增量备份并预览恢复改动；导出支持 MRPACK、CurseForge 和 ZIP。"
+		"message": "内容会随后台扫描逐步显示。在「内容」页点击「检查 Mod 和资源更新」，即可查找兼容更新。设置中可启用增量备份并预览恢复改动；导出支持 MRPACK、CurseForge 和 ZIP。"
 	},
 	"app.onboarding.instance-tabs.title": {
 		"message": "剩下的工作台"

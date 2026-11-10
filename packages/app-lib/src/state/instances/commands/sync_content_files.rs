@@ -1,9 +1,10 @@
 use crate::State;
 use crate::state::instances::adapters::{filesystem, sqlite};
-use crate::state::instances::{Instance, InstanceFile};
+use crate::state::instances::{ContentSet, Instance, InstanceFile};
 use crate::state::{
     CacheBehaviour, CachedEntry, CachedFileUpdate, ContentProvider,
     ContentProviderRef, DirectoryInfo, ModrinthVersionId, ProjectType,
+    ReleaseChannel,
 };
 use crate::util::fetch::{self, FetchSemaphore};
 use crate::util::io;
@@ -531,6 +532,26 @@ pub(crate) fn installed_modrinth_version_id(
     })
 }
 
+pub(crate) fn content_update_cache_key(
+    hash: &str,
+    project_type: ProjectType,
+    content_set: &ContentSet,
+    channel: ReleaseChannel,
+) -> String {
+    let loaders = if project_type == ProjectType::Mod {
+        content_set.loader.modrinth_loaders()
+    } else {
+        project_type.get_loaders()
+    };
+
+    format!(
+        "{hash}-{}-{}-{}",
+        loaders.join("+"),
+        channel.key(),
+        content_set.game_version
+    )
+}
+
 pub(crate) async fn fetch_content_file_updates(
     update_key_refs: &[&str],
     cache_behaviour: Option<CacheBehaviour>,
@@ -544,29 +565,13 @@ pub(crate) async fn fetch_content_file_updates(
         cache_behaviour
     };
 
-    match CachedEntry::get_file_update_many(
+    CachedEntry::get_file_update_many(
         update_key_refs,
         update_behaviour,
         pool,
         fetch_semaphore,
     )
     .await
-    {
-        Ok(updates) => Ok(updates),
-        Err(error) if refresh => {
-            tracing::warn!(
-                "Content update refresh failed, using cached update data: {error}"
-            );
-            CachedEntry::get_file_update_many(
-                update_key_refs,
-                Some(CacheBehaviour::CacheOnly),
-                pool,
-                fetch_semaphore,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    }
 }
 
 /// Whether a file may receive Modrinth update suggestions.
@@ -712,6 +717,56 @@ mod tests {
     use std::fs;
     #[cfg(not(feature = "tauri"))]
     use std::sync::Arc;
+
+    #[test]
+    fn cleanroom_content_update_keys_share_compatibility_filters() {
+        use crate::state::ModLoader;
+        use crate::state::instances::{ContentSetStatus, ContentSourceKind};
+
+        let now = Utc::now();
+        let mut content_set = ContentSet {
+            id: "content-set".to_string(),
+            instance_id: "instance".to_string(),
+            name: "Cleanroom 0.6.8".to_string(),
+            source_kind: ContentSourceKind::Local,
+            status: ContentSetStatus::Available,
+            game_version: "1.12.2".to_string(),
+            protocol_version: None,
+            loader: ModLoader::Cleanroom,
+            loader_version: Some("0.6.8".to_string()),
+            revision: 0,
+            created: now,
+            modified: now,
+        };
+        assert_eq!(
+            content_update_cache_key(
+                "sha1",
+                ProjectType::Mod,
+                &content_set,
+                ReleaseChannel::Release
+            ),
+            "sha1-cleanroom+forge-release-1.12.2",
+        );
+        assert_eq!(
+            content_update_cache_key(
+                "sha1",
+                ProjectType::ResourcePack,
+                &content_set,
+                ReleaseChannel::Beta
+            ),
+            "sha1-vanilla+canvas+minecraft-beta-1.12.2",
+        );
+        content_set.loader = ModLoader::Forge;
+        assert_eq!(
+            content_update_cache_key(
+                "sha1",
+                ProjectType::Mod,
+                &content_set,
+                ReleaseChannel::Release
+            ),
+            "sha1-forge-release-1.12.2",
+        );
+    }
 
     fn modrinth_ref() -> ContentProviderRef {
         ContentProviderRef::Modrinth {

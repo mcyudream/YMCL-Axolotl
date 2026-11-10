@@ -1,7 +1,8 @@
 use super::sync_content_files::{
-    fetch_content_file_updates, installed_modrinth_version_id,
-    instance_content_root, join_content_path, modrinth_update_enabled,
-    project_type_for_file, sync_instance_content_files,
+    content_update_cache_key, fetch_content_file_updates,
+    installed_modrinth_version_id, instance_content_root, join_content_path,
+    modrinth_update_enabled, project_type_for_file,
+    sync_instance_content_files,
 };
 use crate::State;
 use crate::pack::install_from::{PackFileHash, PackFormat};
@@ -1405,7 +1406,7 @@ async fn content_projects_for_files(
                     .copied()
                     .unwrap_or(resolved.instance.update_channel),
             );
-            Some(file_update_cache_key(
+            Some(content_update_cache_key(
                 &file.sha1,
                 project_type,
                 &resolved.content_set,
@@ -1699,27 +1700,6 @@ async fn get_installed_update_channels(
         .collect())
 }
 
-fn file_update_cache_key(
-    hash: &str,
-    project_type: ProjectType,
-    content_set: &ContentSet,
-    channel: ReleaseChannel,
-) -> String {
-    let loader_key = if project_type == ProjectType::Mod {
-        content_set.loader.as_str().to_string()
-    } else {
-        project_type.get_loaders().join("+")
-    };
-
-    format!(
-        "{}-{}-{}-{}",
-        hash,
-        loader_key,
-        channel.key(),
-        content_set.game_version
-    )
-}
-
 async fn content_files_to_content_items(
     instance: &Instance,
     files: &[(String, ContentFile)],
@@ -1792,8 +1772,7 @@ async fn content_files_to_content_items(
         crate::api::curseforge::get_projects(
             curseforge_project_ids.into_iter().collect(),
         )
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .map(|project| (project.id.to_string(), project))
         .collect::<HashMap<_, _>>()
@@ -1907,13 +1886,7 @@ async fn content_files_to_content_items(
                 };
                 let current_file_id = file_id.as_ref()?.get();
                 let content_set = content_set.as_ref()?;
-                let loader_type = match content_set.loader.as_str() {
-                    "forge" => Some(1),
-                    "fabric" => Some(4),
-                    "quilt" => Some(5),
-                    "neoforge" => Some(6),
-                    _ => None,
-                };
+                let loader_type = content_set.loader.curseforge_loader_type();
                 let release_type_allowed =
                     |release_type: u32| match instance.update_channel {
                         ReleaseChannel::Release => release_type == 1,

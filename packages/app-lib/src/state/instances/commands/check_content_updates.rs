@@ -10,9 +10,9 @@ use crate::state::{
 use std::collections::HashMap;
 
 use super::sync_content_files::{
-    fetch_content_file_updates, installed_modrinth_version_id,
-    modrinth_update_enabled, project_type_for_file,
-    sync_instance_content_files,
+    content_update_cache_key, fetch_content_file_updates,
+    installed_modrinth_version_id, modrinth_update_enabled,
+    project_type_for_file, sync_instance_content_files,
 };
 
 #[derive(Clone, Debug)]
@@ -249,15 +249,14 @@ async fn resolve_modrinth_updates(
     let update_keys = candidates
         .iter()
         .map(|candidate| {
-            update_cache_key(
-                &candidate.file,
+            content_update_cache_key(
+                &candidate.file.sha1,
                 candidate.project_type,
+                &context.content_set,
                 effective_update_channel(
                     context.instance.update_channel,
                     installed_channels.get(&candidate.file.sha1).copied(),
                 ),
-                &context.content_set.game_version,
-                context.content_set.loader.as_str(),
             )
         })
         .collect::<Vec<_>>();
@@ -368,9 +367,10 @@ async fn resolve_curseforge_updates(
                             Some(context.content_set.game_version.clone()),
                             (project_type == ProjectType::Mod)
                                 .then(|| {
-                                    curseforge_loader_type(
-                                        context.content_set.loader.as_str(),
-                                    )
+                                    context
+                                        .content_set
+                                        .loader
+                                        .curseforge_loader_type()
                                 })
                                 .flatten(),
                             Some(context.instance.update_channel),
@@ -408,16 +408,6 @@ async fn resolve_curseforge_updates(
     }
 
     Ok(output)
-}
-
-fn curseforge_loader_type(loader: &str) -> Option<u32> {
-    match loader {
-        "forge" => Some(1),
-        "fabric" => Some(4),
-        "quilt" => Some(5),
-        "neoforge" => Some(6),
-        _ => None,
-    }
 }
 
 async fn installed_update_channels(
@@ -462,24 +452,4 @@ fn effective_update_channel(
     installed: Option<ReleaseChannel>,
 ) -> ReleaseChannel {
     installed.map_or(preferred, |channel| preferred.least_stable(channel))
-}
-
-fn update_cache_key(
-    file: &InstanceFile,
-    project_type: ProjectType,
-    channel: ReleaseChannel,
-    game_version: &str,
-    loader: &str,
-) -> String {
-    format!(
-        "{}-{}-{}-{}",
-        file.sha1,
-        if project_type == ProjectType::Mod {
-            loader.to_string()
-        } else {
-            project_type.get_loaders().join("+")
-        },
-        channel.key(),
-        game_version
-    )
 }

@@ -311,7 +311,8 @@ export const onboardingMessages = defineMessages({
 	},
 	instanceTabsDescription: {
 		id: 'app.onboarding.instance-tabs.description',
-		defaultMessage: 'Content appears as the background scan progresses. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP.',
+		defaultMessage:
+			'Content appears as the background scan progresses. Use Check mod and resource updates on the Content tab to find compatible updates. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP.',
 	},
 	labTitle: {
 		id: 'app.onboarding.lab.title',

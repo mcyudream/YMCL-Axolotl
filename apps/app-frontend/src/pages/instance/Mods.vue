@@ -335,6 +335,27 @@ const messages = defineMessages({
 		id: 'app.instance.mods.content-type-project',
 		defaultMessage: 'project',
 	},
+	checkContentUpdates: {
+		id: 'app.instance.mods.check-updates',
+		defaultMessage: 'Check mod and resource updates',
+	},
+	checkingContentUpdates: {
+		id: 'app.instance.mods.checking-updates',
+		defaultMessage: 'Checking updates…',
+	},
+	contentUpdatesChecked: {
+		id: 'app.instance.mods.updates-checked',
+		defaultMessage: 'Update check complete for {name}',
+	},
+	contentUpdatesAvailable: {
+		id: 'app.instance.mods.updates-available',
+		defaultMessage:
+			'{count, plural, one {# mod or resource update is available.} other {# mod and resource updates are available.}}',
+	},
+	noContentUpdates: {
+		id: 'app.instance.mods.no-updates',
+		defaultMessage: 'No compatible updates found for recognized mods and resources.',
+	},
 	bulkUpdateResolvingVersions: {
 		id: 'app.instance.mods.bulk-update.resolving-versions',
 		defaultMessage: 'Resolving versions...',
@@ -942,6 +963,8 @@ watch(
 
 const isModpackUpdating = ref(false)
 const isBulkOperating = ref(false)
+const checkingContentUpdates = ref(false)
+let contentUpdateCheckController: AbortController | undefined
 const isInstanceBusy = computed(() => props.instance?.install_stage !== 'installed')
 let contentRequestGeneration = 0
 
@@ -2154,6 +2177,59 @@ async function refreshContentState(cacheBehaviour?: CacheBehaviour) {
 	await initProjects(cacheBehaviour)
 }
 
+async function checkContentUpdates() {
+	if (
+		checkingContentUpdates.value ||
+		props.offline ||
+		isInstanceBusy.value ||
+		isBulkOperating.value ||
+		activeContentOperationKeys.value.size > 0
+	) {
+		return
+	}
+
+	checkingContentUpdates.value = true
+	const instanceId = props.instance.id
+	const instanceName = props.instance.name
+	const controller = new AbortController()
+	contentUpdateCheckController = controller
+	try {
+		const contentData = await loadInstanceContentData(instanceId, 'bypass', undefined, {
+			signal: controller.signal,
+			checkUpdates: true,
+		})
+		if (!contentData || isUnmounted || props.instance.id !== instanceId || isInstanceBusy.value)
+			return
+		if (contentData.snapshot.warnings.length > 0) {
+			throw new Error(contentData.snapshot.warnings.map((warning) => warning.message).join('\n'))
+		}
+
+		await translateContentData(contentData)
+		if (isUnmounted || props.instance.id !== instanceId || isInstanceBusy.value) return
+		if (!applyContentData(contentData)) return
+		const count = [...contentData.contentItems, ...contentData.linkedContentItems].filter(
+			(item) => !isWorldSaveContentItem(item) && item.update != null,
+		).length
+		addNotification({
+			type: 'success',
+			title: formatMessage(messages.contentUpdatesChecked, {
+				name: instanceName,
+			}),
+			text: formatMessage(
+				count > 0 ? messages.contentUpdatesAvailable : messages.noContentUpdates,
+				{
+					count,
+				},
+			),
+		})
+	} catch (error) {
+		if (!isUnmounted && props.instance.id === instanceId) handleError(error as Error)
+	} finally {
+		checkingContentUpdates.value = false
+		contentUpdateCheckController = undefined
+	}
+}
+
 watch(
 	() => installRevisionByInstance.value.get(props.instance.id) ?? 0,
 	async (revision) => {
@@ -2529,8 +2605,20 @@ function getOverflowOptions(item: ContentItem): OverflowMenuOption[] {
 function openSchematicInWorkshop(item: ContentItem) {
 	void router.push({
 		name: 'Schematic workshop',
-		query: { instance: props.instance.id, path: item.file_path ?? item.file_name },
+		query: {
+			instance: props.instance.id,
+			path: item.file_path ?? item.file_name,
+		},
 	})
+}
+
+async function translateContentData(contentData: InstanceContentData) {
+	const [contentItems, linkedContentItems] = await Promise.all([
+		translateContentItemTitles(contentData.contentItems, i18n.global.locale.value),
+		translateContentItemTitles(contentData.linkedContentItems, i18n.global.locale.value),
+	])
+	contentData.contentItems = contentItems
+	contentData.linkedContentItems = linkedContentItems
 }
 
 async function initProjects(cacheBehaviour?: CacheBehaviour) {
@@ -2560,16 +2648,7 @@ async function initProjects(cacheBehaviour?: CacheBehaviour) {
 		return
 	}
 	try {
-		if (contentData.contentItems) {
-			contentData.contentItems = await translateContentItemTitles(
-				contentData.contentItems,
-				i18n.global.locale.value,
-			)
-		}
-		contentData.linkedContentItems = await translateContentItemTitles(
-			contentData.linkedContentItems,
-			i18n.global.locale.value,
-		)
+		await translateContentData(contentData)
 	} catch (error) {
 		if (isCurrentContentRequest(instanceId, generation)) {
 			handleError(error as Error)
@@ -2807,7 +2886,16 @@ provideContentManager({
 		}
 	},
 	getDeleteDependencyWarning,
-	refresh: () => refreshContentState('bypass'),
+	refresh: checkContentUpdates,
+	refreshLabel: formatMessage(messages.checkContentUpdates),
+	refreshingLabel: formatMessage(messages.checkingContentUpdates),
+	refreshDisabled: computed(
+		() =>
+			props.offline ||
+			isInstanceBusy.value ||
+			isBulkOperating.value ||
+			activeContentOperationKeys.value.size > 0,
+	),
 	browse: handleBrowseContent,
 	uploadFiles: handleUploadFiles,
 	hasUpdateSupport: true,
@@ -3045,6 +3133,7 @@ function scheduleContentEventRefresh(event: { event: string; revision?: number }
 		const refreshFilesystem = pendingExternalContentSync && pendingContentChangedRevision == null
 		pendingExternalContentSync = false
 		pendingContentChangedRevision = null
+		if (checkingContentUpdates.value) return
 		if (isBulkOperating.value) {
 			pendingContentRefreshAfterBulk = true
 			return
@@ -3121,6 +3210,7 @@ watch(
 
 onUnmounted(() => {
 	isUnmounted = true
+	contentUpdateCheckController?.abort()
 	if (contentEventTimer) clearTimeout(contentEventTimer)
 	invalidateContentRequests()
 	unlistenInstances?.()

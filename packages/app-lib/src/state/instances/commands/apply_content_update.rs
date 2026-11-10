@@ -886,9 +886,66 @@ fn is_dependency_version_compatible(
     content_set: &ContentSet,
 ) -> bool {
     version.game_versions.contains(&content_set.game_version)
-        && (version
-            .loaders
-            .iter()
-            .any(|loader| loader == content_set.loader.as_str())
-            || version.loaders.iter().any(|loader| loader == "datapack"))
+        && (version.loaders.iter().any(|loader| {
+            content_set
+                .loader
+                .modrinth_loaders()
+                .contains(&loader.as_str())
+        }) || version.loaders.iter().any(|loader| loader == "datapack"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ModLoader;
+    use crate::state::instances::ContentSetStatus;
+
+    #[test]
+    fn cleanroom_content_bulk_dependencies_accept_forge_and_keep_version_filter()
+     {
+        let now = chrono::Utc::now();
+        let content_set = ContentSet {
+            id: "set".to_string(),
+            instance_id: "instance".to_string(),
+            name: "Cleanroom 0.6.8".to_string(),
+            source_kind: ContentSourceKind::Local,
+            status: ContentSetStatus::Available,
+            game_version: "1.12.2".to_string(),
+            protocol_version: None,
+            loader: ModLoader::Cleanroom,
+            loader_version: Some("0.6.8".to_string()),
+            revision: 0,
+            created: now,
+            modified: now,
+        };
+        let mut version = Version {
+            id: "library".to_string(),
+            project_id: "project".to_string(),
+            author_id: "author".to_string(),
+            featured: false,
+            name: "Library".to_string(),
+            version_number: "1".to_string(),
+            changelog: None,
+            changelog_url: None,
+            date_published: now,
+            downloads: 0,
+            version_type: "release".to_string(),
+            files: Vec::new(),
+            dependencies: Vec::new(),
+            game_versions: vec!["1.12.2".to_string()],
+            loaders: vec!["forge".to_string()],
+        };
+        assert!(is_dependency_version_compatible(&version, &content_set));
+        assert!(
+            find_preferred_dependency_version(&[version.clone()], &content_set)
+                .is_some()
+        );
+        version.loaders = vec!["cleanroom".to_string()];
+        assert!(is_dependency_version_compatible(&version, &content_set));
+        version.loaders = vec!["fabric".to_string()];
+        assert!(!is_dependency_version_compatible(&version, &content_set));
+        version.loaders = vec!["forge".to_string()];
+        version.game_versions = vec!["1.20.1".to_string()];
+        assert!(!is_dependency_version_compatible(&version, &content_set));
+    }
 }

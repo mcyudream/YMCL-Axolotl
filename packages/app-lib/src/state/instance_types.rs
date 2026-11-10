@@ -120,6 +120,32 @@ impl ModLoader {
         }
     }
 
+    pub fn modrinth_loaders(&self) -> &'static [&'static str] {
+        match self {
+            Self::Cleanroom => &["cleanroom", "forge"],
+            Self::Vanilla => &["vanilla"],
+            Self::Forge => &["forge"],
+            Self::Fabric => &["fabric"],
+            Self::Quilt => &["quilt"],
+            Self::NeoForge => &["neoforge"],
+            Self::OptiFine => &["optifine"],
+            Self::LiteLoader => &["lite_loader"],
+            Self::LegacyFabric => &["legacy_fabric"],
+            Self::Babric => &["babric"],
+        }
+    }
+
+    pub fn curseforge_loader_type(&self) -> Option<u32> {
+        match self {
+            Self::Forge | Self::Cleanroom => Some(1),
+            Self::LiteLoader => Some(3),
+            Self::Fabric | Self::LegacyFabric => Some(4),
+            Self::Quilt => Some(5),
+            Self::NeoForge => Some(6),
+            _ => None,
+        }
+    }
+
     pub fn try_from_string(val: &str) -> crate::Result<Self> {
         match val {
             "vanilla" => Ok(Self::Vanilla),
@@ -137,6 +163,38 @@ impl ModLoader {
             ))
             .into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod loader_compatibility_tests {
+    use super::ModLoader;
+
+    #[test]
+    fn cleanroom_content_loader_filters_include_forge_without_changing_identity()
+     {
+        assert_eq!(
+            ModLoader::Cleanroom.modrinth_loaders(),
+            &["cleanroom", "forge"]
+        );
+        assert_eq!(ModLoader::Cleanroom.curseforge_loader_type(), Some(1));
+        assert_eq!(ModLoader::Cleanroom.as_str(), "cleanroom");
+    }
+
+    #[test]
+    fn cleanroom_content_compatibility_is_not_applied_to_other_loaders() {
+        for loader in [
+            ModLoader::Forge,
+            ModLoader::Fabric,
+            ModLoader::Quilt,
+            ModLoader::NeoForge,
+        ] {
+            assert_eq!(loader.modrinth_loaders(), &[loader.as_str()]);
+        }
+        assert_eq!(ModLoader::Forge.curseforge_loader_type(), Some(1));
+        assert_eq!(ModLoader::Fabric.curseforge_loader_type(), Some(4));
+        assert_eq!(ModLoader::Quilt.curseforge_loader_type(), Some(5));
+        assert_eq!(ModLoader::NeoForge.curseforge_loader_type(), Some(6));
     }
 }
 

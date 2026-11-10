@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
 })
 
 async function handleRefresh() {
-	if (refreshing.value) return
+	if (refreshing.value || ctx.refreshDisabled?.value) return
 	refreshing.value = true
 	try {
 		await ctx.refresh()
@@ -1053,6 +1053,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 					:disable-add-content="ctx.disableAddContent?.value"
 					:disable-add-content-tooltip="ctx.disableAddContentTooltip"
 					:refreshing="refreshing"
+					:refresh-label="ctx.refreshLabel"
+					:refreshing-label="ctx.refreshingLabel"
+					:refresh-disabled="ctx.refreshDisabled?.value"
 					:view-dependencies="!!ctx.viewDependencies"
 					@browse="ctx.browse"
 					@refresh="handleRefresh"
@@ -1166,6 +1169,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 				:busy="ctx.isBusy.value"
 				:busy-tooltip="ctx.busyMessage?.value"
 				:refreshing="refreshing"
+				:refresh-label="ctx.refreshLabel"
+				:refreshing-label="ctx.refreshingLabel"
+				:refresh-disabled="ctx.refreshDisabled?.value"
 				:disable-add-content="ctx.disableAddContent?.value"
 				:disable-add-content-tooltip="ctx.disableAddContentTooltip"
 				@browse="ctx.browse"

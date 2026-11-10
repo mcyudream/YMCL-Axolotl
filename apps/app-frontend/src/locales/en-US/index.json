@@ -2996,6 +2996,12 @@
 	"app.instance.mods.bulk-update.resolving-versions": {
 		"message": "Resolving versions..."
 	},
+	"app.instance.mods.check-updates": {
+		"message": "Check mod and resource updates"
+	},
+	"app.instance.mods.checking-updates": {
+		"message": "Checking updates…"
+	},
 	"app.instance.mods.content-refresh-warning.body": {
 		"message": "Local content is still complete and can be managed. Names, icons, or update information may be temporarily unavailable."
 	},
@@ -3022,6 +3028,9 @@
 	},
 	"app.instance.mods.missing-files-warning.title": {
 		"message": "Some modpack files are missing"
+	},
+	"app.instance.mods.no-updates": {
+		"message": "No compatible updates found for recognized mods and resources."
 	},
 	"app.instance.mods.orphaned-dependencies.body": {
 		"message": "These dependencies are no longer required by other content and will not be removed automatically: {list}"
@@ -3115,6 +3124,12 @@
 	},
 	"app.instance.mods.update-added-content.description": {
 		"message": "Updates only content added after the modpack was installed. Modpack files are not changed."
+	},
+	"app.instance.mods.updates-available": {
+		"message": "{count, plural, one {# mod or resource update is available.} other {# mod and resource updates are available.}}"
+	},
+	"app.instance.mods.updates-checked": {
+		"message": "Update check complete for {name}"
 	},
 	"app.instance.never-played": {
 		"message": "Never played"
@@ -6267,7 +6282,7 @@
 		"message": "The main controls"
 	},
 	"app.onboarding.instance-tabs.description": {
-		"message": "Content appears as the background scan progresses. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP."
+		"message": "Content appears as the background scan progresses. Use Check mod and resource updates on the Content tab to find compatible updates. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP."
 	},
 	"app.onboarding.instance-tabs.title": {
 		"message": "The rest of the workshop"

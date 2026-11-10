@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { CompassIcon, RefreshCwIcon } from '@modrinth/assets'
+import { CompassIcon } from '@modrinth/assets'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import EmptyState from '#ui/components/base/EmptyState.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
-import { commonMessages, formatContentTypeSentence } from '#ui/utils/common-messages'
+import { formatContentTypeSentence } from '#ui/utils/common-messages'
+
+import ContentRefreshButton from './ContentRefreshButton.vue'
 
 const { formatMessage } = useVIntl()
 
@@ -29,6 +31,9 @@ const props = withDefaults(
 		busy?: boolean
 		busyTooltip?: string | null
 		refreshing?: boolean
+		refreshLabel?: string
+		refreshingLabel?: string
+		refreshDisabled?: boolean
 		disableAddContent?: boolean
 		disableAddContentTooltip?: string
 	}>(),
@@ -36,6 +41,9 @@ const props = withDefaults(
 		busy: false,
 		busyTooltip: null,
 		refreshing: false,
+		refreshLabel: undefined,
+		refreshingLabel: undefined,
+		refreshDisabled: false,
 		disableAddContent: false,
 		disableAddContentTooltip: undefined,
 	},
@@ -65,17 +73,14 @@ const emit = defineEmits<{
 			}}
 		</template>
 		<template #actions>
-			<ButtonStyled type="outlined">
-				<button
-					v-tooltip="props.busyTooltip"
-					:disabled="props.refreshing"
-					class="!h-10"
-					@click="emit('refresh')"
-				>
-					<RefreshCwIcon :class="['size-5', { 'animate-spin': props.refreshing }]" />
-					{{ formatMessage(commonMessages.refreshButton) }}
-				</button>
-			</ButtonStyled>
+			<ContentRefreshButton
+				:label="props.refreshLabel"
+				:pending-label="props.refreshingLabel"
+				:loading="props.refreshing"
+				:disabled="props.refreshDisabled"
+				:tooltip="props.busyTooltip"
+				@click="emit('refresh')"
+			/>
 			<ButtonStyled color="brand">
 				<button
 					v-tooltip="

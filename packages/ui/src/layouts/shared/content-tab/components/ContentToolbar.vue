@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { CompassIcon, GitGraphIcon, RefreshCwIcon, SearchIcon } from '@modrinth/assets'
+import { CompassIcon, GitGraphIcon, SearchIcon } from '@modrinth/assets'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import StyledInput from '#ui/components/base/StyledInput.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
-import { commonMessages, formatContentTypeSentence } from '#ui/utils/common-messages'
+import { formatContentTypeSentence } from '#ui/utils/common-messages'
+
+import ContentRefreshButton from './ContentRefreshButton.vue'
 
 const { formatMessage } = useVIntl()
 
@@ -34,6 +36,9 @@ const props = withDefaults(
 		disableAddContent?: boolean
 		disableAddContentTooltip?: string
 		refreshing?: boolean
+		refreshLabel?: string
+		refreshingLabel?: string
+		refreshDisabled?: boolean
 		viewDependencies?: boolean
 	}>(),
 	{
@@ -42,6 +47,9 @@ const props = withDefaults(
 		disableAddContent: false,
 		disableAddContentTooltip: undefined,
 		refreshing: false,
+		refreshLabel: undefined,
+		refreshingLabel: undefined,
+		refreshDisabled: false,
 		viewDependencies: false,
 	},
 )
@@ -76,7 +84,7 @@ const emit = defineEmits<{
 			"
 		/>
 
-		<div class="flex items-center gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			<ButtonStyled color="brand">
 				<button
 					v-tooltip="
@@ -102,17 +110,14 @@ const emit = defineEmits<{
 					<span>{{ formatMessage(messages.viewDependencies) }}</span>
 				</button>
 			</ButtonStyled>
-			<ButtonStyled type="outlined">
-				<button
-					v-tooltip="props.busyTooltip"
-					:disabled="props.refreshing"
-					class="!h-10"
-					@click="emit('refresh')"
-				>
-					<RefreshCwIcon :class="['size-5', { 'animate-spin': props.refreshing }]" />
-					{{ formatMessage(commonMessages.refreshButton) }}
-				</button>
-			</ButtonStyled>
+			<ContentRefreshButton
+				:label="props.refreshLabel"
+				:pending-label="props.refreshingLabel"
+				:loading="props.refreshing"
+				:disabled="props.refreshDisabled"
+				:tooltip="props.busyTooltip"
+				@click="emit('refresh')"
+			/>
 		</div>
 	</div>
 </template>

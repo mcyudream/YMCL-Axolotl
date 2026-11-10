@@ -5698,13 +5698,9 @@ pub(crate) fn loader_family(loader_id: &str) -> &str {
 }
 
 fn loader_type(loader: &str) -> Option<u32> {
-    match loader {
-        "forge" | "cleanroom" => Some(1),
-        "fabric" => Some(4),
-        "quilt" => Some(5),
-        "neoforge" => Some(6),
-        _ => None,
-    }
+    ModLoader::try_from_string(loader)
+        .ok()?
+        .curseforge_loader_type()
 }
 
 fn merge_install_result(
@@ -5777,13 +5773,9 @@ pub async fn update_installed_file(
         .as_deref()
         .map(ReleaseChannel::from_key)
         .unwrap_or(ReleaseChannel::Release);
-    let mod_loader_type = match loader.as_str() {
-        "forge" => Some(1),
-        "fabric" => Some(4),
-        "quilt" => Some(5),
-        "neoforge" => Some(6),
-        _ => None,
-    };
+    let mod_loader_type = (project_type == "mod")
+        .then(|| loader_type(&loader))
+        .flatten();
     let latest = select_latest_compatible_file(
         project_id,
         Some(game_version.clone()),
@@ -5862,13 +5854,9 @@ pub async fn switch_installed_file_version(
         )?;
     let game_version = row.try_get::<String, _>("game_version")?;
     let loader = row.try_get::<String, _>("loader")?;
-    let mod_loader_type = match loader.as_str() {
-        "forge" => Some(1),
-        "fabric" => Some(4),
-        "quilt" => Some(5),
-        "neoforge" => Some(6),
-        _ => None,
-    };
+    let mod_loader_type = (project_type == "mod")
+        .then(|| loader_type(&loader))
+        .flatten();
 
     if current_file_id == Some(file_id) {
         return Ok(CurseForgeInstallResult::default());

@@ -198,11 +198,12 @@ fn target_preferences(
     loader: ModLoader,
     content_type: ContentType,
 ) -> ResolutionPreferences {
-    let loader = match content_type {
-        ContentType::DataPack => "datapack".to_string(),
-        ContentType::ResourcePack => "minecraft".to_string(),
-        ContentType::Shader => "iris".to_string(),
-        _ => loader.as_str().to_string(),
+    let loaders = match content_type {
+        ContentType::Mod => loader.modrinth_loaders().to_vec(),
+        ContentType::DataPack => vec!["datapack"],
+        ContentType::ResourcePack => vec!["minecraft"],
+        ContentType::Shader => vec!["iris"],
+        _ => vec![loader.as_str()],
     };
 
     ResolutionPreferences {
@@ -211,7 +212,7 @@ fn target_preferences(
         } else {
             vec![game_version]
         },
-        loaders: vec![loader],
+        loaders: loaders.into_iter().map(str::to_string).collect(),
     }
 }
 
@@ -3380,6 +3381,109 @@ mod tests {
     use super::*;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::time::Duration;
+
+    #[test]
+    fn cleanroom_content_install_preferences_include_forge_for_mods() {
+        let preferences = target_preferences(
+            "1.12.2".to_string(),
+            ModLoader::Cleanroom,
+            ContentType::Mod,
+        );
+        assert_eq!(preferences.game_versions, ["1.12.2"]);
+        assert_eq!(preferences.loaders, ["cleanroom", "forge"]);
+
+        let shaders = target_preferences(
+            "1.12.2".to_string(),
+            ModLoader::Cleanroom,
+            ContentType::Shader,
+        );
+        assert_eq!(shaders.loaders, ["iris"]);
+    }
+
+    #[tokio::test]
+    async fn cleanroom_content_updates_resolve_forge_dependencies() {
+        use modrinth_content_management::{
+            Dependency, DependencyType, Version,
+        };
+
+        struct Provider(Vec<Version>);
+
+        #[async_trait]
+        impl ContentMetadataProvider for Provider {
+            async fn get_version(
+                &mut self,
+                id: &str,
+            ) -> Result<Option<Version>, ResolveError> {
+                Ok(self.0.iter().find(|version| version.id == id).cloned())
+            }
+
+            async fn get_project_versions(
+                &mut self,
+                id: &str,
+            ) -> Result<Vec<Version>, ResolveError> {
+                Ok(self
+                    .0
+                    .iter()
+                    .filter(|version| version.project_id == id)
+                    .cloned()
+                    .collect())
+            }
+        }
+
+        let version = |id: &str,
+                       project: &str,
+                       loader: &str,
+                       game: &str,
+                       days: i64| Version {
+            id: id.to_string(),
+            project_id: project.to_string(),
+            date_published: chrono::DateTime::from_timestamp(days * 86400, 0)
+                .unwrap(),
+            version_type: "release".to_string(),
+            dependencies: Vec::new(),
+            game_versions: vec![game.to_string()],
+            loaders: vec![loader.to_string()],
+        };
+        for loader in ["forge", "cleanroom"] {
+            let mut primary = version("update", "mod", loader, "1.12.2", 1);
+            primary.dependencies.push(Dependency {
+                project_id: Some("library".to_string()),
+                version_id: None,
+                file_name: None,
+                dependency_type: DependencyType::Required,
+            });
+            let provider = Provider(vec![
+                primary,
+                version("forge-library", "library", "forge", "1.12.2", 1),
+                version("fabric-library", "library", "fabric", "1.12.2", 2),
+                version("newer-minecraft", "library", "forge", "1.20.1", 3),
+            ]);
+            let plan = modrinth_content_management::resolve_content(
+                provider,
+                ResolveContentRequest {
+                    project_id: "mod".to_string(),
+                    version_id: Some("update".to_string()),
+                    content_type: ContentType::Mod,
+                    selected: ResolutionPreferences::default(),
+                    target: target_preferences(
+                        "1.12.2".to_string(),
+                        ModLoader::Cleanroom,
+                        ContentType::Mod,
+                    ),
+                    existing_project_ids: Vec::new(),
+                    excluded_project_ids: Vec::new(),
+                    force_project_ids: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(plan.primary.version_id, "update");
+            assert_eq!(plan.dependencies.len(), 1);
+            assert_eq!(plan.dependencies[0].version_id, "forge-library");
+            assert!(plan.skipped.is_empty());
+        }
+    }
 
     #[test]
     fn resource_pack_target_preferences_ignore_game_version() {
