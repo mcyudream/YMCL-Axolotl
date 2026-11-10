@@ -46,11 +46,13 @@ import {
 	getLastLibraryDisplayMode,
 	setLastLibraryDisplayMode,
 } from '@/helpers/library-display-mode'
+import { useYmclStore } from '@/store/ymcl'
 
 const { handleError } = injectNotificationManager()
 
 const { formatMessage } = useVIntl()
 const router = useRouter()
+const ymclStore = useYmclStore()
 
 const messages = defineMessages({
 	search: { id: 'app.instances.search', defaultMessage: 'Search' },
@@ -217,8 +219,9 @@ async function duplicateInstance(p) {
 const handleRightClick = (event, instanceId) => {
 	const item = instanceComponents.value.find((x) => x.instance.id === instanceId)
 	const baseOptions = [
-		{ name: 'add_content' },
-		{ type: 'divider' },
+		...(!ymclStore.isRouteHidden(`/browse/${item.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`)
+			? [{ name: 'add_content' }, { type: 'divider' }]
+			: []),
 		{ name: 'edit' },
 		{ name: 'duplicate' },
 		{ name: item.instance.pinned_at ? 'unpin' : 'pin' },
@@ -420,7 +423,10 @@ function onBatchEditApplied() {
 			clearable
 			wrapper-class="flex-1"
 		/>
-		<ButtonStyled color="brand">
+		<ButtonStyled
+			v-if="!ymclStore.isRouteHidden('/create') && !ymclStore.isEntranceHidden('create-instance')"
+			color="brand"
+		>
 			<button @click="router.push('/create')">
 				<PlusIcon />
 				{{ formatMessage(messages.createInstance) }}

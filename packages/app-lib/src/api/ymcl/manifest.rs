@@ -188,6 +188,8 @@ pub struct YmclManifest {
     pub theme: Option<serde_json::Value>,
     #[serde(default)]
     pub home: Option<serde_json::Value>,
+    #[serde(default, alias = "simpleMode")]
+    pub simple_mode: Option<serde_json::Value>,
 }
 
 fn default_protocol_version() -> u32 {
@@ -246,6 +248,31 @@ pub fn validate_protocol_version(version: u32) -> crate::Result<()> {
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod simple_mode_tests {
+    #[test]
+    fn simple_mode_survives_manifest_transport_and_cache_serialization() {
+        let config = serde_json::json!({
+            "enabled": true,
+            "unlockKey": "F12",
+            "hiddenScopes": ["settings"],
+            "hiddenEntrances": ["domain-switcher"],
+            "hiddenNavigationIds": ["tools"]
+        });
+        for field in ["simple_mode", "simpleMode"] {
+            let mut payload = serde_json::json!({ "protocol_version": 1 });
+            payload[field] = config.clone();
+            let manifest: super::YmclManifest =
+                serde_json::from_value(payload).unwrap();
+            assert_eq!(manifest.simple_mode.as_ref(), Some(&config));
+            let serialized = serde_json::to_value(manifest).unwrap();
+            assert_eq!(serialized["simple_mode"], config);
+        }
+        let legacy: super::YmclManifest = serde_json::from_str("{}").unwrap();
+        assert!(legacy.simple_mode.is_none());
+    }
 }
 
 #[cfg(test)]

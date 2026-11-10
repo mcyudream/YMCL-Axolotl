@@ -9,10 +9,13 @@ use theseus::ymcl::auth::{
     YmclExternalProvider,
 };
 use theseus::ymcl::registry::{self, YmclDomainsState, YmclManifest};
+use theseus::ymcl::simple_mode::SimpleModeUnlocks;
 use theseus::ymcl::{YmclSessionInfo, YmclStoredSession};
 use tokio::sync::oneshot;
 
 const OAUTH_LOGIN_TIMEOUT_SECS: u64 = 300;
+static DOMAIN_ACTIVATION_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("ymcl")
@@ -29,6 +32,8 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_domain_activate,
             ymcl_manifest_get,
             ymcl_manifest_refresh,
+            ymcl_simple_mode_unlocked,
+            ymcl_simple_mode_unlock,
             ymcl_data_fetch,
             ymcl_action_execute,
             ymcl_session_get,
@@ -171,6 +176,7 @@ pub async fn ymcl_domain_remove(id: String) -> Result<YmclDomainsState> {
 // invoke('plugin:ymcl|ymcl_domain_activate', { id })
 #[tauri::command]
 pub async fn ymcl_domain_activate(id: String) -> Result<YmclDomainsState> {
+    let _activation = DOMAIN_ACTIVATION_LOCK.lock().await;
     Ok(registry::activate_domain(&id).await?)
 }
 
@@ -186,6 +192,21 @@ pub async fn ymcl_manifest_get() -> Result<Option<YmclManifest>> {
 #[tauri::command]
 pub async fn ymcl_manifest_refresh() -> Result<Option<YmclManifest>> {
     Ok(registry::refresh_manifest().await?)
+}
+
+#[tauri::command]
+pub fn ymcl_simple_mode_unlocked(
+    unlocks: tauri::State<'_, SimpleModeUnlocks>,
+) -> Vec<String> {
+    unlocks.unlocked_domains()
+}
+
+#[tauri::command]
+pub fn ymcl_simple_mode_unlock(
+    domain_id: String,
+    unlocks: tauri::State<'_, SimpleModeUnlocks>,
+) -> Vec<String> {
+    unlocks.unlock(domain_id)
 }
 
 // Stored session for a domain, refreshing expired tokens when possible

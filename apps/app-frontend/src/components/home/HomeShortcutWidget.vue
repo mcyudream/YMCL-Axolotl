@@ -27,6 +27,7 @@ import { computed, ref, watch } from 'vue'
 import type { HomeWidgetPlacement, HomeWidgetSize } from '@/components/home/home-dashboard'
 import { useHomeDashboardRuntime } from '@/components/home/home-dashboard-runtime'
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
+import SimpleModeRouteLink from '@/components/ymcl/SimpleModeRouteLink.vue'
 import { useMinecraftLaunchError } from '@/composables/useMinecraftLaunchError'
 import { trackEvent } from '@/helpers/analytics'
 import { kill, run } from '@/helpers/instance'
@@ -302,7 +303,7 @@ watch(
 			<span class="text-sm text-secondary">{{ formatMessage(messages.unavailable) }}</span>
 		</div>
 		<div v-else class="home-shortcut-card grid min-w-0 min-h-0 h-full overflow-hidden">
-			<router-link
+			<SimpleModeRouteLink
 				class="home-shortcut-visual relative flex min-w-0 min-h-0 items-center justify-center overflow-hidden bg-button-bg text-secondary no-underline"
 				:to="shortcutRoute"
 				tabindex="-1"
@@ -326,10 +327,10 @@ watch(
 					:loader="instance.loader"
 					:size="dashboardSize === '2x1' ? '72px' : '44px'"
 				/>
-			</router-link>
+			</SimpleModeRouteLink>
 
 			<div class="home-shortcut-body relative flex min-w-0 min-h-0 items-stretch">
-				<router-link
+				<SimpleModeRouteLink
 					class="home-shortcut-copy flex min-w-0 flex-1 flex-col text-inherit no-underline"
 					:to="shortcutRoute"
 				>
@@ -360,7 +361,7 @@ watch(
 						<ServerIcon v-else aria-hidden="true" />
 						{{ secondaryLabel }}
 					</span>
-				</router-link>
+				</SimpleModeRouteLink>
 
 				<div class="absolute bottom-3 right-3 z-[2]">
 					<ButtonStyled v-if="isRunning" circular size="small" color="red">

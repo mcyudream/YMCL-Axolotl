@@ -56,7 +56,12 @@ const rootChildren = computed(() =>
 	),
 )
 /** Only render when the active page actually lives under a nested subtree. */
-const visible = computed(() => root.value !== null && rootChildren.value.length > 0)
+const visible = computed(
+	() =>
+		!ymclStore.isEntranceHidden('navigation') &&
+		root.value !== null &&
+		rootChildren.value.length > 0,
+)
 const rootIcon = computed(() => resolveYmclNavIcon(root.value?.icon))
 const rootTitle = computed(() => root.value?.title?.trim() || root.value?.id || '')
 const rootTo = computed(() =>

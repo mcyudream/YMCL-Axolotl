@@ -69,7 +69,12 @@
 			</template>
 		</Dropdown>
 		<ButtonStyled
-			v-if="!isDownloadsPage && hasActiveDownloads && !hasVisibleActiveDownloadToasts"
+			v-if="
+				!ymclStore.isRouteHidden('/downloads') &&
+				!isDownloadsPage &&
+				hasActiveDownloads &&
+				!hasVisibleActiveDownloadToasts
+			"
 			color="brand"
 			type="transparent"
 			circular
@@ -90,12 +95,18 @@
 				<OnlineIndicatorIcon />
 				<div class="text-contrast flex items-center gap-2">
 					<router-link
+						v-if="
+							!ymclStore.isRouteHidden(
+								`/instance/${encodeURIComponent(selectedProcess.instance.id)}`,
+							)
+						"
 						v-tooltip="formatMessage(messages.viewInstance)"
 						:to="`/instance/${encodeURIComponent(selectedProcess.instance.id)}`"
 						class="hover:underline"
 					>
 						{{ selectedProcess.instance.name }}
 					</router-link>
+					<span v-else>{{ selectedProcess.instance.name }}</span>
 					<Dropdown
 						v-if="currentProcesses.length > 1"
 						placement="bottom"
@@ -149,6 +160,11 @@
 										<StopCircleIcon class="text-red size-5" />
 									</button>
 									<button
+										v-if="
+											!ymclStore.isRouteHidden(
+												`/instance/${encodeURIComponent(process.instance.id)}/logs`,
+											)
+										"
 										v-tooltip="formatMessage(messages.viewLogs)"
 										class="active:scale-95 flex"
 										@click.stop="goToTerminal(process.instance.id)"
@@ -168,6 +184,11 @@
 					<StopCircleIcon class="text-red size-5" />
 				</button>
 				<button
+					v-if="
+						!ymclStore.isRouteHidden(
+							`/instance/${encodeURIComponent(selectedProcess.instance.id)}/logs`,
+						)
+					"
 					v-tooltip="formatMessage(messages.viewLogs)"
 					class="active:scale-95 flex"
 					@click="goToTerminal()"
@@ -222,11 +243,13 @@ import type { LoadingBar } from '@/helpers/state'
 import { progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
 import { downloadBarTypes, injectDownloadManager } from '@/providers/download-manager'
+import { useYmclStore } from '@/store/ymcl'
 
 const notificationManager = injectNotificationManager()
 const { handleError } = notificationManager
 const popupNotificationManager = injectPopupNotificationManager()
 const downloadManager = injectDownloadManager()
+const ymclStore = useYmclStore()
 const { formatMessage } = useVIntl()
 
 type NotificationHistoryItem = {
@@ -581,7 +604,10 @@ function updateNotification(resummon = false): void {
 		notif.text = undefined
 		notif.progressItems = progressItems
 		notif.buttons = installJobNotifications.buttons.value
-		notif.onClick = hasDownloadNotificationItems.value ? goToDownloads : undefined
+		notif.onClick =
+			hasDownloadNotificationItems.value && !ymclStore.isRouteHidden('/downloads')
+				? goToDownloads
+				: undefined
 		notif.progress = undefined
 		notif.waiting = undefined
 		notif.autoCloseMs =
@@ -598,7 +624,10 @@ function updateNotification(resummon = false): void {
 			autoCloseMs: null,
 			progressItems,
 			buttons: installJobNotifications.buttons.value,
-			onClick: hasDownloadNotificationItems.value ? goToDownloads : undefined,
+			onClick:
+				hasDownloadNotificationItems.value && !ymclStore.isRouteHidden('/downloads')
+					? goToDownloads
+					: undefined,
 		})
 		notificationId.value = notif.id
 		if (isDownloadsPage.value) {
@@ -758,8 +787,13 @@ const unlistenLoading = await loading_listener((payload: LoadingEventPayload) =>
 })
 
 function goToDownloads() {
-	router.push('/downloads')
+	if (!ymclStore.isRouteHidden('/downloads')) router.push('/downloads')
 }
+
+watch(
+	() => ymclStore.isRouteHidden('/downloads'),
+	() => updateNotification(),
+)
 
 watch(
 	() => route.path,

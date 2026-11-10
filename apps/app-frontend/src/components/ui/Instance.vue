@@ -31,6 +31,7 @@ import { getDisplayInstanceIcon } from '@/helpers/instance-icons'
 import { get_by_instance_id } from '@/helpers/process'
 import { showInstanceInFolder } from '@/helpers/utils.js'
 import { handleSevereError } from '@/store/error.js'
+import { useYmclStore } from '@/store/ymcl'
 
 const { handleError } = injectNotificationManager()
 const formatRelativeTime = useRelativeTime()
@@ -97,9 +98,12 @@ const installing = computed(() => props.instance.install_stage.includes('install
 const installed = computed(() => props.instance.install_stage === 'installed')
 
 const router = useRouter()
+const ymclStore = useYmclStore()
+const instanceRoute = computed(() => `/instance/${encodeURIComponent(props.instance.id)}`)
+const canOpenInstance = computed(() => !ymclStore.isRouteHidden(instanceRoute.value))
 
 const seeInstance = async () => {
-	await router.push(`/instance/${encodeURIComponent(props.instance.id)}`)
+	if (canOpenInstance.value) await router.push(instanceRoute.value)
 }
 
 const checkProcess = async () => {
@@ -167,6 +171,7 @@ const openFolder = async () => {
 }
 
 const addContent = async () => {
+	if (ymclStore.isRouteHidden(`/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`)) return
 	await router.push({
 		path: `/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`,
 		query: { i: props.instance.id },
@@ -203,12 +208,13 @@ onUnmounted(() => unlisten())
 <template>
 	<template v-if="compact">
 		<div
-			class="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg transition-colors"
-			:class="
+			class="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg transition-colors"
+			:class="[
+				{ 'cursor-pointer': canOpenInstance },
 				flat
 					? 'px-2 py-2 hover:bg-button-bg'
-					: 'card-shadow bg-bg-raised p-3 pl-4 hover:brightness-90'
-			"
+					: 'card-shadow bg-bg-raised p-3 pl-4 hover:brightness-90',
+			]"
 			@click="seeInstance"
 			@mouseenter="checkProcess"
 		>
@@ -269,7 +275,8 @@ onUnmounted(() => unlisten())
 	</template>
 	<div v-else-if="variant === 'library'">
 		<div
-			class="group relative flex w-full cursor-pointer select-none flex-col items-start justify-end gap-3 overflow-clip rounded-[20px] border border-solid border-surface-4 bg-surface-3 p-3 text-left transition-[border-color,filter,transform] hover:border-surface-5 hover:brightness-110 active:scale-[0.98]"
+			class="group relative flex w-full select-none flex-col items-start justify-end gap-3 overflow-clip rounded-[20px] border border-solid border-surface-4 bg-surface-3 p-3 text-left transition-[border-color,filter,transform] hover:border-surface-5 hover:brightness-110 active:scale-[0.98]"
+			:class="{ 'cursor-pointer': canOpenInstance }"
 			@click="seeInstance"
 			@mouseenter="checkProcess"
 		>
@@ -361,12 +368,13 @@ onUnmounted(() => unlisten())
 	</div>
 	<div v-else>
 		<div
-			class="button-base flex gap-3 group"
-			:class="
+			class="flex gap-3 group"
+			:class="[
+				{ 'button-base': canOpenInstance },
 				flat
 					? 'rounded-lg bg-transparent px-2 py-2 hover:bg-button-bg'
-					: 'rounded-xl bg-bg-raised p-4'
-			"
+					: 'rounded-xl bg-bg-raised p-4',
+			]"
 			@click="seeInstance"
 			@mouseenter="checkProcess"
 		>

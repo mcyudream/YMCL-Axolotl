@@ -9,19 +9,24 @@ import NavButton from '@/components/ui/NavButton.vue'
 import { instance_listener } from '@/helpers/events.js'
 import { list } from '@/helpers/instance'
 import { useTheming } from '@/store/state'
+import { useYmclStore } from '@/store/ymcl'
 
 const { handleError } = injectNotificationManager()
 
 const themeStore = useTheming()
+const ymclStore = useYmclStore()
 
 const fullInstanceList = ref([])
 const instanceCount = computed(() => themeStore.sidebarInstanceCount)
 
 const recentInstances = computed(() => {
+	const instances = fullInstanceList.value.filter(
+		(instance) => !ymclStore.isRouteHidden(`/instance/${encodeURIComponent(instance.id)}`),
+	)
 	if (instanceCount.value > 0) {
-		return fullInstanceList.value.slice(0, instanceCount.value)
+		return instances.slice(0, instanceCount.value)
 	}
-	return fullInstanceList.value
+	return instances
 })
 
 const getInstances = async () => {

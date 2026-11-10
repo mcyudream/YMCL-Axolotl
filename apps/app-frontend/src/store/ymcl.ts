@@ -5,13 +5,23 @@ import { normalizeDomainHomeLanding } from '@/components/ymcl/home/domain-home'
 import {
 	PERSONAL_DOMAIN_ID,
 	ymcl,
+	type YmclDomainsState,
 	type YmclDomainSummary,
 	type YmclExternalPoll,
 	type YmclManifest,
+	type YmclNavigationItem,
 	type YmclStoredSession,
 } from '@/helpers/ymcl'
+import { ymclNavTo } from '@/helpers/ymcl-domain'
 import { mapHomeProfileToDashboard, type YmclHomeProfile } from '@/helpers/ymcl-home'
 import { normalizeYmclManifest } from '@/helpers/ymcl-nav'
+import {
+	filterSimpleModeNavigation,
+	isSimpleModeRouteHidden,
+	normalizeSimpleMode,
+	type SimpleModeEntrance,
+	simpleModeHiddenRoutes,
+} from '@/helpers/ymcl-simple-mode'
 
 interface YmclStoreState {
 	domains: YmclDomainSummary[]
@@ -30,6 +40,10 @@ interface YmclStoreState {
 	 * domain login dialog.
 	 */
 	loginPromptAt: number
+	/** Cached process-owned unlocks, restored when the WebView is recreated. */
+	unlockedSimpleModeDomains: string[]
+	domainEpoch: number
+	activationRequestId: number
 }
 
 const EXTERNAL_POLL_INTERVAL_MS = 2000
@@ -47,6 +61,9 @@ export const useYmclStore = defineStore('ymclStore', {
 		loggingIn: false,
 		dataEpoch: 0,
 		loginPromptAt: 0,
+		unlockedSimpleModeDomains: [],
+		domainEpoch: 0,
+		activationRequestId: 0,
 	}),
 	getters: {
 		isPersonal: (state) => state.activeDomainId === PERSONAL_DOMAIN_ID,
@@ -57,19 +74,50 @@ export const useYmclStore = defineStore('ymclStore', {
 		 * but no session is established: domain content is off-limits until the
 		 * sign-in dialog completes.
 		 */
-		loginRequired: (state) => {
-			if (state.activeDomainId === PERSONAL_DOMAIN_ID) return false
-			if (state.session) return false
-			return state.activeDomain?.capabilities?.auth?.required === true
+		loginRequired(): boolean {
+			if (this.isPersonal || this.session) return false
+			return this.activeDomain?.capabilities?.auth?.required === true
 		},
-		/**
-		 * Manifest navigation sorted for rendering; the personal domain has no
-		 * manifest and falls back to the built-in launcher navigation.
-		 */
-		navigation: (state) =>
-			[...(state.manifest?.navigation ?? [])]
-				.map((item) => item)
-				.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)),
+		/** Domain-controlled presentation policy. */
+		simpleMode: (state) => normalizeSimpleMode(state.manifest?.simple_mode),
+		simpleModeActive(): boolean {
+			return (
+				!this.isPersonal &&
+				this.simpleMode.enabled &&
+				!this.unlockedSimpleModeDomains.includes(this.activeDomainId)
+			)
+		},
+		simpleModeHiddenRoutes(): string[] {
+			return this.simpleModeActive
+				? simpleModeHiddenRoutes(
+						this.simpleMode,
+						this.manifest?.navigation ?? [],
+						ymclNavTo,
+						this.manifest?.pages ?? [],
+					)
+				: []
+		},
+		isRouteHidden(): (route: string) => boolean {
+			return (route: string): boolean => isSimpleModeRouteHidden(route, this.simpleModeHiddenRoutes)
+		},
+		isEntranceHidden(): (entrance: SimpleModeEntrance) => boolean {
+			return (entrance: SimpleModeEntrance): boolean =>
+				this.simpleModeActive && this.simpleMode.hiddenEntrances.includes(entrance)
+		},
+		/** Manifest navigation filtered for presentation and sorted for rendering. */
+		navigation(state): YmclNavigationItem[] {
+			const navigation = state.manifest?.navigation ?? []
+			return [
+				...(this.simpleModeActive
+					? filterSimpleModeNavigation(
+							navigation,
+							this.simpleMode,
+							this.simpleModeHiddenRoutes,
+							ymclNavTo,
+						)
+					: navigation),
+			].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+		},
 		pageById: (state) => (pageId: string) => {
 			const pages = state.manifest?.pages ?? []
 			return (
@@ -105,29 +153,55 @@ export const useYmclStore = defineStore('ymclStore', {
 		sessionContext: (state) => state.session?.session.context ?? null,
 	},
 	actions: {
+		async unlockSimpleMode() {
+			if (!this.simpleModeActive) return
+			const unlocked = await ymcl.unlockSimpleMode(this.activeDomainId)
+			this.unlockedSimpleModeDomains = [
+				...new Set([...this.unlockedSimpleModeDomains, ...unlocked]),
+			]
+		},
 		setManifest(manifest: YmclManifest | null) {
 			this.manifest = normalizeYmclManifest(manifest)
 		},
 		async init() {
 			if (this.initialized) return
-			const domainState = await ymcl.domainsState().catch(() => null)
-			if (domainState) {
-				this.domains = domainState.domains
-				this.activeDomainId = domainState.active_domain_id
-			}
+			const requestId = this.activationRequestId
+			const [domainState, unlocked] = await Promise.all([
+				ymcl.domainsState().catch(() => null),
+				ymcl.simpleModeUnlocked(),
+			])
+			this.unlockedSimpleModeDomains = [
+				...new Set([...this.unlockedSimpleModeDomains, ...unlocked]),
+			]
+			if (requestId !== this.activationRequestId) return
+			if (domainState) this.applyDomainsState(domainState)
+			const epoch = this.domainEpoch
+			const isCurrent = () => epoch === this.domainEpoch && requestId === this.activationRequestId
 			if (this.activeDomainId && this.activeDomainId !== PERSONAL_DOMAIN_ID) {
 				const fresh = await ymcl.refreshManifest().catch(() => null)
-				this.setManifest(fresh ?? (await ymcl.manifest().catch(() => null)))
+				if (!isCurrent()) return
+				const manifest = fresh ?? (await ymcl.manifest().catch(() => null))
+				if (!isCurrent()) return
+				this.setManifest(manifest)
 			} else {
-				this.setManifest(await ymcl.manifest().catch(() => null))
+				const manifest = await ymcl.manifest().catch(() => null)
+				if (!isCurrent()) return
+				this.setManifest(manifest)
 			}
 			if (!this.isPersonal && this.activeDomainId) {
-				this.session = await ymcl.session(this.activeDomainId).catch(() => null)
+				const session = await ymcl.session(this.activeDomainId).catch(() => null)
+				if (!isCurrent()) return
+				this.session = session
 			}
 			this.initialized = true
 			this.requireLogin(true)
 		},
 		applyDomainsState(domainState: YmclDomainsState) {
+			if (this.activeDomainId !== domainState.active_domain_id) {
+				this.domainEpoch += 1
+				this.setManifest(null)
+				this.session = null
+			}
 			this.domains = domainState.domains
 			this.activeDomainId = domainState.active_domain_id
 		},
@@ -166,20 +240,34 @@ export const useYmclStore = defineStore('ymclStore', {
 			if (this.activeDomainId === id) this.session = null
 		},
 		async activateDomain(id: string) {
+			const requestId = ++this.activationRequestId
 			this.loadingManifest = true
 			try {
-				this.applyDomainsState(await ymcl.activateDomain(id))
+				const domainState = await ymcl.activateDomain(id)
+				if (requestId !== this.activationRequestId) return
+				this.applyDomainsState(domainState)
+				const epoch = this.domainEpoch
+				const isCurrent = () =>
+					requestId === this.activationRequestId &&
+					epoch === this.domainEpoch &&
+					id === this.activeDomainId
+				if (!isCurrent()) return
 				// Session first: authed manifest includes RBAC-filtered nav/pages.
-				this.session = id === PERSONAL_DOMAIN_ID ? null : await ymcl.session(id).catch(() => null)
+				const session = id === PERSONAL_DOMAIN_ID ? null : await ymcl.session(id).catch(() => null)
+				if (!isCurrent()) return
+				this.session = session
 				if (id === PERSONAL_DOMAIN_ID) {
 					this.setManifest(null)
 				} else {
 					const fresh = await ymcl.refreshManifest().catch(() => null)
-					this.setManifest(fresh ?? (await ymcl.manifest().catch(() => null)))
+					if (!isCurrent()) return
+					const manifest = fresh ?? (await ymcl.manifest().catch(() => null))
+					if (!isCurrent()) return
+					this.setManifest(manifest)
 				}
 				this.requireLogin(true)
 			} finally {
-				this.loadingManifest = false
+				if (requestId === this.activationRequestId) this.loadingManifest = false
 			}
 		},
 		/**
@@ -189,12 +277,16 @@ export const useYmclStore = defineStore('ymclStore', {
 		async handleServerEvent(event: { type?: string }) {
 			switch (event.type) {
 				case 'manifest.updated':
-				case 'session.context_changed':
+				case 'session.context_changed': {
+					const epoch = this.domainEpoch
+					const domainId = this.activeDomainId
 					await this.refreshManifest()
-					if (!this.isPersonal && this.activeDomainId) {
-						this.session = await ymcl.session(this.activeDomainId).catch(() => null)
+					if (domainId !== PERSONAL_DOMAIN_ID && epoch === this.domainEpoch) {
+						const session = await ymcl.session(domainId).catch(() => null)
+						if (epoch === this.domainEpoch) this.session = session
 					}
 					break
+				}
 				case 'session.revoked':
 					this.session = null
 					this.requireLogin()
@@ -216,12 +308,15 @@ export const useYmclStore = defineStore('ymclStore', {
 			}
 		},
 		async refreshManifest() {
+			const epoch = this.domainEpoch
+			const domainId = this.activeDomainId
 			this.loadingManifest = true
 			try {
 				const next = await ymcl.refreshManifest().catch(() => null)
-				this.setManifest(next ?? this.manifest)
+				if (epoch === this.domainEpoch && domainId === this.activeDomainId)
+					this.setManifest(next ?? this.manifest)
 			} finally {
-				this.loadingManifest = false
+				if (epoch === this.domainEpoch) this.loadingManifest = false
 			}
 		},
 		/**

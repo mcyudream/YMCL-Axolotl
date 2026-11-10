@@ -919,6 +919,7 @@ fn main() {
         .plugin(api::files::init())
         .plugin(api::worlds::init())
         .plugin(api::ymcl::init())
+        .manage(theseus::ymcl::simple_mode::SimpleModeUnlocks::default())
         .manage(api::files::StudioWatchers::default())
         .manage(PendingUpdateData::default())
         .invoke_handler(tauri::generate_handler![

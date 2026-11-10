@@ -34,6 +34,7 @@ import {
 	type WorldWithInstance,
 } from '@/helpers/worlds'
 import { handleSevereError } from '@/store/error'
+import { useYmclStore } from '@/store/ymcl'
 
 const props = defineProps<{
 	instances: GameInstance[]
@@ -43,6 +44,7 @@ const props = defineProps<{
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
+const ymclStore = useYmclStore()
 const handleMinecraftLaunchError = useMinecraftLaunchError()
 const runtime = useHomeDashboardRuntime()
 const { favoriteWorlds, runningInstanceIds } = runtime
@@ -161,7 +163,12 @@ async function unpinServer(world: ServerWorld & WorldWithInstance) {
 		>
 			<li v-for="server in servers" :key="serverKey(server.world)">
 				<SmartClickable>
-					<template #clickable>
+					<template
+						v-if="
+							!ymclStore.isRouteHidden(`/instance/${encodeURIComponent(server.instance.id)}/worlds`)
+						"
+						#clickable
+					>
 						<router-link
 							:aria-label="server.world.name"
 							:to="`/instance/${encodeURIComponent(server.instance.id)}/worlds?highlight=${encodeURIComponent(getWorldIdentifier(server.world))}`"

@@ -8,6 +8,7 @@ import { useHomeDashboardRuntime } from '@/components/home/home-dashboard-runtim
 import HomeInstanceCard from '@/components/home/HomeInstanceCard.vue'
 import { set_pinned } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
+import { useYmclStore } from '@/store/ymcl'
 
 const props = defineProps<{
 	instances: GameInstance[]
@@ -17,6 +18,7 @@ const props = defineProps<{
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
+const ymclStore = useYmclStore()
 const { runningInstanceIds } = useHomeDashboardRuntime()
 const messages = defineMessages({
 	pinnedInstances: {
@@ -59,7 +61,12 @@ async function updatePinned(instance: GameInstance, pinned: boolean) {
 			<h2>
 				{{ formatMessage(messages.pinnedInstances) }}
 			</h2>
-			<ButtonStyled v-if="dashboardSize !== '1x1'" type="transparent" size="small" class="ml-auto">
+			<ButtonStyled
+				v-if="dashboardSize !== '1x1' && !ymclStore.isRouteHidden('/library')"
+				type="transparent"
+				size="small"
+				class="ml-auto"
+			>
 				<router-link to="/library">
 					<span v-if="dashboardSize === '2x2'">{{ formatMessage(messages.viewAllInstances) }}</span>
 					<RightArrowIcon aria-hidden="true" />

@@ -1,5 +1,11 @@
 <template>
-	<Dropdown v-model:shown="shown" placement="bottom-end" :triggers="['click']" :hide-triggers="['click']">
+	<Dropdown
+		v-if="!ymclStore.isEntranceHidden('domain-switcher')"
+		v-model:shown="shown"
+		placement="bottom-end"
+		:triggers="['click']"
+		:hide-triggers="['click']"
+	>
 		<ButtonStyled type="transparent">
 			<button
 				v-tooltip="formatMessage(messages.switchDomain)"
@@ -39,8 +45,12 @@
 					</span>
 					<CheckIcon v-if="domain.is_active" class="size-4 shrink-0 text-brand" />
 				</button>
-				<hr class="my-1 border-surface-5" />
+				<hr
+					v-if="!ymclStore.isRouteHidden('/settings') && !ymclStore.isEntranceHidden('settings')"
+					class="my-1 border-surface-5"
+				/>
 				<button
+					v-if="!ymclStore.isRouteHidden('/settings') && !ymclStore.isEntranceHidden('settings')"
 					class="flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm text-secondary hover:bg-button-bg hover:text-contrast"
 					@click="goToSettings"
 				>
@@ -54,8 +64,8 @@
 
 <script setup lang="ts">
 import { CheckIcon, DropdownIcon, GlobeIcon, SettingsIcon } from '@modrinth/assets'
-import { Dropdown } from 'floating-vue'
 import { ButtonStyled, defineMessages, useVIntl } from '@modrinth/ui'
+import { Dropdown } from 'floating-vue'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 

@@ -59,6 +59,7 @@ import { list } from '@/helpers/instance'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import type { GameInstance } from '@/helpers/types'
 import { ymcl } from '@/helpers/ymcl'
+import { domainPageRoute, parseShortcutTarget } from '@/helpers/ymcl-domain'
 import {
 	mapDashboardToHomeProfile,
 	mapHomeProfileToDashboard,
@@ -217,10 +218,14 @@ const homeAccess = computed(() =>
 		locked: domainDashboardLocked.value,
 	}),
 )
-const canManageDomainLayout = computed(() => homeAccess.value.canManageDomain)
+const canManageDomainLayout = computed(
+	() => !ymclStore.isEntranceHidden('home-customization') && homeAccess.value.canManageDomain,
+)
 /** Unlocked domain homes allow members to customize their own view (YAP §6.5 用户覆盖). */
 const canOverrideDomainHome = computed(() => !ymclStore.isPersonal && homeAccess.value.canCustomize)
-const canEditOwnHome = computed(() => homeAccess.value.canCustomize)
+const canEditOwnHome = computed(
+	() => !ymclStore.isEntranceHidden('home-customization') && homeAccess.value.canCustomize,
+)
 const editingScope = ref<'personal' | 'member' | 'domain' | null>(null)
 const editingActive = computed(() => editingScope.value !== null)
 const domainEditingConfig = ref<HomeDashboardConfig | null>(null)
@@ -247,11 +252,33 @@ const memberDashboard = computed(() => {
 	return canOverrideDomainHome.value ? applyHomeOverride(domain, domainOverride.value) : domain
 })
 const effectiveDashboard = computed(() => memberDashboard.value ?? dashboardConfig.value)
-const renderedDashboard = computed(() =>
-	(editingScope.value === 'member' || editingScope.value === 'domain') && domainEditingConfig.value
-		? domainEditingConfig.value
-		: effectiveDashboard.value,
-)
+const renderedDashboard = computed(() => {
+	const config =
+		(editingScope.value === 'member' || editingScope.value === 'domain') &&
+		domainEditingConfig.value
+			? domainEditingConfig.value
+			: effectiveDashboard.value
+	if (!config || !ymclStore.simpleModeActive || editingActive.value) return config
+	return {
+		...config,
+		widgets: config.widgets.filter((widget) => {
+			if (widget.kind === 'page-shortcut' && widget.shortcut) {
+				const target = parseShortcutTarget(widget.shortcut.target)
+				if (target)
+					return !ymclStore.isRouteHidden(
+						target.kind === 'page' ? domainPageRoute(target.pageId) : target.route,
+					)
+			}
+			if (widget.kind === 'data-card' && widget.dataSource) {
+				const sourceId = widget.dataSource.id
+				const pageId =
+					ymclStore.manifest?.pages.find((page) => page.data_source === sourceId)?.id ?? sourceId
+				return !ymclStore.isRouteHidden(domainPageRoute(pageId))
+			}
+			return true
+		}),
+	}
+})
 const dashboardConfig = ref<HomeDashboardConfig | null>(null)
 const dashboard = ref<InstanceType<typeof HomeDashboard>>()
 watch(
@@ -834,7 +861,7 @@ onUnmounted(() => {
 			<span v-if="!showDomainLanding" class="home-floating-divider" aria-hidden="true" />
 		</template>
 		<button
-			v-if="!showDomainLanding"
+			v-if="!showDomainLanding && !ymclStore.isEntranceHidden('home-customization')"
 			v-tooltip="formatMessage(isMinimal ? messages.switchToInformation : messages.switchToMinimal)"
 			data-onboarding-id="home-layout-switch"
 			type="button"

@@ -303,6 +303,7 @@ export interface YmclManifest {
 	actions?: unknown
 	theme?: unknown
 	home?: unknown
+	simple_mode?: unknown
 }
 
 export interface YmclDomainSummary {
@@ -634,6 +635,9 @@ export const ymcl = {
 		invoke<YmclDomainsState>('plugin:ymcl|ymcl_domain_activate', { id }),
 	manifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_get'),
 	refreshManifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_refresh'),
+	simpleModeUnlocked: () => invoke<string[]>('plugin:ymcl|ymcl_simple_mode_unlocked'),
+	unlockSimpleMode: (domainId: string) =>
+		invoke<string[]>('plugin:ymcl|ymcl_simple_mode_unlock', { domainId }),
 	interopSite: (domainId: string, refresh = false) =>
 		invoke<InteropSiteDocument | null>('plugin:ymcl|ymcl_interop_site', { domainId, refresh }),
 	activeInteropSite: () =>

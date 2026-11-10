@@ -112,12 +112,12 @@
 									:tint-by="instance.id"
 									size="24px"
 								/>
-								<router-link
+								<SimpleModeRouteLink
 									:to="`/project/${linkedProjectV3.slug ?? linkedProjectV3.id}`"
 									class="hover:underline text-primary truncate"
 								>
 									{{ linkedProjectV3.name }}
-								</router-link>
+								</SimpleModeRouteLink>
 							</div>
 						</template>
 
@@ -445,6 +445,7 @@ import FeatureSelectModal from '@/components/ymcl/FeatureSelectModal.vue'
 import PackInstallModal from '@/components/ymcl/PackInstallModal.vue'
 import PackStatusBanner from '@/components/ymcl/PackStatusBanner.vue'
 import PublishInstanceModal from '@/components/ymcl/PublishInstanceModal.vue'
+import SimpleModeRouteLink from '@/components/ymcl/SimpleModeRouteLink.vue'
 import {
 	fetchCachedServerStatus,
 	getFreshCachedServerStatus,
@@ -475,11 +476,11 @@ import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
 import { createInstanceShortcut, showInstanceInFolder } from '@/helpers/utils.js'
 import { refreshWorlds, type ServerStatus } from '@/helpers/worlds'
+import { DOMAIN_PUBLISH_PERMISSION, hasDomainPermission } from '@/helpers/ymcl'
 import { injectServerInstall } from '@/providers/server-install'
 import { handleSevereError } from '@/store/error.js'
 import { useBreadcrumbs, useTheming } from '@/store/state'
 import { useYmclStore } from '@/store/ymcl'
-import { DOMAIN_PUBLISH_PERMISSION, hasDomainPermission } from '@/helpers/ymcl'
 
 import { isActiveUpgradeJobForInstance, isUnmanagedUpgradeEligible } from './upgrade/entry'
 
@@ -738,33 +739,35 @@ const hideInstanceTabs = computed(() =>
 	displayedInstanceRoute.value.matched.some((record) => record.meta.hideInstanceTabs === true),
 )
 const isStudioMode = computed(() => displayedInstanceRoute.value.name === 'FileStudio')
-const tabs = computed(() => [
-	{
-		label: formatMessage(messages.contentTab),
-		href: `${basePath.value}`,
-		icon: BoxesIcon,
-	},
-	{
-		label: formatMessage(messages.filesTab),
-		href: `${basePath.value}/files`,
-		icon: FolderOpenIcon,
-	},
-	{
-		label: formatMessage(messages.screenshotsTab),
-		href: `${basePath.value}/screenshots`,
-		icon: ImageIcon,
-	},
-	{
-		label: formatMessage(messages.worldsTab),
-		href: `${basePath.value}/worlds`,
-		icon: GlobeIcon,
-	},
-	{
-		label: formatMessage(messages.logsTab),
-		href: `${basePath.value}/logs`,
-		icon: TerminalSquareIcon,
-	},
-])
+const tabs = computed(() =>
+	[
+		{
+			label: formatMessage(messages.contentTab),
+			href: `${basePath.value}`,
+			icon: BoxesIcon,
+		},
+		{
+			label: formatMessage(messages.filesTab),
+			href: `${basePath.value}/files`,
+			icon: FolderOpenIcon,
+		},
+		{
+			label: formatMessage(messages.screenshotsTab),
+			href: `${basePath.value}/screenshots`,
+			icon: ImageIcon,
+		},
+		{
+			label: formatMessage(messages.worldsTab),
+			href: `${basePath.value}/worlds`,
+			icon: GlobeIcon,
+		},
+		{
+			label: formatMessage(messages.logsTab),
+			href: `${basePath.value}/logs`,
+			icon: TerminalSquareIcon,
+		},
+	].filter((tab) => !ymclStore.isRouteHidden(tab.href)),
+)
 
 function updateBreadcrumbs() {
 	if (instance.value) {
@@ -905,8 +908,9 @@ const openUpgrade = async () => {
 
 const handleRightClick = (event: MouseEvent) => {
 	const baseOptions = [
-		{ name: 'add_content' },
-		{ type: 'divider' },
+		...(!ymclStore.isRouteHidden(`/browse/${instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`)
+			? [{ name: 'add_content' }, { type: 'divider' }]
+			: []),
 		{ name: 'edit' },
 		{ name: 'open_folder' },
 		{ name: 'copy_path' },
@@ -942,6 +946,7 @@ const handleOptionsClick = async (args: { option: string; item: unknown }) => {
 			await stopInstance('InstancePageContextMenu')
 			break
 		case 'add_content':
+			if (ymclStore.isRouteHidden(`/browse/${instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`)) return
 			await router.push({
 				path: `/browse/${instance.value?.loader === 'vanilla' ? 'datapack' : 'mod'}`,
 				query: { i: props.id },

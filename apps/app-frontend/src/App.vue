@@ -177,6 +177,7 @@ import {
 } from '@/helpers/ymcl-domain'
 import { resolveDomainImageUrl } from '@/helpers/ymcl-domain-image'
 import { resolveYmclNavIcon } from '@/helpers/ymcl-nav-icon'
+import { matchesSimpleModeUnlockKey } from '@/helpers/ymcl-simple-mode'
 import { applyLocalePreference, setFollowSystemLocale } from '@/i18n.config'
 import {
 	appUpdateState,
@@ -238,6 +239,17 @@ async function onSessionLoginSignedIn() {
 const { hasModal } = useModalStack()
 const router = useRouter()
 const route = useRoute()
+const removeSimpleModeGuard = router.beforeEach((to) =>
+	ymclStore.isRouteHidden(to.path) ? '/' : true,
+)
+onUnmounted(removeSimpleModeGuard)
+watch(
+	() => ymclStore.isRouteHidden(route.path),
+	(hidden) => {
+		if (hidden) void router.replace('/')
+	},
+	{ immediate: true, flush: 'sync' },
+)
 
 type YmclNavMenuItem = {
 	key: string
@@ -354,8 +366,12 @@ const domainNativeRoutes = computed(
 				.map((item) => ymclNativeRoute(item)),
 		),
 )
-const showReservedLab = computed(() => !domainNativeRoutes.value.has('/lab'))
-const showReservedDownloads = computed(() => !domainNativeRoutes.value.has('/downloads'))
+const showReservedLab = computed(
+	() => !domainNativeRoutes.value.has('/lab') && !ymclStore.isRouteHidden('/lab'),
+)
+const showReservedDownloads = computed(
+	() => !domainNativeRoutes.value.has('/downloads') && !ymclStore.isRouteHidden('/downloads'),
+)
 const onSkinsPage = computed(() => route.path === '/skins')
 const onSchematicWorkshopPage = computed(() => route.path === '/lab/schematic-preview')
 const onSettingsPage = computed(() => route.path.startsWith('/settings'))
@@ -396,7 +412,12 @@ const forceSidebar = computed(
 	() => route.path.startsWith('/browse') || route.path.startsWith('/project'),
 )
 const domainHomeVisible = computed(() => route.path === '/' && ymclStore.showDomainLanding)
-const forceSidebarHidden = computed(() => route.path === '/settings' || domainHomeVisible.value)
+const forceSidebarHidden = computed(
+	() =>
+		route.path === '/settings' ||
+		domainHomeVisible.value ||
+		ymclStore.isEntranceHidden('account-sidebar'),
+)
 const sidebarVisible = computed(
 	() => !forceSidebarHidden.value && (sidebarToggled.value || forceSidebar.value),
 )
@@ -665,6 +686,16 @@ async function checkUpdates() {
  * can still be opened intentionally.
  */
 function handleGlobalKeydown(event: KeyboardEvent) {
+	if (
+		!ymclStore.isPersonal &&
+		ymclStore.simpleMode.enabled &&
+		matchesSimpleModeUnlockKey(event, ymclStore.simpleMode.unlockKey)
+	) {
+		event.preventDefault()
+		event.stopImmediatePropagation()
+		if (!event.repeat) void ymclStore.unlockSimpleMode().catch(handleError)
+		return
+	}
 	const key = event.key.toLowerCase()
 	const isFindShortcut = key === 'f' && (event.ctrlKey || event.metaKey)
 	const isBlockedDevtoolsShortcut = event.key === 'F12' && !themeStore.devMode
@@ -740,6 +771,7 @@ function bindingFor(action: ShortcutAction): KeyBinding {
 /** Whether an action is switched on and reachable in the current state. */
 function shortcutIsAvailable(action: ShortcutAction): boolean {
 	if (!themeStore[action.enabledField]) return false
+	if (action.target && ymclStore.isRouteHidden(action.target(route))) return false
 	return !action.unavailable?.({
 		worldsTabEnabled: themeStore.featureFlags.worlds_tab,
 		offline: offline.value,
@@ -2930,7 +2962,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					</span>
 				</NavButton>
 			</NavRail>
-			<NavRail v-else>
+			<NavRail v-else-if="!ymclStore.isEntranceHidden('navigation')">
 				<template v-for="item in ymclNavItems" :key="item.id">
 					<div v-if="item.kind === 'separator'" class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
 					<OverflowMenu
@@ -3002,11 +3034,12 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			</NavRail>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>
 			<div class="quick-instance-scroll flex-1 min-h-0 overflow-x-hidden overflow-y-auto">
-				<suspense>
+				<suspense v-if="!ymclStore.isEntranceHidden('quick-instances')">
 					<QuickInstanceSwitcher />
 				</suspense>
 			</div>
 			<NavButton
+				v-if="!ymclStore.isEntranceHidden('create-instance') && !ymclStore.isRouteHidden('/create')"
 				v-tooltip.right="formatMessage(messages.createInstance)"
 				data-onboarding-id="create-instance"
 				to="/create"
@@ -3015,6 +3048,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				<PlusIcon />
 			</NavButton>
 			<NavButton
+				v-if="!ymclStore.isEntranceHidden('settings') && !ymclStore.isRouteHidden('/settings')"
 				v-tooltip.right="formatMessage(commonMessages.settingsLabel)"
 				data-onboarding-id="nav-settings"
 				to="/settings"
@@ -3152,7 +3186,11 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					-->
 					<Transition name="page-slide" :css="themeStore.getFeatureFlag('page_transitions')" appear>
 						<div :key="getPageTransitionKey(pageRoute)" class="page-transition-layer">
-							<Suspense v-if="Component" @pending="onSuspensePending" @resolve="onSuspenseResolve">
+							<Suspense
+								v-if="Component && !ymclStore.isRouteHidden(pageRoute.path)"
+								@pending="onSuspensePending"
+								@resolve="onSuspenseResolve"
+							>
 								<component :is="Component"></component>
 							</Suspense>
 						</div>

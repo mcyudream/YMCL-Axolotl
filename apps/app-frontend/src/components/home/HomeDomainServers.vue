@@ -22,10 +22,11 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import type { HomeWidgetSize } from '@/components/home/home-dashboard'
-import JoinServerModal from '@/components/ymcl/JoinServerModal.vue'
 import { useHomeDashboardRuntime } from '@/components/home/home-dashboard-runtime'
+import JoinServerModal from '@/components/ymcl/JoinServerModal.vue'
 import type { DomainServerRow } from '@/composables/useDomainServers'
 import { useDomainServers } from '@/composables/useDomainServers'
+import { useYmclStore } from '@/store/ymcl'
 
 /**
  * Launcher-built domain servers home card. Servers are the hard dependency
@@ -41,6 +42,7 @@ const props = defineProps<{
 const { formatMessage } = useVIntl()
 const { addNotification, handleError } = injectNotificationManager()
 const router = useRouter()
+const ymclStore = useYmclStore()
 const runtime = useHomeDashboardRuntime()
 const joinModal = ref<InstanceType<typeof JoinServerModal> | null>(null)
 
@@ -475,7 +477,15 @@ watch(
 						</button>
 					</ButtonStyled>
 
-					<ButtonStyled v-else-if="row.install" circular size="small" type="transparent">
+					<ButtonStyled
+						v-else-if="
+							row.install &&
+							!ymclStore.isRouteHidden(`/instance/${encodeURIComponent(row.install.instanceId)}`)
+						"
+						circular
+						size="small"
+						type="transparent"
+					>
 						<button
 							v-tooltip="formatMessage(messages.openInstance)"
 							class="opacity-60 transition-opacity group-hover:opacity-100"

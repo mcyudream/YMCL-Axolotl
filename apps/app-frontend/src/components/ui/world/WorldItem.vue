@@ -41,6 +41,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
+import SimpleModeRouteLink from '@/components/ymcl/SimpleModeRouteLink.vue'
 import { copyToClipboard, createInstanceShortcut } from '@/helpers/utils'
 import type {
 	ProtocolVersion,
@@ -50,6 +51,7 @@ import type {
 	World,
 } from '@/helpers/worlds.ts'
 import { getWorldIdentifier, set_world_display_status } from '@/helpers/worlds.ts'
+import { useYmclStore } from '@/store/ymcl'
 
 import { LockIcon } from '../../../../../../packages/assets/generated-icons'
 
@@ -62,6 +64,7 @@ const formatDateTime = useFormatDateTime({
 })
 
 const router = useRouter()
+const ymclStore = useYmclStore()
 const { addNotification, handleError } = injectNotificationManager()
 
 const emit = defineEmits<{
@@ -267,7 +270,12 @@ const messages = defineMessages({
 </script>
 <template>
 	<SmartClickable>
-		<template v-if="instanceId" #clickable>
+		<template
+			v-if="
+				instanceId && !ymclStore.isRouteHidden(`/instance/${encodeURIComponent(instanceId)}/worlds`)
+			"
+			#clickable
+		>
 			<router-link
 				class="no-click-animation"
 				:to="`/instance/${encodeURIComponent(instanceId)}/worlds?highlight=${encodeURIComponent(getWorldIdentifier(world))}`"
@@ -390,9 +398,9 @@ const messages = defineMessages({
 					</div>
 					<template v-if="instanceId">
 						<span v-if="dashboardDensity !== 'compact'" aria-hidden="true">•</span>
-						<router-link
+						<SimpleModeRouteLink
 							class="flex items-center gap-1 truncate hover:underline text-secondary smart-clickable:allow-pointer-events"
-							:to="`/instance/${instanceId}`"
+							:to="`/instance/${encodeURIComponent(instanceId)}`"
 						>
 							<InstanceIcon
 								:icon-path="instanceIcon"
@@ -402,7 +410,7 @@ const messages = defineMessages({
 								class="shrink-0"
 							/>
 							<span class="truncate">{{ instanceName }}</span>
-						</router-link>
+						</SimpleModeRouteLink>
 					</template>
 				</div>
 			</div>
@@ -496,7 +504,9 @@ const messages = defineMessages({
 							},
 							{
 								id: 'open-instance',
-								shown: !!instanceId,
+								shown:
+									!!instanceId &&
+									!ymclStore.isRouteHidden(`/instance/${encodeURIComponent(instanceId)}`),
 								action: () => router.push(`/instance/${encodeURIComponent(instanceId)}`),
 							},
 							{

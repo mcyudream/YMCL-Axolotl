@@ -23,6 +23,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 
 import HomeGreeting from '@/components/home/HomeGreeting.vue'
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
+import SimpleModeRouteLink from '@/components/ymcl/SimpleModeRouteLink.vue'
 import { useMinecraftLaunchError } from '@/composables/useMinecraftLaunchError'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { trackEvent } from '@/helpers/analytics'
@@ -32,6 +33,7 @@ import { kill, run } from '@/helpers/instance'
 import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
 import { handleSevereError } from '@/store/error'
+import { useYmclStore } from '@/store/ymcl'
 
 const props = defineProps<{
 	instances: GameInstance[]
@@ -49,6 +51,7 @@ const formatRelativeTime = useRelativeTime()
 const { handleError } = injectNotificationManager()
 const handleMinecraftLaunchError = useMinecraftLaunchError()
 const { offline } = useNetworkStatus()
+const ymclStore = useYmclStore()
 
 const messages = defineMessages({
 	chooseInstance: {
@@ -218,7 +221,7 @@ onUnmounted(() => {
 					<div
 						class="grid min-w-0 grid-cols-1 items-center gap-5 sm:grid-cols-[minmax(0,1fr)_auto]"
 					>
-						<router-link
+						<SimpleModeRouteLink
 							:to="`/instance/${encodeURIComponent(selectedInstance.id)}`"
 							class="group flex min-w-0 items-center gap-5 rounded-lg text-inherit no-underline focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-shadow"
 						>
@@ -245,7 +248,7 @@ onUnmounted(() => {
 									</span>
 								</div>
 							</div>
-						</router-link>
+						</SimpleModeRouteLink>
 
 						<div class="flex min-h-11 shrink-0 items-center justify-end gap-2">
 							<ButtonStyled v-if="running" color="red" size="large">
@@ -313,7 +316,15 @@ onUnmounted(() => {
 								}}
 							</h2>
 						</div>
-						<ButtonStyled color="brand" size="large">
+						<ButtonStyled
+							v-if="
+								instances.length > 0 ||
+								(!ymclStore.isRouteHidden('/create') &&
+									!ymclStore.isEntranceHidden('create-instance'))
+							"
+							color="brand"
+							size="large"
+						>
 							<button v-if="instances.length > 0" @click="emit('choose')">
 								<ListIcon aria-hidden="true" />
 								{{ formatMessage(messages.chooseInstance) }}

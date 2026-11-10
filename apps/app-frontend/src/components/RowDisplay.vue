@@ -35,6 +35,7 @@ import { get_by_instance_id } from '@/helpers/process.js'
 import { showInstanceInFolder } from '@/helpers/utils.js'
 import { injectContentInstall } from '@/providers/content-install'
 import { handleSevereError } from '@/store/error.js'
+import { useYmclStore } from '@/store/ymcl'
 
 const { handleError } = injectNotificationManager()
 const { install: installVersion } = injectContentInstall()
@@ -53,6 +54,7 @@ const messages = defineMessages({
 })
 
 const router = useRouter()
+const ymclStore = useYmclStore()
 
 const props = defineProps({
 	instances: {
@@ -94,7 +96,9 @@ async function duplicateInstance(p) {
 
 const handleInstanceRightClick = async (event, passedInstance) => {
 	const baseOptions = [
-		...(!offline.value ? [{ name: 'add_content' }, { type: 'divider' }] : []),
+		...(!offline.value && !ymclStore.isRouteHidden(`/browse/${passedInstance.loader === 'vanilla' ? 'datapack' : 'mod'}`)
+			? [{ name: 'add_content' }, { type: 'divider' }]
+			: []),
 		{ name: 'edit' },
 		{ name: 'duplicate' },
 		{ name: 'open_folder' },
@@ -171,6 +175,7 @@ const handleOptionsClick = async (args) => {
 			})
 			break
 		case 'add_content':
+			if (ymclStore.isRouteHidden(`/browse/${args.item.loader === 'vanilla' ? 'datapack' : 'mod'}`)) return
 			await router.push({
 				path: `/browse/${args.item.loader === 'vanilla' ? 'datapack' : 'mod'}`,
 				query: { i: args.item.id },

@@ -642,12 +642,12 @@ onUnmounted(() => {
 					full-width
 				/>
 				<div
-					v-if="progressDetail || operation"
+					v-if="progressDetail || (operation && !store.isRouteHidden('/downloads'))"
 					class="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-white/60"
 				>
 					<span v-if="progressDetail && !waiting">{{ progressDetail }}</span>
 					<RouterLink
-						v-if="operation"
+						v-if="operation && !store.isRouteHidden('/downloads')"
 						:to="
 							operation.jobId
 								? { path: '/downloads', query: { job: operation.jobId } }
@@ -680,19 +680,37 @@ onUnmounted(() => {
 							{{ formatMessage(messages.defaultFeatures) }}
 						</p>
 					</div>
-					<ButtonStyled v-if="launched && instanceId" size="large" color="brand">
+					<ButtonStyled
+						v-if="
+							launched &&
+							instanceId &&
+							!store.isRouteHidden(`/instance/${encodeURIComponent(instanceId)}/logs`)
+						"
+						size="large"
+						color="brand"
+					>
 						<RouterLink :to="`/instance/${encodeURIComponent(instanceId)}/logs`"
 							><TerminalSquareIcon />{{ formatMessage(messages.logs) }}</RouterLink
 						>
 					</ButtonStyled>
 					<ButtonStyled
-						v-else-if="action === 'create' && !error && preview?.available"
+						v-else-if="
+							action === 'create' &&
+							!error &&
+							preview?.available &&
+							!store.isRouteHidden('/create') &&
+							!store.isEntranceHidden('create-instance')
+						"
 						size="large"
 						color="brand"
 					>
 						<RouterLink to="/create">{{ formatMessage(messages.create) }}</RouterLink>
 					</ButtonStyled>
-					<ButtonStyled v-else size="large" color="brand">
+					<ButtonStyled
+						v-else-if="(!launched && action !== 'create') || error"
+						size="large"
+						color="brand"
+					>
 						<button
 							type="button"
 							:disabled="(!error && (!preview || !preview.available)) || props.preview"
@@ -762,7 +780,7 @@ onUnmounted(() => {
 				class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-white/50"
 			>
 				<RouterLink
-					v-if="operation"
+					v-if="operation && !store.isRouteHidden('/downloads')"
 					:to="
 						operation.jobId ? { path: '/downloads', query: { job: operation.jobId } } : '/downloads'
 					"
