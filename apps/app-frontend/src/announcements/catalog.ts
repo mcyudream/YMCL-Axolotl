@@ -28,6 +28,42 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.1.5',
+		version: '2.1.5',
+		publishedAt: '2026-11-10',
+		title: {
+			'en-US': 'YMCL 2.1.5',
+			'zh-CN': 'YMCL 2.1.5',
+		},
+		changes: {
+			changed: [
+				{
+					'en-US':
+						'Improved the dependency graph with a focused view for each mod, searches that show direct relationships, and more readable names and zoom levels.',
+					'zh-CN': '改进依赖图，支持聚焦单个模组、搜索直接关联项，并优化长名称和缩放后的可读性。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed repeated or prolonged scans of legacy mods, including Minecraft 1.12.2. Stalled online lookups now time out and can be cancelled while keeping local results.',
+					'zh-CN':
+						'修复 Minecraft 1.12.2 等旧版模组反复扫描或长时间停留在扫描中的问题；在线查询卡住时会超时，也可取消并保留本地结果。',
+				},
+				{
+					'en-US':
+						'Fixed missing dependency relationships for local mods and connections being lost after online identification.',
+					'zh-CN': '修复本地模组依赖关系缺失，以及在线识别后部分依赖连线丢失的问题。',
+				},
+				{
+					'en-US':
+						'Fixed search results hidden by collapsed parents and cyclic dependencies missing from the dependency tree.',
+					'zh-CN': '修复依赖树中搜索结果被折叠父项遮住，以及循环依赖未显示的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.1.4',
 		version: '2.1.4',
 		publishedAt: '2026-11-04',
