@@ -1,6 +1,33 @@
 {
-  "updated_at": "2026-11-10T08:51:01.664Z",
+  "updated_at": "2026-11-10T09:53:17.220Z",
   "announcements": [
+    {
+      "id": "launcher-2.1.6",
+      "version": "2.1.6",
+      "publishedAt": "2026-11-10",
+      "title": {
+        "en-US": "YMCL 2.1.6",
+        "zh-CN": "YMCL 2.1.6"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added a one-click mod and resource update check to the instance Content tab, with progress and available update counts.",
+            "zh-CN": "实例「内容」页新增一键检查 Mod 和资源更新，显示检查状态和可更新数量。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed Cleanroom instances missing Forge mod updates and compatible dependencies, including Minecraft 1.12.2 with Cleanroom 0.6.8.",
+            "zh-CN": "修复 Minecraft 1.12.2、Cleanroom 0.6.8 等实例无法发现 Forge 模组更新及匹配兼容依赖的问题。"
+          },
+          {
+            "en-US": "Fixed failed online update checks silently using cached results instead of reporting errors.",
+            "zh-CN": "修复在线更新检查失败时静默使用旧缓存的问题，现在会明确显示错误。"
+          }
+        ]
+      }
+    },
     {
       "id": "launcher-2.1.5",
       "version": "2.1.5",
