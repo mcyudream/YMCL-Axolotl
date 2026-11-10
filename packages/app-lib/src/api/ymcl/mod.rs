@@ -15,8 +15,8 @@ pub mod manifest;
 pub mod mip;
 pub mod p2p;
 pub mod registry;
-pub mod skins;
 pub mod simple_mode;
+pub mod skins;
 pub mod stats;
 pub mod yggroot;
 
