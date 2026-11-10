@@ -28,6 +28,27 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.0',
+		version: '2.2.0',
+		publishedAt: '2026-11-10',
+		title: {
+			'en-US': 'YMCL 2.2.0',
+			'zh-CN': 'YMCL 2.2.0',
+		},
+		changes: {
+			added: [
+				{
+					'en-US': 'Added domain-controlled simple mode with configurable hidden features, entrances and navigation items, unlocked with F12 by default for the current launcher run.',
+					'zh-CN': '新增域控傻瓜模式，支持配置隐藏功能、界面入口和导航项，默认按 F12 解锁，仅本次启动有效。',
+				},
+			],
+		},
+		notes: {
+			'en-US': 'Simple mode requires YMCL domain adapter 0.18.0 or later; unlocking preserves existing domain permissions.',
+			'zh-CN': '傻瓜模式需要域服务端的 YMCL 适配器 0.18.0 或更高版本，解锁后仍遵守原有域权限。',
+		},
+	},
+	{
 		id: 'launcher-2.1.6',
 		version: '2.1.6',
 		publishedAt: '2026-11-10',
