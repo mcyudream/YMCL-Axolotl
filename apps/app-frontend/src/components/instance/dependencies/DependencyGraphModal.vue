@@ -7,6 +7,7 @@ import {
 	ListIcon,
 	RotateCounterClockwiseIcon,
 	SearchIcon,
+	XIcon,
 	ZoomInIcon,
 	ZoomOutIcon,
 } from '@modrinth/assets'
@@ -31,9 +32,11 @@ import {
 	type DependencyDirection,
 	type DependencyGraph,
 	type DependencyGraphEdge,
+	dependencyGraphMetrics,
 	type DependencyGraphNode,
+	getDependencyRootIds,
 	getDependencyTreeRows,
-	getRelatedNodeIds,
+	getDirectlyRelatedNodeIds,
 	layoutDependencyGraph,
 } from './dependency-graph'
 
@@ -134,6 +137,18 @@ const messages = defineMessages({
 	resetZoom: { id: 'app.instance.dependencies.reset-zoom', defaultMessage: 'Fit graph to view' },
 	zoomIn: { id: 'app.instance.dependencies.zoom-in', defaultMessage: 'Zoom in' },
 	zoomOut: { id: 'app.instance.dependencies.zoom-out', defaultMessage: 'Zoom out' },
+	focusRelationships: {
+		id: 'app.instance.dependencies.focus-relationships',
+		defaultMessage: 'Focus relationships',
+	},
+	allRelationships: {
+		id: 'app.instance.dependencies.all-relationships',
+		defaultMessage: 'Show all relationships',
+	},
+	clearSelection: {
+		id: 'app.instance.dependencies.clear-selection',
+		defaultMessage: 'Close details',
+	},
 })
 
 type ViewMode = 'tree' | 'graph'
@@ -141,21 +156,22 @@ type Filter =
 	'all' | 'pack' | 'user' | 'local' | 'disabled' | 'missing' | 'orphaned' | 'cycle' | 'unresolved'
 type Point = { x: number; y: number }
 
-const minZoom = 0.32
+const minZoom = 0.02
 const maxZoom = 1.6
 const viewportPadding = 36
 const modal = ref<InstanceType<typeof NewModal>>()
 const items = ref<ContentItem[]>([])
 const viewMode = ref<ViewMode>('tree')
-const direction = ref<DependencyDirection>('requiredBy')
+const direction = ref<DependencyDirection>('requires')
 const searchQuery = ref('')
 const sourceFilter = ref<'all' | 'pack' | 'user' | 'local'>('all')
 const typeFilter = ref('all')
 const statusFilter = ref<Filter>('all')
-const onlyRelated = ref(false)
+const onlyRelated = ref(true)
 const showIsolated = ref(false)
 const expandedIds = ref(new Set<string>())
 const selectedNodeId = ref<string>()
+const focusedNodeId = ref<string>()
 const zoom = ref(1)
 const pan = ref<Point>({ x: 0, y: 0 })
 const draggedNodeId = ref<string>()
@@ -251,14 +267,22 @@ const filteredEdges = computed(() =>
 )
 
 const treeRows = computed(() =>
-	getDependencyTreeRows(graph.value, expandedIds.value, direction.value).filter((row) => {
-		if (!row.nodeId) return true
-		return filteredNodeIds.value.has(row.nodeId)
-	}),
+	getDependencyTreeRows(graph.value, expandedIds.value, direction.value, filteredNodeIds.value),
 )
 
 const selectedNode = computed(() =>
 	selectedNodeId.value ? graph.value.nodeById.get(selectedNodeId.value) : undefined,
+)
+
+const selectedRelatedNodeIds = computed(() =>
+	getDirectlyRelatedNodeIds(
+		graph.value,
+		new Set(selectedNodeId.value ? [selectedNodeId.value] : []),
+	),
+)
+
+const focusedNode = computed(() =>
+	focusedNodeId.value ? graph.value.nodeById.get(focusedNodeId.value) : undefined,
 )
 
 const hasActiveGraphFilter = computed(
@@ -270,8 +294,10 @@ const hasActiveGraphFilter = computed(
 )
 
 const graphNodeIds = computed(() => {
+	if (focusedNodeId.value)
+		return getDirectlyRelatedNodeIds(graph.value, new Set([focusedNodeId.value]))
 	if (!hasActiveGraphFilter.value) return relationshipNodeIds.value
-	return getRelatedNodeIds(graph.value, matchedNodeIds.value)
+	return getDirectlyRelatedNodeIds(graph.value, matchedNodeIds.value)
 })
 
 const graphLayout = computed(() =>
@@ -279,6 +305,7 @@ const graphLayout = computed(() =>
 )
 
 const isolatedNodes = computed(() => {
+	if (focusedNodeId.value) return []
 	const candidates = hasActiveGraphFilter.value
 		? matchedNodeIds.value
 		: new Set(graph.value.nodes.map((node) => node.id))
@@ -311,16 +338,6 @@ const graphStructureKey = computed(
 			.join('|')}`,
 )
 
-function treeRootIdsForDirection(graphData: DependencyGraph, treeDirection: DependencyDirection) {
-	if (treeDirection === 'requires') return graphData.rootIds
-	return graphData.nodes
-		.filter((node) => !(graphData.edgesBySource.get(node.id)?.length ?? 0))
-		.map((node) => node.id)
-		.sort((left, right) =>
-			graphData.nodeById.get(left)!.title.localeCompare(graphData.nodeById.get(right)!.title),
-		)
-}
-
 function toggleExpanded(nodeId: string) {
 	const next = new Set(expandedIds.value)
 	if (next.has(nodeId)) next.delete(nodeId)
@@ -330,6 +347,30 @@ function toggleExpanded(nodeId: string) {
 
 function selectNode(nodeId: string) {
 	selectedNodeId.value = nodeId
+}
+
+function focusNode(nodeId: string) {
+	searchQuery.value = ''
+	typeFilter.value = 'all'
+	sourceFilter.value = 'all'
+	statusFilter.value = 'all'
+	selectedNodeId.value = nodeId
+	focusedNodeId.value = nodeId
+	viewMode.value = 'graph'
+	nodeOffsets.value = new Map()
+	nextTick(scheduleGraphFit)
+}
+
+function navigateToNode(nodeId: string) {
+	if (viewMode.value === 'graph') focusNode(nodeId)
+	else selectNode(nodeId)
+}
+
+function showAllRelationships() {
+	focusedNodeId.value = undefined
+	selectedNodeId.value = undefined
+	nodeOffsets.value = new Map()
+	nextTick(scheduleGraphFit)
 }
 
 function clamp(value: number, lower: number, upper: number): number {
@@ -366,7 +407,7 @@ function constrainedPan(nextPan: Point, nextZoom = zoom.value): Point {
 	}
 }
 
-function fitGraph() {
+function fitGraph(keepReadable = false) {
 	const viewport = graphViewport.value
 	if (!viewport || !graphLayout.value.nodes.length) return
 	const availableWidth = Math.max(1, viewport.clientWidth - viewportPadding * 2)
@@ -380,10 +421,19 @@ function fitGraph() {
 		minZoom,
 		maxZoom,
 	)
+	if (keepReadable) zoom.value = Math.max(0.75, zoom.value)
+	const focus = keepReadable
+		? (graphLayout.value.nodes.find((node) => node.id === focusedNodeId.value) ??
+			graphLayout.value.nodes.find((node) => matchedNodeIds.value.has(node.id)))
+		: undefined
 	pan.value = constrainedPan(
 		{
-			x: (viewport.clientWidth - graphLayout.value.width * zoom.value) / 2,
-			y: (viewport.clientHeight - graphLayout.value.height * zoom.value) / 2,
+			x: focus
+				? viewport.clientWidth / 2 - (focus.x + dependencyGraphMetrics.nodeWidth / 2) * zoom.value
+				: (viewport.clientWidth - graphLayout.value.width * zoom.value) / 2,
+			y: focus
+				? viewport.clientHeight / 2 - (focus.y + dependencyGraphMetrics.nodeHeight / 2) * zoom.value
+				: (viewport.clientHeight - graphLayout.value.height * zoom.value) / 2,
 		},
 		zoom.value,
 	)
@@ -406,13 +456,13 @@ function scheduleGraphFit() {
 	if (fitFrame) cancelAnimationFrame(fitFrame)
 	fitFrame = requestAnimationFrame(() => {
 		fitFrame = undefined
-		if (viewMode.value === 'graph') fitGraph()
+		if (viewMode.value === 'graph') fitGraph(!!focusedNodeId.value || hasActiveGraphFilter.value)
 	})
 }
 
 function resetGraphView() {
 	nodeOffsets.value = new Map()
-	nextTick(scheduleGraphFit)
+	nextTick(() => requestAnimationFrame(() => fitGraph()))
 }
 
 function zoomTo(nextZoom: number, anchor?: Point) {
@@ -544,6 +594,7 @@ function sourceLabel(node: DependencyGraphNode) {
 }
 
 function nodeStatusClass(node: DependencyGraphNode) {
+	if (selectedNodeId.value === node.id) return 'border-brand bg-surface-2'
 	if (!node.resolved) return 'border-orange bg-surface-2 shadow-orange/15'
 	if (node.cycle) return 'border-red bg-surface-2 shadow-red/15'
 	if (node.enabled === false) return 'border-surface-4 bg-surface-2 opacity-70'
@@ -561,18 +612,17 @@ function edgeIsMuted(edge: DependencyGraphEdge) {
 function show(contentItems: ContentItem[]) {
 	items.value = [...contentItems]
 	selectedNodeId.value = undefined
+	focusedNodeId.value = undefined
 	searchQuery.value = ''
 	typeFilter.value = 'all'
 	sourceFilter.value = 'all'
 	statusFilter.value = 'all'
-	onlyRelated.value = false
+	onlyRelated.value = true
 	showIsolated.value = false
 	viewMode.value = 'tree'
-	direction.value = 'requiredBy'
+	direction.value = 'requires'
 	nodeOffsets.value = new Map()
-	expandedIds.value = new Set(
-		treeRootIdsForDirection(buildDependencyGraph(contentItems), 'requiredBy'),
-	)
+	expandedIds.value = new Set(getDependencyRootIds(graph.value, 'requires', filteredNodeIds.value))
 	zoom.value = 1
 	pan.value = { x: 0, y: 0 }
 	nextTick(() => modal.value?.show())
@@ -580,11 +630,11 @@ function show(contentItems: ContentItem[]) {
 
 function setItems(contentItems: ContentItem[]) {
 	items.value = [...contentItems]
-	const ids = new Set(buildDependencyGraph(contentItems).nodes.map((node) => node.id))
+	const ids = new Set(graph.value.nodes.map((node) => node.id))
 	selectedNodeId.value = ids.has(selectedNodeId.value ?? '') ? selectedNodeId.value : undefined
+	focusedNodeId.value = ids.has(focusedNodeId.value ?? '') ? focusedNodeId.value : undefined
 	expandedIds.value = new Set([...expandedIds.value].filter((id) => ids.has(id)))
 	nodeOffsets.value = new Map([...nodeOffsets.value].filter(([id]) => ids.has(id)))
-	nextTick(scheduleGraphFit)
 }
 
 function hide() {
@@ -592,8 +642,18 @@ function hide() {
 }
 
 watch(direction, () => {
-	expandedIds.value = new Set()
+	expandedIds.value = new Set(
+		getDependencyRootIds(graph.value, direction.value, filteredNodeIds.value),
+	)
 })
+
+watch(
+	[searchQuery, typeFilter, sourceFilter, statusFilter],
+	() => {
+		focusedNodeId.value = undefined
+	},
+	{ flush: 'sync' },
+)
 
 watch(viewMode, (mode) => {
 	if (mode === 'graph') nextTick(scheduleGraphFit)
@@ -645,7 +705,7 @@ defineExpose({ show, hide, setItems })
 			</div>
 		</template>
 
-		<div class="flex h-[min(640px,calc(100vh-8rem))] min-h-0 flex-col">
+		<div class="dependency-workspace flex min-h-0 flex-col">
 			<div
 				class="flex flex-wrap items-center gap-3 border-0 border-b border-solid border-surface-4 px-6 py-4"
 			>
@@ -675,7 +735,6 @@ defineExpose({ show, hide, setItems })
 			>
 				<DropdownSelect
 					v-model="typeFilter"
-					class="!w-44"
 					name="dependency-type"
 					:options="typeOptions"
 					:display-name="typeFilterLabel"
@@ -683,17 +742,15 @@ defineExpose({ show, hide, setItems })
 				/>
 				<DropdownSelect
 					v-model="sourceFilter"
-					class="!w-44"
 					name="dependency-source"
-					:options="sourceOptions"
+					:options="[...sourceOptions]"
 					:display-name="sourceFilterLabel"
 					auto-placement
 				/>
 				<DropdownSelect
 					v-model="statusFilter"
-					class="!w-44"
 					name="dependency-status"
-					:options="statusOptions"
+					:options="[...statusOptions]"
 					:display-name="statusFilterLabel"
 					auto-placement
 				/>
@@ -701,7 +758,9 @@ defineExpose({ show, hide, setItems })
 					<Toggle id="dependency-related-only" v-model="onlyRelated" small />
 					<span>{{ formatMessage(messages.onlyRelated) }}</span>
 				</div>
-				<span class="ml-auto text-sm text-secondary">{{ statsText }}</span>
+				<span class="ml-auto text-sm text-secondary">{{
+					viewMode === 'graph' ? graphStatsText : statsText
+				}}</span>
 			</div>
 
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
@@ -716,7 +775,7 @@ defineExpose({ show, hide, setItems })
 						v-else-if="filteredNodeIds.size === 0"
 						class="flex h-full items-center justify-center p-8 text-secondary"
 					>
-						{{ formatMessage(messages.noMatches) }}
+						{{ formatMessage(hasActiveGraphFilter ? messages.noMatches : messages.noDependencies) }}
 					</div>
 					<div v-else-if="viewMode === 'tree'" class="h-full overflow-auto p-4">
 						<div class="mb-3 flex items-center gap-2">
@@ -748,11 +807,13 @@ defineExpose({ show, hide, setItems })
 								tabindex="0"
 								class="group flex min-h-14 w-full items-center gap-2 rounded-xl px-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
 								:class="
-									row.kind === 'cycle'
-										? 'text-red'
-										: row.kind === 'reference'
-											? 'text-secondary'
-											: 'text-primary'
+									selectedNodeId === row.nodeId
+										? 'bg-surface-2 ring-1 ring-brand'
+										: row.kind === 'cycle'
+											? 'text-red'
+											: row.kind === 'reference'
+												? 'text-secondary'
+												: 'text-primary'
 								"
 								:style="{ paddingLeft: `${row.depth * 1.5 + 0.5}rem` }"
 								@click="row.nodeId && selectNode(row.nodeId)"
@@ -813,17 +874,21 @@ defineExpose({ show, hide, setItems })
 								class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-0 border-b border-solid border-surface-4 bg-surface-2 px-4 py-3"
 							>
 								<div class="flex min-w-0 items-center gap-2">
-									<span
-										class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
-									>
-										<GitGraphIcon class="size-4" />
-									</span>
-									<span class="truncate text-sm text-secondary">{{
+									<MinecraftFormattedText
+										v-if="focusedNode"
+										:text="focusedNode.title"
+										class="truncate text-sm font-semibold text-contrast"
+									/>
+									<span v-else class="truncate text-sm text-secondary">{{
 										formatMessage(messages.graphDirection)
 									}}</span>
 								</div>
 								<div class="flex items-center gap-3">
-									<span class="shrink-0 text-xs text-secondary">{{ graphStatsText }}</span>
+									<ButtonStyled v-if="focusedNode" type="transparent" size="small">
+										<button @click="showAllRelationships">
+											{{ formatMessage(messages.allRelationships) }}
+										</button>
+									</ButtonStyled>
 									<div
 										v-if="isolatedNodes.length"
 										class="flex items-center gap-2 text-xs text-secondary"
@@ -933,7 +998,7 @@ defineExpose({ show, hide, setItems })
 										class="dependency-graph-node absolute flex h-[76px] w-[228px] cursor-grab items-center gap-3 rounded-2xl border-2 px-3 shadow-lg transition-[box-shadow,opacity,transform] active:cursor-grabbing"
 										:class="[
 											nodeStatusClass(node),
-											selectedNodeId && selectedNodeId !== node.id ? 'opacity-35' : '',
+											selectedNodeId && !selectedRelatedNodeIds.has(node.id) ? 'opacity-35' : '',
 											draggedNodeId === node.id ? 'z-10 scale-[1.03] shadow-xl' : '',
 										]"
 										:style="{ left: `${node.x}px`, top: `${node.y}px` }"
@@ -950,7 +1015,7 @@ defineExpose({ show, hide, setItems })
 										<div class="min-w-0 flex-1">
 											<MinecraftFormattedText
 												:text="node.title"
-												class="block truncate text-sm font-bold text-contrast"
+												class="line-clamp-2 text-sm font-bold leading-tight text-contrast"
 											/>
 											<div class="mt-0.5 truncate text-xs text-secondary">
 												{{ statusLabel(node) ?? sourceLabel(node) }}
@@ -994,7 +1059,7 @@ defineExpose({ show, hide, setItems })
 
 				<aside
 					v-if="selectedNode"
-					class="flex min-h-0 w-full shrink-0 flex-col gap-4 overflow-y-auto border-0 border-t border-solid border-surface-4 bg-surface-1 p-5 lg:w-[310px] lg:border-l lg:border-t-0"
+					class="dependency-details flex min-h-0 w-full shrink-0 flex-col gap-4 overflow-y-auto border-0 border-t border-solid border-surface-4 bg-surface-1 p-5 lg:w-[310px] lg:border-l lg:border-t-0"
 				>
 					<div class="flex items-center gap-3">
 						<Avatar
@@ -1003,22 +1068,39 @@ defineExpose({ show, hide, setItems })
 							size="3rem"
 							no-shadow
 						/>
-						<div class="min-w-0">
+						<div class="min-w-0 flex-1">
 							<RouterLink
 								v-if="nodeLink(selectedNode)"
 								:to="{ path: nodeLink(selectedNode), query: nodeLinkQuery() }"
-								class="block truncate font-semibold text-contrast hover:underline"
+								class="line-clamp-2 font-semibold text-contrast hover:underline"
 							>
 								<MinecraftFormattedText :text="selectedNode.title" />
 							</RouterLink>
 							<MinecraftFormattedText
 								v-else
 								:text="selectedNode.title"
-								class="block truncate font-semibold text-contrast"
+								class="line-clamp-2 font-semibold text-contrast"
 							/>
 							<span class="text-sm text-secondary">{{ sourceLabel(selectedNode) }}</span>
 						</div>
+						<ButtonStyled circular type="transparent" size="small">
+							<button
+								:aria-label="formatMessage(messages.clearSelection)"
+								@click="selectedNodeId = undefined"
+							>
+								<XIcon />
+							</button>
+						</ButtonStyled>
 					</div>
+					<ButtonStyled
+						v-if="focusedNodeId !== selectedNode.id && selectedRelatedNodeIds.size > 1"
+						type="standard"
+						size="small"
+					>
+						<button @click="focusNode(selectedNode.id)">
+							<GitGraphIcon class="size-4" />{{ formatMessage(messages.focusRelationships) }}
+						</button>
+					</ButtonStyled>
 					<p v-if="!selectedNode.resolved" class="m-0 text-sm text-orange">
 						{{ formatMessage(messages.unresolvedLabel) }}
 					</p>
@@ -1026,10 +1108,9 @@ defineExpose({ show, hide, setItems })
 						<span v-if="selectedNode.versionNumber">{{
 							formatMessage(messages.version, { version: selectedNode.versionNumber })
 						}}</span>
-						<span v-if="selectedNode.fileName">{{
+						<span v-if="selectedNode.fileName" class="break-words">{{
 							formatMessage(messages.file, { file: selectedNode.fileName })
 						}}</span>
-						<span>{{ formatMessage(messages.source) }}: {{ sourceLabel(selectedNode) }}</span>
 						<span v-if="statusLabel(selectedNode)">
 							{{ formatMessage(messages.status) }}: {{ statusLabel(selectedNode) }}
 						</span>
@@ -1042,7 +1123,7 @@ defineExpose({ show, hide, setItems })
 							v-for="edge in graph.edgesBySource.get(selectedNode.id)"
 							:key="edge.id"
 							class="truncate text-left text-sm text-brand hover:underline"
-							@click="selectNode(edge.target)"
+							@click="navigateToNode(edge.target)"
 						>
 							<MinecraftFormattedText :text="graph.nodeById.get(edge.target)?.title ?? ''" />
 						</button>
@@ -1061,7 +1142,7 @@ defineExpose({ show, hide, setItems })
 							v-for="edge in graph.edgesByTarget.get(selectedNode.id)"
 							:key="edge.id"
 							class="truncate text-left text-sm text-brand hover:underline"
-							@click="selectNode(edge.source)"
+							@click="navigateToNode(edge.source)"
 						>
 							<MinecraftFormattedText :text="graph.nodeById.get(edge.source)?.title ?? ''" />
 						</button>
@@ -1079,6 +1160,21 @@ defineExpose({ show, hide, setItems })
 </template>
 
 <style scoped>
+.dependency-workspace {
+	/* The canvas needs a stable viewport for pointer coordinates and fit-to-view. */
+	height: min(40rem, calc(100dvh - 8rem));
+}
+
+.dependency-details {
+	max-height: 40%;
+}
+
+@media (min-width: 1024px) {
+	.dependency-details {
+		max-height: none;
+	}
+}
+
 .dependency-graph-viewport {
 	background-color: var(--surface-1);
 	background-image:

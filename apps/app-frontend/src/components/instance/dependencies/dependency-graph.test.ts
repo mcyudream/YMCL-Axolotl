@@ -7,12 +7,20 @@ import {
 	buildDependencyGraph,
 	dependencyGraphMetrics,
 	getConnectedComponents,
+	getDependencyRootIds,
 	getDependencyTreeRows,
+	getDirectlyRelatedNodeIds,
 	getRelatedNodeIds,
 	layoutDependencyGraph,
 } from './dependency-graph.ts'
 
-type Ref = { provider: 'modrinth'; projectId: string; releaseId: string }
+type Ref = {
+	entryId?: string
+	fileId?: string
+	provider: 'modrinth' | 'curseforge' | 'local'
+	projectId: string
+	releaseId: string
+}
 
 type ItemOptions = {
 	title?: string
@@ -31,7 +39,12 @@ function item(projectId: string, versionId: string, options: ItemOptions = {}): 
 		size: 1,
 		enabled: true,
 		project_type: 'mod',
-		project: { id: projectId, slug: projectId, title: options.title ?? projectId, icon_url: null },
+		project: {
+			id: projectId,
+			slug: projectId,
+			title: options.title ?? projectId,
+			icon_url: undefined,
+		},
 		version: { id: versionId, version_number: versionId, file_name: `${projectId}.jar` },
 		update: null,
 		origin_provider: 'modrinth',
@@ -242,4 +255,95 @@ test('uses dragged final coordinates for connectors and canvas bounds', () => {
 		layout.height >=
 			target.y + dependencyGraphMetrics.nodeHeight + dependencyGraphMetrics.canvasPadding,
 	)
+})
+
+test('focus and search keep immediate relationships without expanding a whole modpack', () => {
+	const graph = buildDependencyGraph([
+		item('parent', '1', { requires: [ref('library'), ref('unrelated')] }),
+		item('library', '1', { requires: [ref('core')] }),
+		item('core', '1', { requires: [ref('distant')] }),
+		item('unrelated', '1'),
+		item('distant', '1'),
+	])
+	const visible = getDirectlyRelatedNodeIds(graph, new Set([nodeId('library')]))
+	assert.deepEqual(visible, new Set([nodeId('library'), nodeId('parent'), nodeId('core')]))
+	const layout = layoutDependencyGraph(graph, visible)
+	assert.equal(layout.nodes.length, 3)
+	assert.equal(layout.edges.length, 2)
+})
+
+test('tree search finds a matching child even when its hidden parent is collapsed', () => {
+	const graph = buildDependencyGraph([
+		item('parent', '1', { requires: [ref('child')] }),
+		item('child', '1', { requires: [ref('library')] }),
+		item('library', '1'),
+	])
+	for (const direction of ['requires', 'requiredBy'] as const) {
+		const rows = getDependencyTreeRows(graph, new Set(), direction, new Set([nodeId('child')]))
+		assert.equal(rows.length, 1)
+		assert.equal(rows[0].nodeId, nodeId('child'))
+		assert.equal(rows[0].depth, 0)
+	}
+})
+
+test('cycles have a single tree entry point in both directions', () => {
+	const graph = buildDependencyGraph([
+		item('a', '1', { requires: [ref('b')] }),
+		item('b', '1', { requires: [ref('c')] }),
+		item('c', '1', { requires: [ref('a')] }),
+	])
+	for (const direction of ['requires', 'requiredBy'] as const) {
+		assert.equal(getDependencyRootIds(graph, direction).length, 1)
+		const rows = getDependencyTreeRows(graph, new Set(graph.nodeById.keys()), direction)
+		assert.equal(rows.filter((row) => row.kind === 'node').length, 3)
+		assert.equal(rows.filter((row) => row.kind === 'cycle').length, 1)
+	}
+})
+
+test('shared dependencies have unique row identities across sibling branches', () => {
+	const graph = buildDependencyGraph([
+		item('root', '1', { requires: [ref('a'), ref('b'), ref('c')] }),
+		...['a', 'b', 'c'].map((id) => item(id, '1', { requires: [ref('shared')] })),
+		item('shared', '1'),
+	])
+	const rows = getDependencyTreeRows(graph, new Set(graph.nodeById.keys()))
+	assert.equal(rows.length, new Set(rows.map((row) => row.id)).size)
+	assert.equal(rows.filter((row) => row.kind === 'reference').length, 2)
+})
+
+test('entry references stay connected when online metadata replaces a local display identity', () => {
+	const reference: Ref = {
+		entryId: 'library-b',
+		provider: 'local',
+		projectId: 'local:library',
+		releaseId: '1',
+	}
+	const graph = buildDependencyGraph([
+		item('parent', '1', { requires: [reference] }),
+		item('online-library', '1', { entryId: 'library-a' }),
+		item('online-library', '1', { entryId: 'library-b' }),
+	])
+	assert.equal(graph.unresolvedIds.size, 0)
+	assert.equal(graph.edges.length, 1)
+	assert.equal(graph.edges[0].target, 'item:entry:library-b')
+})
+
+test('file references and node positions survive later provider recognition', () => {
+	const reference: Ref = {
+		fileId: 'file-library',
+		provider: 'local',
+		projectId: 'local:library',
+		releaseId: '1',
+	}
+	const parent = item('parent', '1', { requires: [reference] })
+	const local = { ...item('local:library', '1'), instanceFileId: 'file-library' }
+	const recognized = {
+		...item('online-library', '1', { entryId: 'recognized-entry' }),
+		instanceFileId: 'file-library',
+	}
+	for (const copy of [local, recognized]) {
+		const graph = buildDependencyGraph([parent, copy])
+		assert.equal(graph.unresolvedIds.size, 0)
+		assert.equal(graph.edges[0].target, 'item:file:file-library')
+	}
 })

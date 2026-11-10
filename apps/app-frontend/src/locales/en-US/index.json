@@ -2660,6 +2660,15 @@
 	"app.instance.dependencies.zoom-out": {
 		"message": "Zoom out"
 	},
+	"app.instance.dependencies.focus-relationships": {
+		"message": "Focus relationships"
+	},
+	"app.instance.dependencies.all-relationships": {
+		"message": "Show all relationships"
+	},
+	"app.instance.dependencies.clear-selection": {
+		"message": "Close details"
+	},
 	"app.instance.disable-selected": {
 		"message": "Disable selected"
 	},

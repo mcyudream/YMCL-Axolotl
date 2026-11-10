@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::future::Future;
 use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,7 @@ use crate::state::instances::adapters::{
 static ACTIVE: LazyLock<DashMap<String, CancellationToken>> =
     LazyLock::new(DashMap::new);
 static WORKERS: Semaphore = Semaphore::const_new(2);
+const ONLINE_REFRESH_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +51,26 @@ pub(crate) struct RefreshContext {
 }
 
 impl RefreshContext {
+    async fn run_online_refresh(
+        &self,
+        work: impl Future<Output = crate::Result<()>>,
+        timeout: Duration,
+    ) -> crate::Result<()> {
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => self.check_cancelled(),
+            result = tokio::time::timeout(timeout, work) => match result {
+                Ok(result) => result,
+                Err(_) => {
+                    let message = "Online content information timed out. Local files and dependencies are available. Retry unfinished files to try again.";
+                    sqlx::query("UPDATE instance_content_refresh_files SET state = 'failed', error = ? WHERE instance_id = ? AND state = 'local_ready'")
+                        .bind(message).bind(&self.instance_id).execute(&self.pool).await?;
+                    Err(crate::ErrorKind::InputError(message.into()).into())
+                }
+            },
+        }
+    }
+
     pub(crate) fn check_cancelled(&self) -> crate::Result<()> {
         if self.cancel.is_cancelled() {
             return Err(crate::ErrorKind::InputError(
@@ -252,33 +275,10 @@ pub async fn start_content_refresh(
 				_ = context.cancel.cancelled() => { context.check_cancelled()?; unreachable!() }
 			};
 			super::sync_content_files::sync_instance_content_files_with_progress(&instance, &state, Some(&context)).await?;
+			// Publish local dependency relationships before waiting for any provider.
+			super::content_snapshot::get_content_snapshot(&context.instance_id, false, &state).await?;
 			context.set_stage("enriching", None).await?;
-			let paths = sqlx::query_scalar::<_, String>("SELECT relative_path FROM instance_content_refresh_files WHERE instance_id = ? AND state = 'local_ready' ORDER BY relative_path")
-				.bind(&context.instance_id).fetch_all(&context.pool).await?;
-			for paths in paths.chunks(8) {
-				context.check_cancelled()?;
-				let batch = tokio::select! {
-					result = super::list_content::refresh_content_by_paths(&context.instance_id, paths, Some(CacheBehaviour::MustRevalidate), &state) => result,
-					_ = context.cancel.cancelled() => { context.check_cancelled()?; unreachable!() }
-				};
-				for path in paths {
-					context.check_cancelled()?;
-					let result = if batch.is_ok() { Ok(()) } else {
-						super::list_content::refresh_content_by_paths(&context.instance_id, std::slice::from_ref(path), Some(CacheBehaviour::MustRevalidate), &state).await.map(|_| ())
-					};
-					match result {
-						Ok(()) => { sqlx::query("UPDATE instance_content_refresh_files SET state = 'completed', error = NULL WHERE instance_id = ? AND relative_path = ?").bind(&context.instance_id).bind(path).execute(&context.pool).await?; }
-						Err(error) => context.file_failed(path, &error.to_string()).await?,
-					}
-				}
-				context.update_counts().await?;
-				context.notify().await;
-			}
-			context.check_cancelled()?;
-			tokio::select! {
-				result = super::content_snapshot::finish_content_refresh(&context.instance_id, &state) => result?,
-				_ = context.cancel.cancelled() => context.check_cancelled()?,
-			}
+			context.run_online_refresh(refresh_online_content(&context, &state), ONLINE_REFRESH_TIMEOUT).await?;
 			Ok::<(), crate::Error>(())
 		}.await;
         let failed = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM instance_content_refresh_files WHERE instance_id = ? AND state = 'failed'").bind(&context.instance_id).fetch_one(&context.pool).await.unwrap_or(1);
@@ -302,6 +302,53 @@ pub async fn start_content_refresh(
     Ok(initial)
 }
 
+async fn refresh_online_content(
+    context: &RefreshContext,
+    state: &State,
+) -> crate::Result<()> {
+    let paths = sqlx::query_scalar::<_, String>("SELECT relative_path FROM instance_content_refresh_files WHERE instance_id = ? AND state = 'local_ready' ORDER BY relative_path")
+        .bind(&context.instance_id).fetch_all(&context.pool).await?;
+    for paths in paths.chunks(8) {
+        context.check_cancelled()?;
+        let batch = super::list_content::refresh_content_by_paths(
+            &context.instance_id,
+            paths,
+            Some(CacheBehaviour::MustRevalidate),
+            state,
+        )
+        .await;
+        for path in paths {
+            context.check_cancelled()?;
+            let result = if batch.is_ok() {
+                Ok(())
+            } else {
+                super::list_content::refresh_content_by_paths(
+                    &context.instance_id,
+                    std::slice::from_ref(path),
+                    Some(CacheBehaviour::MustRevalidate),
+                    state,
+                )
+                .await
+                .map(|_| ())
+            };
+            match result {
+                Ok(()) => {
+                    sqlx::query("UPDATE instance_content_refresh_files SET state = 'completed', error = NULL WHERE instance_id = ? AND relative_path = ?")
+                        .bind(&context.instance_id).bind(path).execute(&context.pool).await?;
+                }
+                Err(error) => {
+                    context.file_failed(path, &error.to_string()).await?
+                }
+            }
+        }
+        context.update_counts().await?;
+        context.notify().await;
+    }
+    context.check_cancelled()?;
+    super::content_snapshot::finish_content_refresh(&context.instance_id, state)
+        .await
+}
+
 pub async fn cancel_content_refresh(instance_id: &str) -> crate::Result<()> {
     if let Some(token) = ACTIVE.get(instance_id) {
         token.cancel();
@@ -321,6 +368,117 @@ pub(crate) async fn recover_content_refreshes(
 mod tests {
     use super::*;
     use crate::state::{CreateDirectLinkInstance, DirectoryInfo, Instance};
+
+    #[tokio::test]
+    async fn cached_snapshot_links_local_dependencies_before_online_enrichment()
+    {
+        use std::io::Write;
+        let (root, state, instance, context) = fixture().await;
+        for (name, metadata) in [
+            (
+                "parent",
+                r#"[{"modid":"parent","version":"1","useDependencyInformation":true,"requiredMods":["library"]}]"#,
+            ),
+            ("library", r#"[{"modid":"library","version":"1"}]"#),
+        ] {
+            let file = std::fs::File::create(
+                root.path().join(format!("minecraft/mods/{name}.jar")),
+            )
+            .unwrap();
+            let mut archive = zip::ZipWriter::new(file);
+            archive
+                .start_file(
+                    "mcmod.info",
+                    zip::write::FileOptions::<()>::default(),
+                )
+                .unwrap();
+            archive.write_all(metadata.as_bytes()).unwrap();
+            archive.finish().unwrap();
+        }
+        super::super::sync_content_files::sync_instance_content_files_with_progress(&instance, &state, Some(&context)).await.unwrap();
+        let snapshot = super::super::content_snapshot::get_content_snapshot(
+            &instance.id,
+            false,
+            &state,
+        )
+        .await
+        .unwrap();
+        let parent = snapshot
+            .items
+            .iter()
+            .find(|item| item.expected_relative_path == "mods/parent.jar")
+            .unwrap();
+        let dependency = parent.dependency.as_ref().unwrap();
+        assert_eq!(dependency.requires.len(), 1);
+        assert_eq!(dependency.requires[0].project_id, "local:library");
+        let library = snapshot
+            .items
+            .iter()
+            .find(|item| item.expected_relative_path == "mods/library.jar")
+            .unwrap();
+        assert_eq!(dependency.requires[0].entry_id, library.entry_id);
+        assert_eq!(
+            dependency.requires[0].provider,
+            crate::state::ContentProvider::Local
+        );
+        assert!(library.entry_id.is_none());
+        assert_eq!(dependency.requires[0].file_id, library.file_id);
+        assert_eq!(
+            library.ownership_kind,
+            crate::state::instances::ContentOwnershipKind::LocalDiscovered
+        );
+        let persisted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM instance_content_entries WHERE content_set_id = (SELECT applied_content_set_id FROM instances WHERE id = ?)")
+            .bind(&instance.id).fetch_one(&state.pool).await.unwrap();
+        assert_eq!(
+            persisted, 0,
+            "reading local dependencies must not change content ownership"
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_online_refresh_preserves_local_files_and_retry_paths() {
+        let (root, state, instance, context) = fixture().await;
+        std::fs::write(root.path().join("minecraft/mods/local.jar"), b"local")
+            .unwrap();
+        let files = super::super::sync_content_files::sync_instance_content_files_with_progress(&instance, &state, Some(&context)).await.unwrap();
+        let result = context
+            .run_online_refresh(
+                std::future::pending(),
+                Duration::from_millis(1),
+            )
+            .await;
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+        let failed: (String, String) = sqlx::query_as("SELECT state, error FROM instance_content_refresh_files WHERE relative_path = 'mods/local.jar'")
+            .fetch_one(&state.pool).await.unwrap();
+        assert_eq!(failed.0, "failed");
+        assert!(
+            failed
+                .1
+                .contains("Local files and dependencies are available")
+        );
+        let stored = crate::state::instances::adapters::sqlite::content_rows::get_instance_files(&instance.id, &state.pool).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].sha1, files[0].sha1);
+        assert!(!crate::mod_metadata::metadata_cache_needs_refresh(
+            stored[0].local_mod_data.as_deref()
+        ));
+    }
+
+    #[tokio::test]
+    async fn online_refresh_cancellation_does_not_wait_for_the_provider() {
+        let (_root, _state, _instance, context) = fixture().await;
+        context.cancel.cancel();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            context.run_online_refresh(
+                std::future::pending(),
+                ONLINE_REFRESH_TIMEOUT,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+    }
 
     async fn fixture()
     -> (tempfile::TempDir, Arc<State>, Instance, RefreshContext) {

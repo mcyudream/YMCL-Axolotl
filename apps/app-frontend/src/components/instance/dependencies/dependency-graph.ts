@@ -91,6 +91,8 @@ export type DependencyGraphLayout = {
 }
 
 type DependencyReference = {
+	entryId?: string
+	fileId?: string
 	provider: string
 	projectId: string
 	releaseId: string
@@ -121,11 +123,15 @@ function normalizeProjectId(provider: string, projectId: string): string {
 }
 
 function referenceKey(reference: DependencyReference): string {
+	if (reference.entryId) return `entry:${reference.entryId}`
+	if (reference.fileId) return `file:${reference.fileId}`
 	return `${reference.provider}:${normalizeProjectId(reference.provider, reference.projectId)}:${reference.releaseId}`
 }
 
 function itemReferenceKeys(item: ContentItem): Set<string> {
 	const keys = new Set<string>()
+	if (item.instanceEntryId) keys.add(`entry:${item.instanceEntryId}`)
+	if (item.instanceFileId) keys.add(`file:${item.instanceFileId}`)
 	const projectId = item.project?.id
 	const versionId = item.version?.id
 	const provider = item.origin_provider ?? item.provider_refs[0]?.provider
@@ -151,9 +157,9 @@ function itemReferenceKeys(item: ContentItem): Set<string> {
 }
 
 function nodeIdForItem(item: ContentItem): string {
+	if (item.instanceFileId) return `item:file:${item.instanceFileId}`
 	if (item.instanceEntryId) return `item:entry:${item.instanceEntryId}`
 	if (item.instanceMemberId) return `item:member:${item.instanceMemberId}`
-	if (item.instanceFileId) return `item:file:${item.instanceFileId}`
 
 	const provider = item.origin_provider ?? item.provider_refs[0]?.provider
 	const projectId = item.project?.id
@@ -218,6 +224,8 @@ function findNodesForReference(
 	reference: DependencyReference,
 	nodesByItemKey: Map<string, DependencyGraphNode[]>,
 ): DependencyGraphNode[] {
+	if (reference.entryId) return nodesByItemKey.get(`entry:${reference.entryId}`) ?? []
+	if (reference.fileId) return nodesByItemKey.get(`file:${reference.fileId}`) ?? []
 	const exact = nodesByItemKey.get(referenceKey(reference))
 	if (exact?.length) return exact
 
@@ -313,58 +321,78 @@ export function buildDependencyGraph(items: ContentItem[]): DependencyGraph {
 		node.shared = (edgesByTarget.get(node.id)?.length ?? 0) > 1
 	}
 
-	const rootIds = allNodes
-		.filter((node) => !(edgesByTarget.get(node.id)?.length ?? 0))
-		.map((node) => node.id)
-		.sort((a, b) => (nodes.get(a)!.title ?? '').localeCompare(nodes.get(b)!.title ?? ''))
-	const covered = new Set<string>()
-	const visitFromRoot = (id: string) => {
-		if (covered.has(id)) return
-		covered.add(id)
-		for (const edge of edgesBySource.get(id) ?? []) visitFromRoot(edge.target)
-	}
-	for (const rootId of rootIds) visitFromRoot(rootId)
-	for (const node of allNodes
-		.filter((candidate) => !covered.has(candidate.id))
-		.sort((a, b) => a.title.localeCompare(b.title))) {
-		rootIds.push(node.id)
-	}
-
-	return {
+	const graph: DependencyGraph = {
 		nodes: allNodes,
 		edges: allEdges,
 		nodeById: nodes,
 		edgesBySource,
 		edgesByTarget,
-		rootIds,
+		rootIds: [],
 		cycleIds,
 		unresolvedIds,
 	}
+	graph.rootIds = getDependencyRootIds(graph)
+	return graph
+}
+
+export function getDependencyRootIds(
+	graph: DependencyGraph,
+	direction: DependencyDirection = 'requires',
+	visibleIds: ReadonlySet<string> = new Set(graph.nodes.map((node) => node.id)),
+): string[] {
+	const outgoing = direction === 'requires' ? graph.edgesBySource : graph.edgesByTarget
+	const incoming = direction === 'requires' ? graph.edgesByTarget : graph.edgesBySource
+	const childId = (edge: DependencyGraphEdge) =>
+		direction === 'requires' ? edge.target : edge.source
+	const parentId = (edge: DependencyGraphEdge) =>
+		direction === 'requires' ? edge.source : edge.target
+	const candidates = graph.nodes
+		.filter((node) => visibleIds.has(node.id))
+		.sort((a, b) => a.title.localeCompare(b.title))
+	const roots = candidates
+		.filter((node) => !(incoming.get(node.id) ?? []).some((edge) => visibleIds.has(parentId(edge))))
+		.map((node) => node.id)
+	const covered = new Set<string>()
+	function cover(start: string) {
+		const pending = [start]
+		while (pending.length) {
+			const id = pending.pop()!
+			if (covered.has(id)) continue
+			covered.add(id)
+			for (const edge of outgoing.get(id) ?? []) {
+				if (visibleIds.has(childId(edge))) pending.push(childId(edge))
+			}
+		}
+	}
+	for (const root of roots) cover(root)
+	// A cyclic component has no natural root. Give it one entry point, in
+	// either direction, rather than dropping it or repeating every node.
+	for (const node of candidates) {
+		if (covered.has(node.id)) continue
+		roots.push(node.id)
+		cover(node.id)
+	}
+	return roots
 }
 
 export function getDependencyTreeRows(
 	graph: DependencyGraph,
 	expandedIds: Set<string>,
 	direction: DependencyDirection = 'requires',
+	visibleIds?: ReadonlySet<string>,
 ): DependencyTreeRow[] {
 	const rows: DependencyTreeRow[] = []
 	const seen = new Set<string>()
-	const roots =
-		direction === 'requires'
-			? graph.rootIds
-			: graph.nodes
-					.filter((node) => !(graph.edgesBySource.get(node.id)?.length ?? 0))
-					.map((node) => node.id)
-					.sort((a, b) => graph.nodeById.get(a)!.title.localeCompare(graph.nodeById.get(b)!.title))
+	const roots = getDependencyRootIds(graph, direction, visibleIds)
 
 	function visit(nodeId: string, depth: number, stack: Set<string>) {
 		const node = graph.nodeById.get(nodeId)
 		if (!node) return
 		const edges =
 			direction === 'requires' ? graph.edgesBySource.get(nodeId) : graph.edgesByTarget.get(nodeId)
-		const children = (edges ?? []).map((edge) =>
-			direction === 'requires' ? edge.target : edge.source,
-		)
+		const children = (edges ?? [])
+			.map((edge) => (direction === 'requires' ? edge.target : edge.source))
+			.filter((id) => !visibleIds || visibleIds.has(id))
 		const expanded = expandedIds.has(nodeId)
 		const firstVisit = !seen.has(nodeId)
 		if (firstVisit) {
@@ -379,7 +407,7 @@ export function getDependencyTreeRows(
 			})
 		} else {
 			rows.push({
-				id: `reference:${nodeId}:${depth}`,
+				id: `reference:${[...stack, nodeId].join('->')}`,
 				nodeId,
 				depth,
 				kind: 'reference',
@@ -390,10 +418,11 @@ export function getDependencyTreeRows(
 		}
 
 		if (!expanded) return
+		const ancestors = new Set([...stack, nodeId])
 		for (const childId of children) {
-			if (stack.has(childId)) {
+			if (ancestors.has(childId)) {
 				rows.push({
-					id: `cycle:${childId}:${depth + 1}`,
+					id: `cycle:${[...ancestors, childId].join('->')}`,
 					nodeId: childId,
 					depth: depth + 1,
 					kind: 'cycle',
@@ -402,12 +431,28 @@ export function getDependencyTreeRows(
 				})
 				continue
 			}
-			visit(childId, depth + 1, new Set([...stack, nodeId]))
+			visit(childId, depth + 1, ancestors)
 		}
 	}
 
 	for (const rootId of roots) visit(rootId, 0, new Set())
 	return rows
+}
+
+/** Include only the requested items and their immediate neighbors. Searching
+ * for a common library must not expand its entire connected modpack. */
+export function getDirectlyRelatedNodeIds(
+	graph: DependencyGraph,
+	nodeIds: ReadonlySet<string>,
+): Set<string> {
+	const related = new Set<string>()
+	for (const id of nodeIds) {
+		if (!graph.nodeById.has(id)) continue
+		related.add(id)
+		for (const edge of graph.edgesBySource.get(id) ?? []) related.add(edge.target)
+		for (const edge of graph.edgesByTarget.get(id) ?? []) related.add(edge.source)
+	}
+	return related
 }
 
 export function getRelatedNodeIds(

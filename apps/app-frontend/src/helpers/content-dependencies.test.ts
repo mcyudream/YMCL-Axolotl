@@ -69,3 +69,38 @@ test('local project identity remains usable with partial online references', () 
 		true,
 	)
 })
+
+test('stable entries survive online display identities and distinguish duplicate copies', () => {
+	const reference = { entryId: 'library-b', provider: 'local' as const, projectId: 'local:library' }
+	const item = {
+		instanceEntryId: 'library-b',
+		project: { id: '123' },
+		provider_refs: [{ provider: 'curseforge' as const, project_id: 123, file_id: null }],
+	}
+	assert.equal(dependencyRefMatchesContentItem(reference, item), true)
+	assert.equal(
+		dependencyRefMatchesContentItem(reference, { ...item, instanceEntryId: 'library-a' }),
+		false,
+	)
+})
+
+test('discovered file references survive online display metadata', () => {
+	const reference = {
+		fileId: 'library-file',
+		provider: 'local' as const,
+		projectId: 'local:library',
+	}
+	const item = {
+		instanceFileId: 'library-file',
+		instanceEntryId: 'recognized-entry',
+		project: { id: 'online-library' },
+		provider_refs: [
+			{ provider: 'modrinth' as const, project_id: 'online-library', version_id: 'online-version' },
+		],
+	}
+	assert.equal(dependencyRefMatchesContentItem(reference, item), true)
+	assert.equal(
+		dependencyRefMatchesContentItem(reference, { ...item, instanceFileId: 'other-file' }),
+		false,
+	)
+})

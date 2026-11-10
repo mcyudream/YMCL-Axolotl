@@ -241,7 +241,8 @@ pub(crate) async fn sync_instance_content_files_with_progress(
                 .and_then(|f| f.icon_path.clone()),
         });
         if progress.is_some() && files.len() >= 12 {
-            enrich_local_metadata(&mut files, &content_root, state).await;
+            enrich_local_metadata(&mut files, &content_root, state, progress)
+                .await?;
             let batch = commit_scanned_files(
                 instance,
                 &files,
@@ -260,7 +261,7 @@ pub(crate) async fn sync_instance_content_files_with_progress(
         }
     }
 
-    enrich_local_metadata(&mut files, &content_root, state).await;
+    enrich_local_metadata(&mut files, &content_root, state, progress).await?;
     let batch = commit_scanned_files(
         instance,
         &files,
@@ -298,23 +299,20 @@ async fn enrich_local_metadata(
     files: &mut [InstanceFile],
     content_root: &Path,
     state: &State,
-) {
+    progress: Option<&super::content_refresh::RefreshContext>,
+) -> crate::Result<()> {
     let icon_cache_dir = state.directories.caches_dir().join("icons");
     for file in files {
+        if let Some(progress) = progress {
+            progress.check_cancelled()?;
+        }
         let Some(project_type) = project_type_for_file(file) else {
             continue;
         };
         let extract_metadata = project_type == ProjectType::Mod
-            && file
-                .local_mod_data
-                .as_ref()
-                .and_then(|json| {
-                    serde_json::from_str::<
-                        crate::mod_metadata::LocalModMetadata,
-                    >(json)
-                    .ok()
-                })
-                .is_none_or(|metadata| metadata.needs_refresh());
+            && crate::mod_metadata::metadata_cache_needs_refresh(
+                file.local_mod_data.as_deref(),
+            );
         let extract_icon = file.icon_path.is_none()
             && matches!(
                 project_type,
@@ -329,8 +327,11 @@ async fn enrich_local_metadata(
         // Resource packs are read entry-wise so large archives are not
         // materialized in memory just to fetch `pack.png`.
         if extract_icon && project_type == ProjectType::ResourcePack {
-            let icon =
-                crate::mod_metadata::icon::extract_resource_pack_icon(&path);
+            let icon = tokio::task::spawn_blocking(move || {
+                crate::mod_metadata::icon::extract_resource_pack_icon(&path)
+            })
+            .await
+            .map_err(|error| crate::ErrorKind::InputError(error.to_string()))?;
             file.icon_path = Some(
                 cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
                     .await,
@@ -347,31 +348,50 @@ async fn enrich_local_metadata(
             }
         };
 
-        if extract_metadata
-            && let Some(meta) =
+        let cached = file.local_mod_data.clone();
+        // ZIP decompression and class parsing are CPU/blocking work. Keep
+        // them off Tokio's workers so progress and cancellation stay usable.
+        let (metadata_json, icon) = tokio::task::spawn_blocking(move || {
+            let metadata = if extract_metadata {
                 crate::mod_metadata::extract_mod_metadata(&bytes)
-            && let Ok(json) = serde_json::to_string(&meta)
-        {
+            } else {
+                cached.as_deref().and_then(|json| {
+                    serde_json::from_str::<
+                            crate::mod_metadata::LocalModMetadata,
+                        >(json)
+                        .ok()
+                })
+            };
+            let metadata_json = extract_metadata
+                .then(|| {
+                    crate::mod_metadata::serialize_metadata_cache(
+                        metadata.as_ref(),
+                    )
+                })
+                .transpose()?;
+            let icon = extract_icon
+                .then(|| {
+                    crate::mod_metadata::icon::extract_mod_icon(
+                        &bytes,
+                        metadata.as_ref(),
+                    )
+                })
+                .flatten();
+            Ok::<_, serde_json::Error>((metadata_json, icon))
+        })
+        .await
+        .map_err(|error| crate::ErrorKind::InputError(error.to_string()))??;
+        if let Some(json) = metadata_json {
             file.local_mod_data = Some(json);
         }
-
         if extract_icon {
-            let meta = file.local_mod_data.as_ref().and_then(|json| {
-                serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(
-                    json,
-                )
-                .ok()
-            });
-            let icon = crate::mod_metadata::icon::extract_mod_icon(
-                &bytes,
-                meta.as_ref(),
-            );
             file.icon_path = Some(
                 cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
                     .await,
             );
         }
     }
+    Ok(())
 }
 
 async fn commit_scanned_files(

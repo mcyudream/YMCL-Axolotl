@@ -2662,6 +2662,15 @@
 	"app.instance.dependencies.zoom-out": {
 		"message": "缩小"
 	},
+	"app.instance.dependencies.focus-relationships": {
+		"message": "只看此项关系"
+	},
+	"app.instance.dependencies.all-relationships": {
+		"message": "查看全部关系"
+	},
+	"app.instance.dependencies.clear-selection": {
+		"message": "关闭详情"
+	},
 	"app.instance.disable-selected": {
 		"message": "禁用所选项"
 	},

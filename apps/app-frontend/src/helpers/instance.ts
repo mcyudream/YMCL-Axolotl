@@ -491,11 +491,15 @@ export interface InstanceContentSnapshotItem {
 	dependency: {
 		autoDependency: boolean
 		requiredBy: Array<{
+			entryId?: string
+			fileId?: string
 			provider: 'modrinth' | 'curseforge' | 'mcarchive' | 'local'
 			projectId: string
 			releaseId: string
 		}>
 		requires: Array<{
+			entryId?: string
+			fileId?: string
 			provider: 'modrinth' | 'curseforge' | 'mcarchive' | 'local'
 			projectId: string
 			releaseId: string

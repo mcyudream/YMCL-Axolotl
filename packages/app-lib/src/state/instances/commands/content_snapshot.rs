@@ -241,17 +241,45 @@ async fn get_content_snapshot_inner(
         })
         .collect::<HashMap<_, _>>();
     let mut local_metadata_by_entry = HashMap::new();
+    let mut dependency_entries = entries.clone();
+    let mut local_file_entries = HashSet::new();
     for file in &files {
-        let Some(entry) = entries_by_file_id.get(&file.id) else {
-            continue;
-        };
         let Some(json) = file.local_mod_data.as_ref() else {
             continue;
         };
         if let Ok(metadata) =
             serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(json)
         {
-            local_metadata_by_entry.insert(entry.id.clone(), metadata);
+            let entry_id = if let Some(entry) = entries_by_file_id.get(&file.id)
+            {
+                entry.id.clone()
+            } else if !file.missing {
+                // A discovered file is a graph endpoint without becoming a
+                // user-owned or pack-managed database entry.
+                let id = format!("local-file:{}", file.id);
+                local_file_entries.insert(id.clone());
+                dependency_entries.push(
+                    crate::state::instances::ContentEntry {
+                        id: id.clone(),
+                        instance_id: instance.id.clone(),
+                        content_set_id: content_set.id.clone(),
+                        file_id: Some(file.id.clone()),
+                        project_type: crate::state::ProjectType::Mod,
+                        source_kind: ContentSourceKind::Local,
+                        ownership_kind: ContentOwnershipKind::LocalDiscovered,
+                        auto_dependency: false,
+                        server_requirement: ContentRequirement::Unknown,
+                        client_requirement: ContentRequirement::Unknown,
+                        enabled: file.enabled,
+                        added_at: file.added_at,
+                        modified_at: file.modified_at,
+                    },
+                );
+                id
+            } else {
+                continue;
+            };
+            local_metadata_by_entry.insert(entry_id, metadata);
         }
     }
     let mut represented_members = HashSet::new();
@@ -401,8 +429,16 @@ async fn get_content_snapshot_inner(
         }
     }
 
-    attach_dependency_info(&mut items, &entries, &content_set.id, state)
-        .await?;
+    attach_dependency_info(
+        &mut items,
+        &dependency_entries,
+        &refs_by_entry,
+        &local_metadata_by_entry,
+        &local_file_entries,
+        &content_set,
+        state,
+    )
+    .await?;
 
     let cache_behaviour = if refresh_remote {
         CacheBehaviour::MustRevalidate
@@ -1634,12 +1670,16 @@ fn embedded_dependency_ref(
         refs_by_entry.get(entry_id).and_then(|refs| refs.first())
     {
         ContentDependencyRef {
+            entry_id: Some(entry_id.to_string()),
+            file_id: None,
             provider: reference.provider(),
             project_id: reference.database_project_id(),
             release_id: reference.database_release_id().unwrap_or_default(),
         }
     } else {
         ContentDependencyRef {
+            entry_id: Some(entry_id.to_string()),
+            file_id: None,
             provider: ContentProvider::Local,
             project_id: format!("local:{}", metadata.mod_id),
             release_id: metadata
@@ -1653,12 +1693,52 @@ fn embedded_dependency_ref(
 async fn attach_dependency_info(
     items: &mut [InstanceContentSnapshotItem],
     entries: &[crate::state::instances::ContentEntry],
-    content_set_id: &str,
+    refs_by_entry: &HashMap<String, Vec<ContentProviderRef>>,
+    local_metadata: &HashMap<String, crate::mod_metadata::LocalModMetadata>,
+    local_file_entries: &HashSet<String>,
+    content_set: &crate::state::instances::ContentSet,
     state: &State,
 ) -> crate::Result<()> {
-    let edges =
-        content_rows::get_content_dependency_edges(content_set_id, &state.pool)
-            .await?;
+    let mut edges = content_rows::get_content_dependency_edges(
+        &content_set.id,
+        &state.pool,
+    )
+    .await?;
+    let mut local = DependencyBackfill::default();
+    backfill_local_dependency_edges(
+        entries,
+        refs_by_entry,
+        &edges,
+        content_set,
+        local_metadata,
+        &mut local,
+    );
+    edges.retain(|edge| {
+        edge.dependency_kind
+            != crate::state::instances::ContentDependencyKind::Required
+            || !local.rejected_pairs.contains(&(
+                edge.parent_entry_id.clone(),
+                edge.child_entry_id.clone(),
+            ))
+    });
+    edges.extend(local.edges);
+    let entry_by_id = entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let reference =
+        |entry_id: &str, provider, project_id: &str, release_id: &str| {
+            ContentDependencyRef {
+                entry_id: (!local_file_entries.contains(entry_id))
+                    .then(|| entry_id.to_string()),
+                file_id: entry_by_id
+                    .get(entry_id)
+                    .and_then(|entry| entry.file_id.clone()),
+                provider,
+                project_id: project_id.to_string(),
+                release_id: release_id.to_string(),
+            }
+        };
     let mut required_by: HashMap<String, Vec<ContentDependencyRef>> =
         HashMap::new();
     let mut requires: HashMap<String, Vec<ContentDependencyRef>> =
@@ -1667,34 +1747,34 @@ async fn attach_dependency_info(
         required_by
             .entry(edge.child_entry_id.clone())
             .or_default()
-            .push(ContentDependencyRef {
-                provider: edge.parent_provider,
-                project_id: edge.parent_project_id.clone(),
-                release_id: edge.parent_release_id.clone(),
-            });
+            .push(reference(
+                &edge.parent_entry_id,
+                edge.parent_provider,
+                &edge.parent_project_id,
+                &edge.parent_release_id,
+            ));
         requires
             .entry(edge.parent_entry_id.clone())
             .or_default()
-            .push(ContentDependencyRef {
-                provider: edge.child_provider,
-                project_id: edge.child_project_id.clone(),
-                release_id: edge.child_release_id.clone(),
-            });
+            .push(reference(
+                &edge.child_entry_id,
+                edge.child_provider,
+                &edge.child_project_id,
+                &edge.child_release_id,
+            ));
     }
 
-    let entry_by_id = entries
-        .iter()
-        .map(|entry| (entry.id.as_str(), entry))
-        .collect::<HashMap<_, _>>();
     for item in items {
-        let Some(entry_id) = item.entry_id.as_deref() else {
+        let Some(entry_id) = item.entry_id.clone().or_else(|| {
+            item.file_id.as_ref().map(|id| format!("local-file:{id}"))
+        }) else {
             continue;
         };
-        let Some(entry) = entry_by_id.get(entry_id) else {
+        let Some(entry) = entry_by_id.get(entry_id.as_str()) else {
             continue;
         };
-        let required_by = required_by.remove(entry_id).unwrap_or_default();
-        let requires = requires.remove(entry_id).unwrap_or_default();
+        let required_by = required_by.remove(&entry_id).unwrap_or_default();
+        let requires = requires.remove(&entry_id).unwrap_or_default();
         if !entry.auto_dependency
             && required_by.is_empty()
             && requires.is_empty()

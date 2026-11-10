@@ -11,6 +11,14 @@ use super::{
 const FORGE_MOD: &str = "Lnet/minecraftforge/fml/common/Mod;";
 const FML_MOD: &str = "Lcpw/mods/fml/common/Mod;";
 const MAX_CLASS_SIZE: u64 = 16 * 1024 * 1024;
+const MAX_ANNOTATION_CLASSES: usize = 16_384;
+const MAX_ANNOTATION_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_ANNOTATION_ENTRIES: usize = 65_536;
+
+struct AnnotationScan {
+    annotations: Vec<ModAnnotation>,
+    complete: bool,
+}
 
 #[derive(Default)]
 struct ModAnnotation {
@@ -26,6 +34,14 @@ struct ModAnnotation {
 pub(super) fn extract(
     archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
 ) -> Option<LocalModMetadata> {
+    extract_with_budget(archive, MAX_ANNOTATION_CLASSES, MAX_ANNOTATION_BYTES)
+}
+
+fn extract_with_budget(
+    archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    max_classes: usize,
+    max_bytes: u64,
+) -> Option<LocalModMetadata> {
     let mut entries = archive
         .by_name("mcmod.info")
         .ok()
@@ -38,8 +54,9 @@ pub(super) fn extract(
             .as_deref()
             .is_some_and(|id| !id.trim().is_empty())
     });
-    let annotations = read_annotations(archive);
-    if !annotations.is_empty() {
+    let scan = read_annotations(archive, max_classes, max_bytes);
+    let annotations = scan.annotations;
+    if scan.complete && !annotations.is_empty() {
         // Forge discovers mods through @Mod, then looks up their metadata by
         // ID. Old entries in mcmod.info do not provide additional loaded mods.
         entries.retain(|entry| {
@@ -101,6 +118,7 @@ pub(super) fn extract(
 
     Some(LocalModMetadata {
         metadata_version: METADATA_VERSION,
+        annotation_scan_incomplete: !scan.complete,
         mod_id,
         additional_mods,
         name: primary
@@ -132,24 +150,38 @@ fn mod_version(
 
 fn read_annotations(
     archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
-) -> Vec<ModAnnotation> {
+    max_classes: usize,
+    max_bytes: u64,
+) -> AnnotationScan {
     let mut annotations = Vec::new();
+    let mut complete = archive.len() <= MAX_ANNOTATION_ENTRIES;
+    let mut classes = 0;
+    let mut bytes_read = 0;
     let mut options = cafebabe::ParseOptions::default();
     options.parse_bytecode(false);
-    for index in 0..archive.len() {
+    for index in 0..archive.len().min(MAX_ANNOTATION_ENTRIES) {
         let Ok(file) = archive.by_index(index) else {
+            complete = false;
             continue;
         };
-        if !file.name().ends_with(".class") || file.size() > MAX_CLASS_SIZE {
+        if !file.name().ends_with(".class") {
+            continue;
+        }
+        if classes >= max_classes || bytes_read >= max_bytes {
+            complete = false;
+            break;
+        }
+        classes += 1;
+        let limit = MAX_CLASS_SIZE.min(max_bytes - bytes_read);
+        if file.size() > limit {
+            complete = false;
             continue;
         }
         let mut data = Vec::new();
-        if file
-            .take(MAX_CLASS_SIZE + 1)
-            .read_to_end(&mut data)
-            .is_err()
-            || data.len() as u64 > MAX_CLASS_SIZE
-        {
+        let result = file.take(limit + 1).read_to_end(&mut data);
+        bytes_read += data.len() as u64;
+        if result.is_err() || data.len() as u64 > limit {
+            complete = false;
             continue;
         }
         if ![FORGE_MOD, FML_MOD].iter().any(|descriptor| {
@@ -175,7 +207,10 @@ fn read_annotations(
             }
         }
     }
-    annotations
+    AnnotationScan {
+        annotations,
+        complete,
+    }
 }
 
 fn read_annotation(annotation: Annotation<'_>) -> Option<ModAnnotation> {
@@ -290,6 +325,41 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+
+    #[test]
+    fn incomplete_annotation_scan_preserves_metadata_only_mods() {
+        let first = mod_class("main", "required-after:library", None);
+        let second = mod_class("bundled", "", None);
+        let jar = jar(&[
+            ("Main.class", &first),
+            ("Bundled.class", &second),
+            (
+                "mcmod.info",
+                br#"[{"modid":"main"},{"modid":"bundled","version":"2"}]"#,
+            ),
+        ]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&*jar)).unwrap();
+        let metadata =
+            extract_with_budget(&mut archive, 1, MAX_ANNOTATION_BYTES).unwrap();
+        assert!(metadata.annotation_scan_incomplete);
+        assert_eq!(metadata.additional_mods[0].mod_id, "bundled");
+        assert_eq!(metadata.dependencies.unwrap()[0].mod_id, "library");
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(&*jar)).unwrap();
+        let complete =
+            extract_with_budget(&mut archive, 2, MAX_ANNOTATION_BYTES).unwrap();
+        assert!(!complete.annotation_scan_incomplete);
+    }
+
+    #[test]
+    fn annotation_scan_stops_at_aggregate_byte_budget() {
+        let class = mod_class("main", "required-after:library", None);
+        let jar = jar(&[("Main.class", &class), ("Other.class", &class)]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&*jar)).unwrap();
+        let scan = read_annotations(&mut archive, 10, class.len() as u64);
+        assert!(!scan.complete);
+        assert_eq!(scan.annotations.len(), 1);
+    }
 
     fn jar(entries: &[(&str, &[u8])]) -> bytes::Bytes {
         let mut buffer = Cursor::new(Vec::new());

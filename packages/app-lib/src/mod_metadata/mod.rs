@@ -20,7 +20,7 @@ mod toml_mod;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-pub(crate) const METADATA_VERSION: u32 = 3;
+pub(crate) const METADATA_VERSION: u32 = 4;
 
 /// Unified local mod metadata extracted from inside a JAR.
 ///
@@ -30,6 +30,10 @@ pub struct LocalModMetadata {
     /// Extractor version used to invalidate cached metadata after parser changes.
     #[serde(default)]
     pub metadata_version: u32,
+    /// The bounded legacy annotation scan stopped before reading every class.
+    /// In this case metadata-only identities must be retained as fallbacks.
+    #[serde(default)]
+    pub annotation_scan_incomplete: bool,
     /// Unique mod identifier (e.g. "sodium", "minecraft")
     pub mod_id: String,
     /// Other mods provided by the same JAR, excluding `mod_id`.
@@ -82,6 +86,38 @@ impl LocalModMetadata {
                 .find(|item| item.mod_id == mod_id)
                 .and_then(|item| item.version.as_deref())
         }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum MetadataCacheMiss {
+    Unrecognized { metadata_version: u32 },
+}
+
+/// Negative results have the same parser-version lifetime as recognized mods.
+/// Old empty strings and malformed JSON are retried once by the current parser.
+pub(crate) fn metadata_cache_needs_refresh(cached: Option<&str>) -> bool {
+    let Some(cached) = cached else { return true };
+    if let Ok(metadata) = serde_json::from_str::<LocalModMetadata>(cached) {
+        return metadata.needs_refresh();
+    }
+    match serde_json::from_str::<MetadataCacheMiss>(cached) {
+        Ok(MetadataCacheMiss::Unrecognized { metadata_version }) => {
+            metadata_version < METADATA_VERSION
+        }
+        Err(_) => true,
+    }
+}
+
+pub(crate) fn serialize_metadata_cache(
+    metadata: Option<&LocalModMetadata>,
+) -> Result<String, serde_json::Error> {
+    match metadata {
+        Some(metadata) => serde_json::to_string(metadata),
+        None => serde_json::to_string(&MetadataCacheMiss::Unrecognized {
+            metadata_version: METADATA_VERSION,
+        }),
     }
 }
 
@@ -158,6 +194,7 @@ fn try_fabric(
 
     Some(LocalModMetadata {
         metadata_version: METADATA_VERSION,
+        annotation_scan_incomplete: false,
         additional_mods: Vec::new(),
         mod_id,
         name: parsed.name,
@@ -192,6 +229,7 @@ fn try_quilt(
 
     Some(LocalModMetadata {
         metadata_version: METADATA_VERSION,
+        annotation_scan_incomplete: false,
         additional_mods: Vec::new(),
         mod_id,
         name: inner.name,
@@ -290,6 +328,7 @@ fn try_toml_path(
 
     Some(LocalModMetadata {
         metadata_version: METADATA_VERSION,
+        annotation_scan_incomplete: false,
         additional_mods: Vec::new(),
         mod_id,
         name: entry.display_name,
@@ -361,6 +400,35 @@ fn resolve_toml_version(
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+
+    #[test]
+    fn metadata_cache_versions_recognized_and_unrecognized_results() {
+        use super::*;
+        for cached in [
+            None,
+            Some(""),
+            Some("bad json"),
+            Some(r#"{"status":"unrecognized","metadata_version":3}"#),
+        ] {
+            assert!(metadata_cache_needs_refresh(cached));
+        }
+        let miss = serialize_metadata_cache(None).unwrap();
+        assert!(!metadata_cache_needs_refresh(Some(&miss)));
+        assert!(serde_json::from_str::<LocalModMetadata>(&miss).is_err());
+
+        let jar = build_jar(&[(
+            "mcmod.info",
+            r#"[{"modid":"example","version":"1"}]"#,
+        )]);
+        let metadata = extract_mod_metadata(&jar).unwrap();
+        let cached = serialize_metadata_cache(Some(&metadata)).unwrap();
+        assert!(!metadata_cache_needs_refresh(Some(&cached)));
+        let old = cached.replace(
+            &format!("\"metadata_version\":{METADATA_VERSION}"),
+            "\"metadata_version\":3",
+        );
+        assert!(metadata_cache_needs_refresh(Some(&old)));
+    }
 
     fn build_jar(entries: &[(&str, &str)]) -> bytes::Bytes {
         let mut buffer = std::io::Cursor::new(Vec::new());

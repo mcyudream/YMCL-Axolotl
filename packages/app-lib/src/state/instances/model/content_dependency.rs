@@ -53,6 +53,11 @@ pub struct ContentDependencyEdge {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContentDependencyRef {
+    /// Stable content identity, independent of provider metadata or display IDs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
     pub provider: ContentProvider,
     pub project_id: String,
     pub release_id: String,
