@@ -3119,11 +3119,11 @@
 	"app.instance.mods.toggle-dependencies.will-enable": {
 		"message": "The following content will be enabled:"
 	},
-	"app.instance.mods.update-added-content": {
-		"message": "Update added content"
+	"app.instance.mods.update-content": {
+		"message": "Update mods and resources"
 	},
-	"app.instance.mods.update-added-content.description": {
-		"message": "Updates only content added after the modpack was installed. Modpack files are not changed."
+	"app.instance.mods.update-content.description": {
+		"message": "Updates installed mods and resources to their latest compatible versions, including files in the modpack group."
 	},
 	"app.instance.mods.updates-available": {
 		"message": "{count, plural, one {# mod or resource update is available.} other {# mod and resource updates are available.}}"
@@ -6282,7 +6282,7 @@
 		"message": "The main controls"
 	},
 	"app.onboarding.instance-tabs.description": {
-		"message": "Content appears as the background scan progresses. Use Check mod and resource updates on the Content tab to find compatible updates. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP."
+		"message": "Content appears as the background scan progresses. On the Content tab, check for compatible mod and resource updates, then update individual files or all available updates, including modpack contents. Settings include incremental backups with restore previews; the export action supports MRPACK, CurseForge, and ZIP."
 	},
 	"app.onboarding.instance-tabs.title": {
 		"message": "The rest of the workshop"

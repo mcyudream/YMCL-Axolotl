@@ -2855,6 +2855,138 @@ mod tests {
         entry
     }
 
+    #[tokio::test]
+    async fn imported_mrpack_members_keep_individual_content_updates() {
+        use crate::state::instances::{
+            PackMemberMaterializationState, PackMemberOverrideKind,
+        };
+        use crate::state::{CacheValue, CachedFileUpdate, ModrinthHashMatch};
+
+        // MRPACK files have no origin provider, and override files may not
+        // have any provider reference until their hash is recognized.
+        for (project_type, path, known_provider) in [
+            (ProjectType::Mod, "mods/pack-mod.jar", true),
+            (ProjectType::Mod, "mods/override.jar.disabled", false),
+            (ProjectType::ResourcePack, "resourcepacks/pack.zip", true),
+        ] {
+            let (_temp, state, resolved) = reconciliation_fixture().await;
+            let mut tx = state.pool.begin().await.unwrap();
+            sqlite::instance_rows::upsert_instance_link(
+                &resolved.instance.id,
+                &InstanceLink::ImportedModpack {
+                    project_id: None,
+                    version_id: None,
+                    name: Some("Imported pack".to_string()),
+                    version_number: Some("1".to_string()),
+                    filename: Some("test.mrpack".to_string()),
+                },
+                &mut tx,
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+
+            let bytes = b"installed MRPACK member";
+            let sha1 = sha1_smol::Sha1::from(bytes).hexdigest();
+            let root =
+                instance_content_root(&state.directories, &resolved.instance)
+                    .unwrap();
+            crate::util::io::write(root.join(path), bytes)
+                .await
+                .unwrap();
+            let reference = ContentProviderRef::Modrinth {
+                project_id: ModrinthProjectId::new("AANobbMI").unwrap(),
+                version_id: Some(ModrinthVersionId::new("7pwil2dy").unwrap()),
+            };
+            super::super::apply_content_install::record_project_file_atomic(
+                &resolved.instance.id,
+                path,
+                &sha1,
+                bytes.len() as u64,
+                project_type,
+                ContentSourceKind::ImportedModpack,
+                ContentOwnershipKind::PackManaged,
+                known_provider.then_some(&reference),
+                false,
+                None,
+                &state,
+            )
+            .await
+            .unwrap();
+            let loaders = if project_type == ProjectType::Mod {
+                resolved.content_set.loader.modrinth_loaders()
+            } else {
+                project_type.get_loaders()
+            };
+            CachedEntry::upsert_many(
+                &[
+                    CacheValue::File(ModrinthHashMatch {
+                        hash: sha1.clone(),
+                        project_id: "AANobbMI".to_string(),
+                        version_id: "7pwil2dy".to_string(),
+                    })
+                    .get_entry(),
+                    CacheValue::FileUpdate(CachedFileUpdate {
+                        hash: sha1,
+                        game_version: resolved.content_set.game_version.clone(),
+                        loaders: loaders
+                            .into_iter()
+                            .map(|loader| loader.to_string())
+                            .collect(),
+                        channel_policy: resolved
+                            .instance
+                            .update_channel
+                            .key()
+                            .to_string(),
+                        update_version_id: "vf7UgZpC".to_string(),
+                    })
+                    .get_entry(),
+                ],
+                &state.pool,
+            )
+            .await
+            .unwrap();
+
+            let snapshot =
+                super::super::content_snapshot::get_content_snapshot(
+                    &resolved.instance.id,
+                    false,
+                    &state,
+                )
+                .await
+                .unwrap();
+            assert!(snapshot.warnings.is_empty(), "{:?}", snapshot.warnings);
+            assert_eq!(snapshot.items.len(), 1);
+            let member = &snapshot.items[0];
+            assert!(member.member_id.is_some());
+            assert_eq!(
+                member.ownership_kind,
+                ContentOwnershipKind::PackManaged
+            );
+            assert_eq!(
+                member.materialization_state,
+                PackMemberMaterializationState::Present
+            );
+            assert_eq!(
+                member.override_kind,
+                if path.ends_with(".disabled") {
+                    PackMemberOverrideKind::Disabled
+                } else {
+                    PackMemberOverrideKind::None
+                }
+            );
+            assert!(member.capabilities.can_update, "{path}");
+            let content = member.content.as_ref().unwrap();
+            assert_eq!(content.origin_provider, None);
+            assert_eq!(content.file_path, path);
+            assert!(
+                matches!(content.update.as_ref(), Some(ContentItemUpdate::Modrinth {
+                current_version_id, target_version_id, ..
+            }) if current_version_id.as_str() == "7pwil2dy" && target_version_id.as_str() == "vf7UgZpC")
+            );
+        }
+    }
+
     #[test]
     fn resource_pack_install_candidates_ignore_game_version() {
         let targets = vec![InstanceInstallTarget {

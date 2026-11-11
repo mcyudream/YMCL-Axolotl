@@ -724,7 +724,7 @@ pub(crate) async fn rename_instance_file(
     enabled: bool,
     pool: &SqlitePool,
 ) -> crate::Result<Option<InstanceFile>> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     let file = rename_instance_file_in_transaction(
         instance_id,
@@ -2222,6 +2222,59 @@ pub(crate) async fn get_pending_manual_downloads(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+pub(crate) async fn record_pack_member_local_override_in_transaction(
+    member: &PackMember,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE instance_pack_members
+         SET content_entry_id = ?, materialization_state = 'present',
+             override_kind = CASE
+                 WHEN expected_sha1 = ?
+                    OR (expected_sha1 IS NULL AND provider = ?
+                        AND provider_project_id = ? AND provider_release_id = ?)
+                 THEN ?
+                 ELSE 'version'
+             END,
+             modified_at = ?
+         WHERE id = (
+             SELECT member.id FROM instance_pack_members member
+             WHERE member.content_set_id = ? AND member.project_type = ?
+                AND (member.member_key = ? OR member.content_entry_id = ?
+                    OR EXISTS (
+                        SELECT 1 FROM instance_content_provider_refs ref
+                        WHERE ref.content_entry_id = member.content_entry_id
+                            AND ref.provider = ? AND ref.provider_project_id = ?
+                    ))
+             ORDER BY (member.member_key = ?) DESC, member.id
+             LIMIT 1
+         )",
+    )
+    .bind(&member.content_entry_id)
+    .bind(&member.expected_sha1)
+    .bind(member.provider.map(ContentProvider::as_str))
+    .bind(&member.provider_project_id)
+    .bind(&member.provider_release_id)
+    .bind(
+        if member.override_kind == PackMemberOverrideKind::Disabled {
+            "disabled"
+        } else {
+            "none"
+        },
+    )
+    .bind(member.modified_at.timestamp())
+    .bind(&member.content_set_id)
+    .bind(member.project_type.get_name())
+    .bind(&member.member_key)
+    .bind(&member.content_entry_id)
+    .bind(member.provider.map(ContentProvider::as_str))
+    .bind(&member.provider_project_id)
+    .bind(&member.member_key)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub(crate) async fn upsert_pack_member_in_transaction(
     member: &PackMember,
     tx: &mut Transaction<'_, Sqlite>,
@@ -2434,6 +2487,169 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pack_member_local_update_preserves_default_version() {
+        let pool = test_pool().await;
+        sqlx::raw_sql(
+            "CREATE TABLE instance_pack_members (
+                id TEXT PRIMARY KEY,
+                content_set_id TEXT NOT NULL,
+                content_entry_id TEXT NULL,
+                member_key TEXT NOT NULL,
+                project_type TEXT NOT NULL,
+                expected_relative_path TEXT NOT NULL,
+                provider TEXT NULL,
+                provider_project_id TEXT NULL,
+                provider_release_id TEXT NULL,
+                required INTEGER NOT NULL,
+                expected_sha1 TEXT NULL,
+                expected_size INTEGER NULL,
+                expected_fingerprint INTEGER NULL,
+                materialization_state TEXT NOT NULL,
+                override_kind TEXT NOT NULL,
+                reconciled INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                modified_at INTEGER NOT NULL,
+                UNIQUE(content_set_id, member_key)
+            );
+            CREATE TABLE instance_content_provider_refs (
+                content_entry_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                provider_project_id TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("pack member table");
+
+        let now = Utc::now();
+        let original = PackMember {
+            id: "original-member".to_string(),
+            content_set_id: "set".to_string(),
+            content_entry_id: Some("original-entry".to_string()),
+            member_key: "modrinth:project:mod".to_string(),
+            project_type: ProjectType::Mod,
+            expected_relative_path: "mods/original.jar".to_string(),
+            provider: Some(ContentProvider::Modrinth),
+            provider_project_id: Some("project".to_string()),
+            provider_release_id: Some("original-version".to_string()),
+            required: false,
+            expected_sha1: Some("original-sha1".to_string()),
+            expected_size: Some(10),
+            expected_fingerprint: Some(123),
+            materialization_state: PackMemberMaterializationState::Present,
+            override_kind: PackMemberOverrideKind::None,
+            reconciled: true,
+            created_at: now,
+            modified_at: now,
+        };
+        let updated = PackMember {
+            id: "new-member".to_string(),
+            content_entry_id: Some("updated-entry".to_string()),
+            expected_relative_path: "mods/updated.jar".to_string(),
+            provider_release_id: Some("updated-version".to_string()),
+            expected_sha1: Some("updated-sha1".to_string()),
+            expected_size: Some(20),
+            expected_fingerprint: None,
+            required: true,
+            override_kind: PackMemberOverrideKind::Version,
+            ..original.clone()
+        };
+        let mut tx = pool.begin().await.expect("begin transaction");
+        assert!(
+            !record_pack_member_local_override_in_transaction(
+                &updated, &mut tx,
+            )
+            .await
+            .expect("unknown members require initial registration")
+        );
+        upsert_pack_member_in_transaction(&original, &mut tx)
+            .await
+            .expect("initial pack registration");
+        assert!(
+            record_pack_member_local_override_in_transaction(
+                &updated, &mut tx,
+            )
+            .await
+            .expect("record local update")
+        );
+        tx.commit().await.expect("commit update");
+
+        let members = get_pack_members("set", &pool).await.unwrap();
+        assert_eq!(members.len(), 1);
+        let member = &members[0];
+        assert_eq!(member.id, original.id);
+        assert_eq!(member.content_entry_id, updated.content_entry_id);
+        assert_eq!(member.provider_release_id, original.provider_release_id);
+        assert_eq!(
+            member.expected_relative_path,
+            original.expected_relative_path
+        );
+        assert_eq!(member.expected_sha1, original.expected_sha1);
+        assert_eq!(member.expected_size, original.expected_size);
+        assert_eq!(member.expected_fingerprint, original.expected_fingerprint);
+        assert!(!member.required);
+        assert_eq!(member.override_kind, PackMemberOverrideKind::Version);
+        assert_eq!(
+            member.materialization_state,
+            PackMemberMaterializationState::Present
+        );
+
+        let disabled_update = PackMember {
+            override_kind: PackMemberOverrideKind::Disabled,
+            ..updated
+        };
+        let mut tx = pool.begin().await.unwrap();
+        record_pack_member_local_override_in_transaction(
+            &disabled_update,
+            &mut tx,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        let members = get_pack_members("set", &pool).await.unwrap();
+        assert_eq!(members[0].override_kind, PackMemberOverrideKind::Version);
+
+        let mut tx = pool.begin().await.unwrap();
+        record_pack_member_local_override_in_transaction(&original, &mut tx)
+            .await
+            .expect("restore original content");
+        tx.commit().await.unwrap();
+        let members = get_pack_members("set", &pool).await.unwrap();
+        assert_eq!(members[0].override_kind, PackMemberOverrideKind::None);
+
+        sqlx::query("UPDATE instance_pack_members SET member_key = 'path:mods/original.jar'")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO instance_content_provider_refs VALUES ('original-entry', 'modrinth', 'project')")
+            .execute(&pool).await.unwrap();
+        let renamed = PackMember {
+            content_entry_id: Some("renamed-entry".to_string()),
+            expected_relative_path: "mods/renamed.jar".to_string(),
+            expected_sha1: Some("renamed-sha1".to_string()),
+            ..original.clone()
+        };
+        let mut tx = pool.begin().await.unwrap();
+        assert!(
+            record_pack_member_local_override_in_transaction(&renamed, &mut tx)
+                .await
+                .unwrap()
+        );
+        tx.commit().await.unwrap();
+        let members = get_pack_members("set", &pool).await.unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, original.id);
+        assert_eq!(members[0].content_entry_id, renamed.content_entry_id);
+        assert_eq!(
+            members[0].expected_relative_path,
+            original.expected_relative_path
+        );
+        assert_eq!(
+            members[0].provider_release_id,
+            original.provider_release_id
+        );
+        assert_eq!(members[0].override_kind, PackMemberOverrideKind::Version);
+    }
+
+    #[tokio::test]
     async fn materialized_curseforge_downloads_require_current_exact_content() {
         let pool = test_pool().await;
         sqlx::query(
@@ -2581,6 +2797,7 @@ mod tests {
 				provider TEXT NOT NULL,
 				provider_project_id TEXT NOT NULL,
 				provider_release_id TEXT NULL,
+				provider_file_id TEXT NULL,
 				is_origin INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE UNIQUE INDEX instance_content_provider_refs_identity

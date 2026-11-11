@@ -74,6 +74,10 @@ jobs:
           cargo test --package theseus --locked --lib writing_version_info_creates_missing_parent_directory
           cargo test --package theseus --locked --lib mod_metadata::
           cargo test --package theseus --locked --lib content_snapshot::tests
+          cargo test --package theseus --locked --lib content_rows::tests
+          cargo test --package theseus --locked --lib api::instance::content::tests
+          cargo test --package theseus --locked --lib imported_mrpack_members_keep_individual_content_updates
+          cargo test --package theseus --locked --lib curseforge_content_updates_
           cargo test --package theseus --locked --lib content_refresh::tests
           cargo test --package theseus --locked --lib api::instance::export_mrpack::tests
       - name: Test Windows portable ZIP contents
@@ -81,6 +85,9 @@ jobs:
       - name: Test mod dependency presentation
         working-directory: apps/app-frontend
         run: node --test src/helpers/content-dependencies.test.ts src/components/instance/dependencies/dependency-graph.test.ts src/components/ymcl/home/domain-home.test.ts src/components/ymcl/home/use-domain-home-carousel.test.ts
+      - name: Test content update filtering
+        working-directory: packages/ui
+        run: node --test src/layouts/shared/content-tab/composables/content-pipeline.test.ts src/layouts/shared/content-tab/composables/content-filter-state.test.ts
       - name: Build and type-check desktop frontend
         run: pnpm exec turbo run build --filter=@modrinth/app-frontend
         env:

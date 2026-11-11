@@ -398,6 +398,34 @@ async fn resolved_content_file_size(
     Ok(file.map_or(1, |file| (file.size as u64).max(1)))
 }
 
+pub(crate) async fn finish_project_update(
+    instance_id: &str,
+    previous_path: &str,
+    installed_path: &str,
+    state: &State,
+) -> crate::Result<String> {
+    if previous_path != installed_path
+        && archive_project_file(
+            instance_id,
+            previous_path,
+            installed_path,
+            state,
+        )
+        .await?
+        .is_none()
+    {
+        remove_project(instance_id, previous_path, state).await?;
+    }
+    if previous_path.ends_with(".disabled")
+        && !installed_path.ends_with(".disabled")
+    {
+        toggle_disable_project(instance_id, installed_path, Some(false), state)
+            .await
+    } else {
+        Ok(installed_path.to_string())
+    }
+}
+
 pub(crate) async fn switch_project_version_with_dependencies(
     instance_id: &str,
     project_path: &str,
@@ -433,10 +461,9 @@ pub(crate) async fn switch_project_version_with_dependencies(
     )
     .await?;
 
-    let was_disabled = project_path.ends_with(".disabled");
     let ownership_kind =
         content_ownership_for_path(instance_id, project_path, state).await?;
-    let mut new_path = add_project_from_version(
+    let new_path = add_project_from_version(
         instance_id,
         &plan.primary.version_id,
         DownloadReason::Update,
@@ -446,12 +473,6 @@ pub(crate) async fn switch_project_version_with_dependencies(
         state,
     )
     .await?;
-
-    if was_disabled {
-        new_path =
-            toggle_disable_project(instance_id, &new_path, Some(false), state)
-                .await?;
-    }
 
     let mut installed_paths = Vec::with_capacity(plan.dependencies.len() + 1);
     installed_paths.push(new_path.clone());
@@ -475,15 +496,7 @@ pub(crate) async fn switch_project_version_with_dependencies(
     )
     .await?;
 
-    if new_path != project_path
-        && archive_project_file(instance_id, project_path, &new_path, state)
-            .await?
-            .is_none()
-    {
-        remove_project(instance_id, project_path, state).await?;
-    }
-
-    Ok(new_path)
+    finish_project_update(instance_id, project_path, &new_path, state).await
 }
 
 pub(crate) async fn add_resolved_content(
@@ -2294,46 +2307,54 @@ async fn record_project_files_atomic_with_pending_completion(
                     )
                 },
             );
-            content_rows::upsert_pack_member_in_transaction(
-                &PackMember {
-                    id: format!("pack-member:{}", entry.id),
-                    content_set_id: scope.content_set_id.clone(),
-                    content_entry_id: Some(entry.id.clone()),
-                    member_key,
-                    project_type: record.project_type,
-                    expected_relative_path: record.relative_path.clone(),
-                    provider: record
-                        .provider_ref
-                        .as_ref()
-                        .map(ContentProviderRef::provider),
-                    provider_project_id: record
-                        .provider_ref
-                        .as_ref()
-                        .map(ContentProviderRef::database_project_id),
-                    provider_release_id: record
-                        .provider_ref
-                        .as_ref()
-                        .and_then(ContentProviderRef::database_release_id),
-                    required: true,
-                    expected_sha1: Some(record.sha1.clone()),
-                    expected_size: Some(record.size),
-                    expected_fingerprint: None,
-                    materialization_state:
-                        PackMemberMaterializationState::Present,
-                    override_kind: if !file.enabled {
-                        PackMemberOverrideKind::Disabled
-                    } else if record.source_kind == ContentSourceKind::Local {
-                        PackMemberOverrideKind::Version
-                    } else {
-                        PackMemberOverrideKind::None
-                    },
-                    reconciled: true,
-                    created_at: now,
-                    modified_at: now,
+            let member = PackMember {
+                id: format!("pack-member:{}", entry.id),
+                content_set_id: scope.content_set_id.clone(),
+                content_entry_id: Some(entry.id.clone()),
+                member_key,
+                project_type: record.project_type,
+                expected_relative_path: record.relative_path.clone(),
+                provider: record
+                    .provider_ref
+                    .as_ref()
+                    .map(ContentProviderRef::provider),
+                provider_project_id: record
+                    .provider_ref
+                    .as_ref()
+                    .map(ContentProviderRef::database_project_id),
+                provider_release_id: record
+                    .provider_ref
+                    .as_ref()
+                    .and_then(ContentProviderRef::database_release_id),
+                required: true,
+                expected_sha1: Some(record.sha1.clone()),
+                expected_size: Some(record.size),
+                expected_fingerprint: None,
+                materialization_state: PackMemberMaterializationState::Present,
+                override_kind: if !file.enabled {
+                    PackMemberOverrideKind::Disabled
+                } else if record.source_kind == ContentSourceKind::Local {
+                    PackMemberOverrideKind::Version
+                } else {
+                    PackMemberOverrideKind::None
                 },
-                &mut tx,
-            )
-            .await?;
+                reconciled: true,
+                created_at: now,
+                modified_at: now,
+            };
+            let recorded_override = record.source_kind
+                == ContentSourceKind::Local
+                && content_rows::record_pack_member_local_override_in_transaction(
+                    &member,
+                    &mut tx,
+                )
+                .await?;
+            if !recorded_override {
+                content_rows::upsert_pack_member_in_transaction(
+                    &member, &mut tx,
+                )
+                .await?;
+            }
         }
         if let Some((project_id, file_id)) =
             record.provider_ref.as_ref().and_then(|provider_ref| {
@@ -2457,7 +2478,11 @@ pub(crate) async fn toggle_disable_project(
     }
     sqlx::query(
         "UPDATE instance_pack_members
-         SET override_kind = ?, materialization_state = 'present',
+         SET override_kind = CASE
+                 WHEN override_kind = 'version' THEN 'version'
+                 ELSE ?
+             END,
+             materialization_state = 'present',
              modified_at = ?
          WHERE content_entry_id IN (
             SELECT id FROM instance_content_entries
@@ -2641,7 +2666,11 @@ pub(crate) async fn toggle_content_entries(
             }
             sqlx::query(
                 "UPDATE instance_pack_members
-                 SET override_kind = ?, materialization_state = 'present',
+                 SET override_kind = CASE
+                         WHEN override_kind = 'version' THEN 'version'
+                         ELSE ?
+                     END,
+                     materialization_state = 'present',
                      modified_at = ?
                  WHERE content_entry_id IN (
                     SELECT id FROM instance_content_entries

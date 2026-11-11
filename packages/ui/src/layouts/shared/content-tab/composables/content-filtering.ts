@@ -22,6 +22,25 @@ export function canToggleContentItem(item: ContentItem): boolean {
 	)
 }
 
+export function canUpdateContentItem(item: ContentItem): boolean {
+	return (
+		isPresentContentItem(item) &&
+		item.update != null &&
+		item.instanceCapabilities?.canUpdate !== false
+	)
+}
+
+export function getUpdatableContentItems(
+	items: ContentItem[],
+	getItemId: (item: ContentItem) => string,
+): ContentItem[] {
+	const updates = new Map<string, ContentItem>()
+	for (const item of items) {
+		if (canUpdateContentItem(item)) updates.set(getItemId(item), item)
+	}
+	return [...updates.values()]
+}
+
 export interface ContentFilterOption {
 	id: string
 	label: string

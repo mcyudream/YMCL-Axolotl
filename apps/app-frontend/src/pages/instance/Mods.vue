@@ -368,14 +368,14 @@ const messages = defineMessages({
 		id: 'app.instance.mods.bulk-update.finishing',
 		defaultMessage: 'Finishing update...',
 	},
-	updateAddedContent: {
-		id: 'app.instance.mods.update-added-content',
-		defaultMessage: 'Update added content',
+	updateContent: {
+		id: 'app.instance.mods.update-content',
+		defaultMessage: 'Update mods and resources',
 	},
-	updateAddedContentDescription: {
-		id: 'app.instance.mods.update-added-content.description',
+	updateContentDescription: {
+		id: 'app.instance.mods.update-content.description',
 		defaultMessage:
-			'Updates only content added after the modpack was installed. Modpack files are not changed.',
+			'Updates installed mods and resources to their latest compatible versions, including files in the modpack group.',
 	},
 	contentRefreshWarningTitle: {
 		id: 'app.instance.mods.content-refresh-warning.title',
@@ -1945,15 +1945,19 @@ async function bulkUpdateAllProjects(onProgress?: (status: BulkOperationStatus) 
 				waiting: true,
 			})
 		}
-		const plan = await plan_content_updates(props.instance.id, 'user_added')
+		const plan = await plan_content_updates(props.instance.id, 'all')
+		onProgress?.({
+			message: formatMessage(commonMessages.updatingLabel),
+			total: plan.actions.length,
+			waiting: true,
+		})
 		await apply_content_update_plan(plan.id)
-
-		await refreshContentState('bypass')
 	} catch (err) {
 		handleError(err as Error)
 		throw err
 	} finally {
 		onProgress?.({ message: formatMessage(messages.bulkUpdateFinishing) })
+		await refreshContentState('bypass')
 	}
 }
 
@@ -2857,7 +2861,6 @@ provideContentManager({
 
 		return null
 	}),
-	isPackLocked,
 	isBusy: isInstanceBusy,
 	isBulkOperating,
 	skipNonEssentialWarnings,
@@ -2902,8 +2905,8 @@ provideContentManager({
 	updateItem: handleUpdate,
 	rollbackItem: handleRollbackContent,
 	bulkUpdateAll: bulkUpdateAllProjects,
-	bulkUpdateAllLabel: formatMessage(messages.updateAddedContent),
-	bulkUpdateAllDescription: formatMessage(messages.updateAddedContentDescription),
+	bulkUpdateAllLabel: formatMessage(messages.updateContent),
+	bulkUpdateAllDescription: formatMessage(messages.updateContentDescription),
 	bulkUpdateIncludesModpack: false,
 	bulkUpdateItem: updateProject,
 	updateModpack: props.isServerInstance ? undefined : handleModpackUpdate,
@@ -3011,9 +3014,7 @@ provideContentManager({
 						? formatMessage(messages.packMemberRemoved)
 						: null,
 			toggleDisabled: item.instanceCapabilities?.canToggle === false,
-			hideSwitchVersion:
-				(isPackLocked.value && item.instanceOwnershipKind === 'pack_managed') ||
-				item.instanceCapabilities?.canChangeVersion === false,
+			hideSwitchVersion: item.instanceCapabilities?.canChangeVersion === false,
 			pendingManualDownload: item.pendingManualDownload,
 			installing: item.installing,
 			dependencyBadge,

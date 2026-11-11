@@ -3121,11 +3121,11 @@
 	"app.instance.mods.toggle-dependencies.will-enable": {
 		"message": "以下内容将同时启用："
 	},
-	"app.instance.mods.update-added-content": {
-		"message": "更新后装内容"
+	"app.instance.mods.update-content": {
+		"message": "更新 Mod 和资源"
 	},
-	"app.instance.mods.update-added-content.description": {
-		"message": "仅更新整合包安装后添加的内容，不会更改整合包自带文件。"
+	"app.instance.mods.update-content.description": {
+		"message": "将已安装的 Mod 和资源更新到最新兼容版本，包括整合包分组内的文件。"
 	},
 	"app.instance.mods.updates-available": {
 		"message": "发现 {count, number} 个 Mod 或资源可更新。"
@@ -6284,7 +6284,7 @@
 		"message": "主操作台"
 	},
 	"app.onboarding.instance-tabs.description": {
-		"message": "内容会随后台扫描逐步显示。在「内容」页点击「检查 Mod 和资源更新」，即可查找兼容更新。设置中可启用增量备份并预览恢复改动；导出支持 MRPACK、CurseForge 和 ZIP。"
+		"message": "内容会随后台扫描逐步显示。在「内容」页检查 Mod 和资源的兼容更新后，可单独更新或一键更新全部可更新文件，包括整合包内的内容。设置中可启用增量备份并预览恢复改动；导出支持 MRPACK、CurseForge 和 ZIP。"
 	},
 	"app.onboarding.instance-tabs.title": {
 		"message": "剩下的工作台"

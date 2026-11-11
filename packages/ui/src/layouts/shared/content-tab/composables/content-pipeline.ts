@@ -33,7 +33,6 @@ export interface ContentPipelineConfig {
 	getItemId: (item: ContentItem) => string
 	showTypeFilters?: boolean
 	showUpdateFilter?: boolean
-	isPackLocked?: Ref<boolean>
 	memoryKey?: string
 	searchKeys?: string[]
 	initialFilters?: ContentFilterSelections
@@ -83,7 +82,6 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 		getItemId,
 		showTypeFilters = false,
 		showUpdateFilter = false,
-		isPackLocked,
 		memoryKey = '',
 		searchKeys = ['project.title', 'owner.name', 'file_name'],
 		initialFilters,
@@ -149,20 +147,12 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
 	const sortedItems = computed(() => sortItems(items.value))
 
-	const modpackItemsNoUpdate = computed(() => {
-		const raw = modpackItems?.value ?? []
-		return sortItems(
-			raw.map((item) => ({
-				...item,
-				update: null,
-			})),
-		)
-	})
+	const sortedModpackItems = computed(() => sortItems(modpackItems?.value ?? []))
 
 	const filterValidationOptions = computed(() => {
 		const type = new Set<string>()
 		const status = new Set<string>()
-		const allItems = [...modpackItemsNoUpdate.value, ...sortedItems.value]
+		const allItems = [...sortedModpackItems.value, ...sortedItems.value]
 		const duplicateItemIds = new Set((duplicateItems?.value ?? []).map((item) => getItemId(item)))
 
 		for (const item of allItems) {
@@ -228,7 +218,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 		// Step 2: Compute searchedAllItems (for filter UI — counts, options, totalCount)
 		// Old code: [...modpackSearched.filter(modpackChildIdSet), ...regularSearched.filter(!modpackChildIdSet)]
 		const modpackChildIds = modpackChildIdSet.value
-		const modpackSearched = search(modpackItemsNoUpdate.value).filter((item) =>
+		const modpackSearched = search(sortedModpackItems.value).filter((item) =>
 			modpackChildIds.has(getItemId(item).replace(/\.disabled$/, '')),
 		)
 		const regularSearched = search(sortedItems.value).filter(
@@ -319,7 +309,6 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
 		// Step 7: Compute filteredItems and filteredModpackItems (matching old layout.vue)
 		// Old filteredItems = applyFilters(search(sortedItems))
-		// Old filteredModpackItems = applyFilters(search(modpackItemsNoUpdate).filter(modpackIds))
 		function applyFilters(source: ContentItem[]): ContentItem[] {
 			let result = source
 			if (typeFilters.length > 0) {
@@ -340,12 +329,12 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
 		const filteredItems = applyFilters(search(sortedItems.value))
 
-		const modpackIds = new Set(modpackItemsNoUpdate.value.map((item) => getItemId(item)))
+		const modpackIds = new Set(sortedModpackItems.value.map((item) => getItemId(item)))
 		const filteredModpackItems =
-			modpackItemsNoUpdate.value.length === 0
+			sortedModpackItems.value.length === 0
 				? []
 				: applyFilters(
-						search(modpackItemsNoUpdate.value).filter((item) => modpackIds.has(getItemId(item))),
+						search(sortedModpackItems.value).filter((item) => modpackIds.has(getItemId(item))),
 					)
 
 		return {
@@ -362,7 +351,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 	watch(
 		[
 			sortedItems,
-			modpackItemsNoUpdate,
+			sortedModpackItems,
 			duplicateItems,
 			searchQuery,
 			selectedTypeFilter,
@@ -379,7 +368,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
 	// Update Fuse index asynchronously when items change (separate from pipeline)
 	watch(
-		() => [sortedItems.value, modpackItemsNoUpdate.value] as const,
+		() => [sortedItems.value, sortedModpackItems.value] as const,
 		([sorted, modpack]) => {
 			const seenIds = new Set<string>()
 			const collection: ContentItem[] = []
@@ -477,7 +466,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 		searchQuery,
 		searchableItemCount,
 		sortedItems,
-		modpackItemsNoUpdate,
+		sortedModpackItems,
 		modpackChildIdSet,
 		selectedTypeFilter,
 		selectedStatusFilters,

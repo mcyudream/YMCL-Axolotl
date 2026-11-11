@@ -339,6 +339,7 @@ function handleSort(column: ContentCardTableSortColumn) {
 				:duplicate-count="item.duplicateCount"
 				:has-update="item.hasUpdate"
 				:rollback-file-name="item.rollbackFileName"
+				:hide-switch-version="item.hideSwitchVersion"
 				:overflow-options="item.overflowOptions"
 				:disabled="item.disabled"
 				:disabled-tooltip="item.disabledTooltip"

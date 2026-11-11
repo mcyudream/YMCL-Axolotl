@@ -6,6 +6,7 @@ use crate::state::ContentProvider;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentUpdateScope {
+    All,
     UserAdded,
     Pack,
     Item,

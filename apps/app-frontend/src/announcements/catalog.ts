@@ -28,6 +28,31 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.1',
+		version: '2.2.1',
+		publishedAt: '2026-11-11',
+		title: {
+			'en-US': 'YMCL 2.2.1',
+			'zh-CN': 'YMCL 2.2.1',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed MRPACK mods and resources losing their available update indicators and being excluded from update filters and bulk updates.',
+					'zh-CN':
+						'修复 MRPACK 整合包内 Mod 和资源不显示可用更新、无法参与更新筛选和批量更新的问题。',
+				},
+				{
+					'en-US':
+						'Individual modpack file updates now preserve pack membership, original pack versions, and disabled states, including CurseForge manual downloads.',
+					'zh-CN':
+						'单独更新整合包文件时保留整合包归属、原始版本和禁用状态，并修复 CurseForge 手动下载更新后的文件替换。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.0',
 		version: '2.2.0',
 		publishedAt: '2026-11-10',

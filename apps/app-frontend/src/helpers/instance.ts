@@ -561,7 +561,7 @@ export async function refresh_content(instanceId: string): Promise<InstanceConte
 	return await invoke('plugin:instance|instance_refresh_content', { instanceId })
 }
 
-export type ContentUpdateScope = 'user_added' | 'pack' | 'item'
+export type ContentUpdateScope = 'all' | 'user_added' | 'pack' | 'item'
 
 export interface ContentUpdatePlan {
 	id: string

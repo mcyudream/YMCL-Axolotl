@@ -45,7 +45,6 @@ export interface ContentManagerContext {
 
 	// Modpack
 	modpack: Ref<ContentModpackData | null> | ComputedRef<ContentModpackData | null>
-	isPackLocked: Ref<boolean> | ComputedRef<boolean>
 	modpackItems?: Ref<ContentItem[]> | ComputedRef<ContentItem[]>
 
 	// Guards

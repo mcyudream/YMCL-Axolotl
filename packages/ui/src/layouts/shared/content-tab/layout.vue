@@ -32,10 +32,12 @@ import ConfirmUnlinkModal from './components/modals/ConfirmUnlinkModal.vue'
 import ContentDependencyWarningModal from './components/modals/ContentDependencyWarningModal.vue'
 import {
 	canToggleContentItem,
+	canUpdateContentItem,
 	clearPinnedContentViewPreferences,
 	type ContentSortMode,
 	type ContentViewState,
 	getPinnedContentViewPreferences,
+	getUpdatableContentItems,
 	isDisabledContentItem,
 	isEnabledContentItem,
 	isPresentContentItem,
@@ -238,7 +240,7 @@ const filterOptionsReady = computed(
 const {
 	searchQuery,
 	searchableItemCount,
-	modpackItemsNoUpdate,
+	sortedModpackItems,
 	modpackChildIdSet,
 	selectedTypeFilter,
 	selectedStatusFilters,
@@ -258,7 +260,6 @@ const {
 	getItemId,
 	showTypeFilters: true,
 	showUpdateFilter: ctx.hasUpdateSupport,
-	isPackLocked: ctx.isPackLocked,
 	memoryKey: ctx.instanceId,
 	initialFilters: initialPinnedView ?? undefined,
 	filterOptionsReady,
@@ -306,7 +307,7 @@ const activeMetadataFilterCount = computed(() => metadataFilteringKeys.value.len
 
 const { selectedIds, selectedItems, clearSelection, removeFromSelection } = useContentSelection(
 	computed(() => {
-		return [...modpackItemsNoUpdate.value, ...ctx.items.value]
+		return [...sortedModpackItems.value, ...ctx.items.value]
 	}),
 	getItemId,
 )
@@ -523,7 +524,7 @@ function mapToTableItem(item: ContentItem, group?: string): ContentCardTableItem
 			: (base.toggleDisabledTooltip ?? null),
 		installing: item.installing === true,
 		pendingManualDownload: item.pendingManualDownload === true,
-		hasUpdate: group ? false : item.update != null,
+		hasUpdate: canUpdateContentItem(item),
 		rollbackFileName: item.rollback?.file_name,
 		hideSwitchVersion: base.hideSwitchVersion ?? !base.versionLink,
 		overflowOptions: buildItemOverflowOptions(item),
@@ -675,12 +676,17 @@ const tableItems = computed<ContentCardTableItem[]>(() => {
 
 watch(tableItems, restoreContentViewScroll, { flush: 'post', immediate: true })
 
-const hasOutdatedProjects = computed(() => {
-	const outdated = ctx.items.value.filter((p) => p.update != null)
-	const modpackHasUpdate =
-		ctx.bulkUpdateIncludesModpack !== false && (ctx.modpack.value?.hasUpdate ?? false)
-	return outdated.length > 0 || modpackHasUpdate
-})
+const updatableItems = computed(() =>
+	getUpdatableContentItems([...(ctx.modpackItems?.value ?? []), ...ctx.items.value], getItemId),
+)
+
+const bulkModpackHasUpdate = computed(
+	() => ctx.bulkUpdateIncludesModpack !== false && (ctx.modpack.value?.hasUpdate ?? false),
+)
+
+const hasOutdatedProjects = computed(
+	() => updatableItems.value.length > 0 || bulkModpackHasUpdate.value,
+)
 
 //  Deletion
 const pendingDeletionItems = ref<ContentItem[]>([])
@@ -942,10 +948,8 @@ const hasBulkUpdateSupport = computed(
 
 function promptUpdateAll(event?: MouseEvent) {
 	if (!hasBulkUpdateSupport.value) return
-	const items = ctx.items.value.filter((item) => item.update != null)
-	const modpackHasUpdate =
-		ctx.bulkUpdateIncludesModpack !== false && (ctx.modpack.value?.hasUpdate ?? false)
-	if (items.length === 0 && !modpackHasUpdate) return
+	const items = updatableItems.value
+	if (items.length === 0 && !bulkModpackHasUpdate.value) return
 	pendingBulkUpdateItems.value = items
 	pendingBulkUpdateAll.value = true
 	if ((event?.shiftKey || skipNonEssentialWarnings.value) && !ctx.isBusy.value) {
@@ -957,7 +961,7 @@ function promptUpdateAll(event?: MouseEvent) {
 
 function promptUpdateSelected(event?: MouseEvent) {
 	if (!hasBulkUpdateSupport.value) return
-	const items = selectedItems.value.filter((item) => item.update != null)
+	const items = selectedItems.value.filter(canUpdateContentItem)
 	if (items.length === 0) return
 	pendingBulkUpdateItems.value = items
 	pendingBulkUpdateAll.value = false
@@ -971,8 +975,7 @@ function promptUpdateSelected(event?: MouseEvent) {
 async function confirmBulkUpdate() {
 	if (ctx.isBusy.value) return
 	const items = pendingBulkUpdateItems.value
-	const modpackHasUpdate =
-		ctx.bulkUpdateIncludesModpack !== false && (ctx.modpack.value?.hasUpdate ?? false)
+	const modpackHasUpdate = pendingBulkUpdateAll.value && bulkModpackHasUpdate.value
 	if (items.length === 0 && !modpackHasUpdate) return
 	if (!hasBulkUpdateSupport.value) return
 
@@ -1145,6 +1148,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 							:reset-tooltip="formatMessage(messages.resetView)"
 							:has-bulk-update-support="hasBulkUpdateSupport"
 							:has-outdated-projects="hasOutdatedProjects"
+							:bulk-update-label="ctx.bulkUpdateAllLabel"
 							:bulk-update-tooltip="
 								ctx.bulkUpdateAllDescription ??
 								ctx.bulkUpdateAllLabel ??
@@ -1199,7 +1203,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 		>
 			<template #actions>
 				<ButtonStyled
-					v-if="hasBulkUpdateSupport && selectedItems.some((m) => m.update != null)"
+					v-if="hasBulkUpdateSupport && selectedItems.some(canUpdateContentItem)"
 					type="transparent"
 					color="green"
 					color-fill="text"
@@ -1305,15 +1309,9 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			v-if="hasBulkUpdateSupport"
 			ref="confirmBulkUpdateModal"
 			:count="
-				pendingBulkUpdateItems.length +
-				(pendingBulkUpdateAll &&
-				ctx.bulkUpdateIncludesModpack !== false &&
-				ctx.modpack.value?.hasUpdate
-					? 1
-					: 0)
+				pendingBulkUpdateItems.length + (pendingBulkUpdateAll && bulkModpackHasUpdate ? 1 : 0)
 			"
-			:action-label="ctx.bulkUpdateAllLabel"
-			:scope-description="ctx.bulkUpdateAllDescription"
+			:scope-description="pendingBulkUpdateAll ? ctx.bulkUpdateAllDescription : undefined"
 			:server="ctx.deletionContext === 'server'"
 			:action-disabled="ctx.isBusy.value"
 			:action-disabled-tooltip="ctx.busyMessage?.value ?? undefined"

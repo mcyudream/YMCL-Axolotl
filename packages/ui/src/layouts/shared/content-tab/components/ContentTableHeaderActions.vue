@@ -31,12 +31,14 @@ const props = withDefaults(
 		resetTooltip: string
 		hasBulkUpdateSupport?: boolean
 		hasOutdatedProjects?: boolean
+		bulkUpdateLabel?: string
 		bulkUpdateTooltip?: string
 		isBulkOperating?: boolean
 	}>(),
 	{
 		hasBulkUpdateSupport: false,
 		hasOutdatedProjects: false,
+		bulkUpdateLabel: undefined,
 		bulkUpdateTooltip: undefined,
 		isBulkOperating: false,
 	},
@@ -113,7 +115,7 @@ const emit = defineEmits<{
 
 		<ButtonStyled
 			v-if="props.hasBulkUpdateSupport && props.hasOutdatedProjects"
-			circular
+			:circular="!props.bulkUpdateLabel"
 			color="green"
 			type="transparent"
 			color-fill="text"
@@ -125,6 +127,7 @@ const emit = defineEmits<{
 				@click="emit('updateAll')"
 			>
 				<DownloadIcon />
+				<span v-if="props.bulkUpdateLabel">{{ props.bulkUpdateLabel }}</span>
 			</button>
 		</ButtonStyled>
 	</div>

@@ -13,10 +13,10 @@ use std::collections::{HashMap, HashSet};
 
 use super::apply_content_install::{
     DownloadedProjectVersion, add_downloaded_project_version,
-    add_project_from_version, add_resolved_content, archive_project_file,
-    content_ownership_for_path, download_project_version,
-    persist_resolved_plan_dependency_edges, remove_project,
-    resolve_content_scope, resolve_install_plan, toggle_disable_project,
+    add_project_from_version, add_resolved_content, content_ownership_for_path,
+    download_project_version, finish_project_update,
+    persist_resolved_plan_dependency_edges, resolve_content_scope,
+    resolve_install_plan,
 };
 use super::check_content_updates::{ContentUpdate, check_content_updates};
 
@@ -104,7 +104,7 @@ async fn apply_content_update(
     update: &ContentUpdate,
     state: &State,
 ) -> crate::Result<String> {
-    let mut new_path = match update {
+    let new_path = match update {
         ContentUpdate::Modrinth {
             project_id,
             current_version_id,
@@ -184,7 +184,7 @@ async fn apply_content_update(
                 project_path,
             )
             .await?;
-            result
+            let path = result
                 .installed
                 .into_iter()
                 .find(|file| !file.dependency)
@@ -194,26 +194,12 @@ async fn apply_content_update(
                         "CurseForge update did not produce an installed file"
                             .to_string(),
                     )
-                })?
+                })?;
+            return Ok(path);
         }
     };
 
-    if project_path.ends_with(".disabled") {
-        new_path =
-            toggle_disable_project(instance_id, &new_path, Some(false), state)
-                .await?;
-    }
-
-    if new_path != project_path {
-        if archive_project_file(instance_id, project_path, &new_path, state)
-            .await?
-            .is_none()
-        {
-            remove_project(instance_id, project_path, state).await?;
-        }
-    }
-
-    Ok(new_path)
+    finish_project_update(instance_id, project_path, &new_path, state).await
 }
 
 pub(crate) async fn update_all_projects(
@@ -246,43 +232,28 @@ pub(crate) async fn update_all_projects(
     for download in downloads {
         match download {
             DownloadedBulkProject::ProjectUpdate(update, downloaded) => {
-                let mut new_path = add_downloaded_project_version(
+                let ownership_kind = content_ownership_for_path(
+                    instance_id,
+                    &update.relative_path,
+                    state,
+                )
+                .await?;
+                let new_path = add_downloaded_project_version(
                     instance_id,
                     downloaded,
                     ContentSourceKind::Local,
-                    crate::state::instances::ContentOwnershipKind::UserAdded,
+                    ownership_kind,
                     state,
                 )
                 .await?;
 
-                if update.relative_path.ends_with(".disabled") {
-                    new_path = toggle_disable_project(
-                        instance_id,
-                        &new_path,
-                        Some(false),
-                        state,
-                    )
-                    .await?;
-                }
-
-                if new_path != update.relative_path {
-                    if archive_project_file(
-                        instance_id,
-                        &update.relative_path,
-                        &new_path,
-                        state,
-                    )
-                    .await?
-                    .is_none()
-                    {
-                        remove_project(
-                            instance_id,
-                            &update.relative_path,
-                            state,
-                        )
-                        .await?;
-                    }
-                }
+                let new_path = finish_project_update(
+                    instance_id,
+                    &update.relative_path,
+                    &new_path,
+                    state,
+                )
+                .await?;
 
                 applied.push(AppliedBulkItem {
                     project_id: update.project_id,

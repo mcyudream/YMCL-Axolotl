@@ -126,7 +126,9 @@ pub async fn plan_content_updates(
     let mut actions = Vec::new();
 
     match scope {
-        ContentUpdateScope::UserAdded | ContentUpdateScope::Item => {
+        ContentUpdateScope::All
+        | ContentUpdateScope::UserAdded
+        | ContentUpdateScope::Item => {
             if scope == ContentUpdateScope::Item && target.is_none() {
                 return Err(crate::ErrorKind::InputError(
                     "An item update plan requires a stable content ID"
@@ -134,33 +136,8 @@ pub async fn plan_content_updates(
                 )
                 .into());
             }
-            for item in &snapshot.items {
-                let content_id = item
-                    .entry_id
-                    .as_deref()
-                    .or(item.member_id.as_deref())
-                    .or(item.file_id.as_deref());
-                let selected =
-                    update_scope_selects_item(scope, target, item, content_id);
-                if !selected {
-                    continue;
-                }
-                let Some(content) = item.content.as_ref() else {
-                    continue;
-                };
-                let Some(update) = content.update.as_ref() else {
-                    continue;
-                };
-                let Some(content_id) = content_id else {
-                    continue;
-                };
-                actions.push(update_action(
-                    content_id.to_string(),
-                    Some(item.expected_relative_path.clone()),
-                    item.ownership_kind,
-                    update,
-                ));
-            }
+            actions =
+                content_item_update_actions(scope, target, &snapshot.items);
         }
         ContentUpdateScope::Pack => {
             let pack = snapshot.pack.as_ref().ok_or_else(|| {
@@ -356,12 +333,51 @@ fn update_scope_selects_item(
     content_id: Option<&str>,
 ) -> bool {
     match scope {
+        ContentUpdateScope::All => true,
         ContentUpdateScope::UserAdded => {
             item.ownership_kind == ContentOwnershipKind::UserAdded
         }
-        ContentUpdateScope::Item => content_id == target,
+        ContentUpdateScope::Item => {
+            target.is_some()
+                && (content_id == target
+                    || item.member_id.as_deref() == target
+                    || item.file_id.as_deref() == target)
+        }
         ContentUpdateScope::Pack => false,
     }
+}
+
+fn content_item_update_actions(
+    scope: ContentUpdateScope,
+    target: Option<&str>,
+    items: &[crate::state::InstanceContentSnapshotItem],
+) -> Vec<ContentUpdatePlanAction> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let content_id = item
+                .entry_id
+                .as_deref()
+                .or(item.member_id.as_deref())
+                .or(item.file_id.as_deref());
+            if !update_scope_selects_item(scope, target, item, content_id)
+                || !item.capabilities.can_update
+                || item.materialization_state
+                    != crate::state::PackMemberMaterializationState::Present
+            {
+                return None;
+            }
+            let content = item.content.as_ref()?;
+            let update = content.update.as_ref()?;
+            let content_id = item.member_id.as_deref().or(content_id)?;
+            Some(update_action(
+                content_id.to_string(),
+                Some(content.file_path.clone()),
+                item.ownership_kind,
+                update,
+            ))
+        })
+        .collect()
 }
 
 fn ensure_update_plan_revision(
@@ -521,10 +537,219 @@ mod tests {
     }
 
     #[test]
+    fn item_update_scope_selects_pack_member_without_selecting_the_pack() {
+        let member = snapshot_item(
+            ContentOwnershipKind::PackManaged,
+            Some("pack-entry"),
+            Some("pack-member"),
+            Some("pack-file"),
+        );
+        assert!(update_scope_selects_item(
+            ContentUpdateScope::Item,
+            Some("pack-entry"),
+            &member,
+            member.entry_id.as_deref(),
+        ));
+        assert!(update_scope_selects_item(
+            ContentUpdateScope::Item,
+            Some("pack-member"),
+            &member,
+            member.entry_id.as_deref(),
+        ));
+        assert!(!update_scope_selects_item(
+            ContentUpdateScope::Item,
+            Some("another-entry"),
+            &member,
+            member.entry_id.as_deref(),
+        ));
+        assert!(!update_scope_selects_item(
+            ContentUpdateScope::Pack,
+            Some("pack-entry"),
+            &member,
+            member.entry_id.as_deref(),
+        ));
+    }
+
+    #[test]
     fn update_plan_revision_rejects_stale_plans() {
         assert!(ensure_update_plan_revision(7, 7).is_ok());
         let error = ensure_update_plan_revision(7, 8).unwrap_err();
         assert!(error.to_string().contains("planned revision 7"));
         assert!(error.to_string().contains("current revision 8"));
+    }
+
+    fn updatable_item(
+        id: &str,
+        ownership: ContentOwnershipKind,
+        project_type: ProjectType,
+    ) -> InstanceContentSnapshotItem {
+        let mut item = snapshot_item(
+            ownership,
+            Some(&format!("entry:{id}")),
+            (ownership == ContentOwnershipKind::PackManaged)
+                .then(|| format!("member:{id}"))
+                .as_deref(),
+            Some(&format!("file:{id}")),
+        );
+        item.project_type = project_type;
+        item.capabilities.can_update = true;
+        item.content = Some(ContentItem {
+            file_name: format!("{id}.jar"),
+            file_path: format!("{}/{id}.jar", project_type.get_folder()),
+            id: id.to_string(),
+            size: 1,
+            enabled: true,
+            project_type,
+            project: None,
+            version: None,
+            owner: None,
+            update: Some(ContentItemUpdate::Modrinth {
+                project_id: crate::state::ModrinthProjectId::new("AANobbMI")
+                    .unwrap(),
+                current_version_id: crate::state::ModrinthVersionId::new(
+                    "7pwil2dy",
+                )
+                .unwrap(),
+                target_version_id: crate::state::ModrinthVersionId::new(
+                    "vf7UgZpC",
+                )
+                .unwrap(),
+            }),
+            date_added: None,
+            provider_refs: Vec::new(),
+            origin_provider: Some(ContentProvider::Modrinth),
+            rollback: None,
+            environment: None,
+            source_kind: None,
+            external: false,
+            loader: None,
+        });
+        item
+    }
+
+    #[test]
+    fn all_content_update_plan_includes_pack_mods_resources_and_added_content()
+    {
+        let items = vec![
+            updatable_item(
+                "pack-mod",
+                ContentOwnershipKind::PackManaged,
+                ProjectType::Mod,
+            ),
+            updatable_item(
+                "pack-resource",
+                ContentOwnershipKind::PackManaged,
+                ProjectType::ResourcePack,
+            ),
+            updatable_item(
+                "added",
+                ContentOwnershipKind::UserAdded,
+                ProjectType::Mod,
+            ),
+            updatable_item(
+                "discovered",
+                ContentOwnershipKind::LocalDiscovered,
+                ProjectType::ShaderPack,
+            ),
+        ];
+        let actions =
+            content_item_update_actions(ContentUpdateScope::All, None, &items);
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| action.content_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "member:pack-mod",
+                "member:pack-resource",
+                "entry:added",
+                "entry:discovered"
+            ]
+        );
+        assert_eq!(
+            actions[1].relative_path.as_deref(),
+            Some("resourcepacks/pack-resource.jar")
+        );
+        assert_eq!(actions[0].target_release_id, "vf7UgZpC");
+        let added = content_item_update_actions(
+            ContentUpdateScope::UserAdded,
+            None,
+            &items,
+        );
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].content_id, "entry:added");
+        assert!(
+            content_item_update_actions(ContentUpdateScope::Pack, None, &items)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn mrpack_item_update_uses_installed_path_and_stable_member_identity() {
+        let mut member = updatable_item(
+            "pack-mod",
+            ContentOwnershipKind::PackManaged,
+            ProjectType::Mod,
+        );
+        member.expected_relative_path = "mods/pack-default.jar".to_string();
+        member.override_kind = PackMemberOverrideKind::Version;
+        member.content.as_mut().unwrap().file_path =
+            "mods/locally-updated.jar.disabled".to_string();
+
+        for target in ["entry:pack-mod", "member:pack-mod", "file:pack-mod"] {
+            let actions = content_item_update_actions(
+                ContentUpdateScope::Item,
+                Some(target),
+                std::slice::from_ref(&member),
+            );
+            assert_eq!(actions.len(), 1);
+            assert_eq!(actions[0].content_id, "member:pack-mod");
+            assert_eq!(
+                actions[0].relative_path.as_deref(),
+                Some("mods/locally-updated.jar.disabled")
+            );
+            assert_eq!(
+                actions[0].ownership_kind,
+                ContentOwnershipKind::PackManaged
+            );
+        }
+    }
+
+    #[test]
+    fn all_content_update_plan_excludes_uninstalled_and_unsupported_items() {
+        let present = updatable_item(
+            "present",
+            ContentOwnershipKind::PackManaged,
+            ProjectType::Mod,
+        );
+        let mut items = vec![present.clone()];
+        for materialization in [
+            PackMemberMaterializationState::Missing,
+            PackMemberMaterializationState::Removed,
+            PackMemberMaterializationState::PendingManual,
+        ] {
+            let mut absent = present.clone();
+            absent.materialization_state = materialization;
+            items.push(absent);
+        }
+        let mut unsupported = present.clone();
+        unsupported.capabilities.can_update = false;
+        items.push(unsupported);
+        let mut current = present.clone();
+        current.content.as_mut().unwrap().update = None;
+        items.push(current);
+        let mut no_content = present.clone();
+        no_content.content = None;
+        items.push(no_content);
+        let mut no_identity = present;
+        no_identity.entry_id = None;
+        no_identity.member_id = None;
+        no_identity.file_id = None;
+        items.push(no_identity);
+
+        let actions =
+            content_item_update_actions(ContentUpdateScope::All, None, &items);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].content_id, "member:present");
     }
 }
