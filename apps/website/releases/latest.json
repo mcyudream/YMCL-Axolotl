@@ -1,11 +1,11 @@
 {
-  "tag_name": "v2.2.1",
+  "tag_name": "v2.2.2",
   "assets": [
-    "YMCL_2.2.1_x64-setup.nsis.zip",
-    "YMCL_2.2.1_x64-setup.nsis.zip.sig",
-    "YMCL_2.2.1_x64_modern-setup.exe",
-    "YMCL_2.2.1_x64_modern-setup.exe.sig",
-    "YMCL_2.2.1_x64_nsis-setup.exe",
-    "YMCL_2.2.1_x64_portable.zip"
+    "YMCL_2.2.2_x64-setup.nsis.zip",
+    "YMCL_2.2.2_x64-setup.nsis.zip.sig",
+    "YMCL_2.2.2_x64_modern-setup.exe",
+    "YMCL_2.2.2_x64_modern-setup.exe.sig",
+    "YMCL_2.2.2_x64_nsis-setup.exe",
+    "YMCL_2.2.2_x64_portable.zip"
   ]
 }
