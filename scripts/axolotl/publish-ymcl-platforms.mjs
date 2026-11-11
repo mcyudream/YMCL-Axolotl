@@ -12,6 +12,7 @@ export const updatePlatforms = [{ origin: 'https://www.yudream.online', secret: 
 
 const pluginPath = '/api/plugins/ymcl-content'
 const expectedTargets = ['windows-x86_64']
+const retryableUploadErrors = new Set([7, 18, 28, 35, 52, 55, 56, 92, 'ECONNRESET', 'ETIMEDOUT'])
 
 function failureDetails(error, secrets = []) {
 	const seen = new Set()
@@ -122,6 +123,19 @@ function matchesArtifact(actual, expected) {
 	)
 }
 
+function canUseVerifiedReleaseUrl(error) {
+	const pending = [error]
+	const seen = new Set()
+	while (pending.length) {
+		const current = pending.pop()
+		if (!current || seen.has(current)) continue
+		seen.add(current)
+		if (retryableUploadErrors.has(current.code)) return true
+		pending.push(current.cause, ...(current.errors ?? []))
+	}
+	return false
+}
+
 export async function downloadArtifact(artifact, directory, fetcher = fetch) {
 	const started = Date.now()
 	console.log(`[GitHub] Downloading ${artifact.filename} (${artifact.size} bytes)`)
@@ -171,7 +185,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 		'--connect-timeout',
 		'30',
 		'--max-time',
-		'600',
+		'90',
 		'--header',
 		'@-',
 		'--write-out',
@@ -185,7 +199,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 		}
 	}
 	args.push('--url', url)
-	const attempts = 4
+	const attempts = 3
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		let response
 		try {
@@ -193,7 +207,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 				const child = execFile(
 					'curl',
 					args,
-					{ timeout: 610_000, maxBuffer: 2 * 1024 * 1024 },
+					{ timeout: 100_000, maxBuffer: 2 * 1024 * 1024 },
 					(error, stdout) => (error ? reject(error) : resolve(stdout)),
 				)
 				child.stdin.on('error', () => {})
@@ -207,7 +221,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 			if (![408, 429, 500, 502, 503, 504].includes(response.status) || attempt === attempts)
 				return response
 		} catch (error) {
-			if (![7, 18, 28, 35, 52, 55, 56, 92].includes(error.code) || attempt === attempts) throw error
+			if (!retryableUploadErrors.has(error.code) || attempt === attempts) throw error
 		}
 		console.log(
 			`[${new URL(url).hostname}] Upload interrupted${response ? ` (HTTP ${response.status})` : ''}; retrying (${attempt}/${attempts - 1})`,
@@ -260,6 +274,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		} catch (error) {
 			throw new Error(
 				`${context} failed after ${Date.now() - started}ms: ${failureDetails(error, [apiKey])}`,
+				{ cause: error },
 			)
 		}
 	}
@@ -273,7 +288,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 				existing.artifacts.some(
 					(actual) =>
 						matchesArtifact(actual, expected) &&
-						(expected.kind !== 'portable' ||
+						(!['portable', 'updater'].includes(expected.kind) ||
 							actual.hostedLocally ||
 							actual.downloadUrl === expected.downloadUrl),
 				),
@@ -284,25 +299,30 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 	} else {
 		const { artifacts: expectedArtifacts, ...metadata } = release
 		let staged = await request(admin, { method: 'POST', body: { ...metadata, enabled: false } })
+		let useReleaseUrls = false
+		const registerReleaseUrl = async (artifact) => {
+			const registered = await request(`${releasePath}/artifacts`, {
+				method: 'POST',
+				body: { ...artifact, id: artifact.filename, mode: 'url' },
+			})
+			if (
+				!registered.artifacts?.some(
+					(actual) =>
+						matchesArtifact(actual, artifact) && actual.downloadUrl === artifact.downloadUrl,
+				)
+			)
+				throw new Error(`${origin}: ${artifact.kind} download URL or metadata mismatch`)
+			return registered
+		}
 		for (const artifact of expectedArtifacts) {
 			const previous = staged.artifacts?.find(
 				(actual) =>
 					matchesArtifact(actual, artifact) &&
-					(actual.hostedLocally ||
-						(artifact.kind === 'portable' && actual.downloadUrl === artifact.downloadUrl)),
+					(actual.hostedLocally || actual.downloadUrl === artifact.downloadUrl),
 			)
 			if (previous) continue
-			if (artifact.kind === 'portable') {
-				// The bundled WebView2 runtime makes the portable ZIP exceed the
-				// platform's upload limit. Its existing URL-artifact API keeps the
-				// versioned GitHub download and digest; updater bytes stay local.
-				staged = await request(`${releasePath}/artifacts`, {
-					method: 'POST',
-					body: { ...artifact, id: artifact.filename, mode: 'url' },
-				})
-				const registered = staged.artifacts?.find((actual) => matchesArtifact(actual, artifact))
-				if (!registered || registered.downloadUrl !== artifact.downloadUrl)
-					throw new Error(`${origin}: portable download URL or metadata mismatch`)
+			if (artifact.kind === 'portable' || useReleaseUrls) {
+				staged = await registerReleaseUrl(artifact)
 				continue
 			}
 			const file = await artifactFile(artifact)
@@ -313,7 +333,17 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 			}
 			body.append('id', artifact.filename)
 			body.append('targetPlatforms', (artifact.targetPlatforms ?? []).join(','))
-			staged = await request(`${releasePath}/artifacts/upload`, { method: 'POST', body, file })
+			try {
+				staged = await request(`${releasePath}/artifacts/upload`, { method: 'POST', body, file })
+			} catch (error) {
+				if (!canUseVerifiedReleaseUrl(error)) throw error
+				console.warn(
+					`[${new URL(origin).hostname}] Using verified GitHub downloads after the upload connection failed`,
+				)
+				useReleaseUrls = true
+				staged = await registerReleaseUrl(artifact)
+				continue
+			}
 			if (
 				!staged.artifacts?.some(
 					(actual) => matchesArtifact(actual, artifact) && actual.hostedLocally,
@@ -327,12 +357,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		}
 		const artifacts = expectedArtifacts.map((expected) => {
 			const actual = staged.artifacts.find((candidate) => matchesArtifact(candidate, expected))
-			if (
-				expected.kind === 'portable' &&
-				!actual?.fileKey &&
-				actual?.downloadUrl === expected.downloadUrl
-			)
-				return actual
+			if (!actual?.fileKey && actual?.downloadUrl === expected.downloadUrl) return actual
 			if (!actual?.fileKey) throw new Error(`${origin}: artifact is not hosted locally`)
 			return {
 				...actual,
@@ -350,7 +375,10 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 		for (const target of artifact.targetPlatforms) {
 			const actual = manifest.platforms?.[target]
 			const expectedUrl = `${origin}${pluginPath}/v1/update/files/${encodeURIComponent(release.version)}/${encodeURIComponent(artifact.filename)}`
-			if (actual?.signature !== artifact.signature || actual.url !== expectedUrl) {
+			if (
+				actual?.signature !== artifact.signature ||
+				![expectedUrl, artifact.downloadUrl].includes(actual.url)
+			) {
 				throw new Error(
 					`${origin}: public updater signature or download URL mismatch for ${target}`,
 				)

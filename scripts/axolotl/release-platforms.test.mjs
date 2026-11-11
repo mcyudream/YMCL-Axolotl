@@ -227,7 +227,12 @@ test('release preparation requires all signed update targets and trusted downloa
 	}
 })
 
-function platformMock({ corrupt = false, stringSizes = false, portableUrl } = {}) {
+function platformMock({
+	corrupt = false,
+	stringSizes = false,
+	portableUrl,
+	resetUpload = false,
+} = {}) {
 	const state = new Map()
 	const requests = []
 	let downloads = 0
@@ -268,6 +273,10 @@ function platformMock({ corrupt = false, stringSizes = false, portableUrl } = {}
 			]
 		} else if (options.body instanceof FormData) {
 			assert.equal(record.enabled, false)
+			if (resetUpload)
+				throw new TypeError('fetch failed', {
+					cause: Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
+				})
 			const body = options.body
 			assert.deepEqual(Buffer.from(await body.get('file').arrayBuffer()), bytes)
 			const uploaded = Object.fromEntries(
@@ -388,6 +397,31 @@ test('accepts canonical string sizes from the servers and reuses staged uploads'
 		publishPlatforms(release, environment, mock.fetcher),
 		/refusing to overwrite/,
 	)
+})
+
+test('registers the signed GitHub updater URL after the platform resets a large upload', async () => {
+	const mock = platformMock({ resetUpload: true })
+	await publishPlatforms(release, { YUDREAM_API_KEY: 'test-yudream' }, mock.fetcher)
+	const published = mock.state.get(updatePlatforms[0].origin)
+	const updater = published.artifacts.find((artifact) => artifact.kind === 'updater')
+	assert.equal(updater.hostedLocally, false)
+	assert.equal(updater.downloadUrl, artifacts[0].downloadUrl)
+	assert.equal(updater.signature, signature)
+	assert.equal(updater.sha256, sha256)
+	assert.equal(published.enabled, true)
+	assert.equal(
+		mock.requests.filter((request) => request.pathname.endsWith('/artifacts/upload')).length,
+		1,
+	)
+	const invalid = platformMock({
+		resetUpload: true,
+		portableUrl: 'https://untrusted.example/update.zip',
+	})
+	await assert.rejects(
+		publishPlatforms(release, { YUDREAM_API_KEY: 'test-yudream' }, invalid.fetcher),
+		/updater download URL or metadata mismatch/,
+	)
+	assert.equal(invalid.state.get(updatePlatforms[0].origin).enabled, false)
 })
 
 test('missing YuDream credentials fail before sending requests or downloading artifacts', async () => {
