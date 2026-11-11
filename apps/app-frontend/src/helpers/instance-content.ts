@@ -7,17 +7,17 @@ import type {
 import { convertFileSrc } from '@tauri-apps/api/core'
 
 import {
-	get_content_snapshot,
-	refresh_content,
-	type InstanceContentSnapshot,
-	type LinkedModpackInfo,
-} from '@/helpers/instance'
-import type { CacheBehaviour } from '@/helpers/types'
-import {
 	getContentRefresh,
 	isContentRefreshActive,
 	startContentRefresh,
 } from '@/helpers/content-refresh'
+import {
+	get_content_snapshot,
+	type InstanceContentSnapshot,
+	type LinkedModpackInfo,
+	refresh_content,
+} from '@/helpers/instance'
+import type { CacheBehaviour } from '@/helpers/types'
 
 export type InstanceContentData = {
 	path: string
@@ -55,6 +55,7 @@ export async function loadInstanceContentData(
 	} = {},
 ): Promise<InstanceContentData | null> {
 	try {
+		let refreshWarning: string | undefined
 		let refresh = await getContentRefresh(path)
 		if (cacheBehaviour === 'bypass' || cacheBehaviour === 'must_revalidate' || !refresh) {
 			refresh = await startContentRefresh(path)
@@ -72,15 +73,28 @@ export async function loadInstanceContentData(
 				refresh = await getContentRefresh(path)
 			}
 			options.signal?.throwIfAborted()
-			if (refresh && refresh.state !== 'completed')
-				throw new Error(
-					refresh.error || 'The content scan did not complete. Refresh content and try again.',
-				)
+			if (refresh && refresh.state !== 'completed') {
+				const message =
+					refresh.error || 'The content scan did not complete. Refresh content and try again.'
+				if (options.checkUpdates && ['failed', 'partial'].includes(refresh.state)) {
+					refreshWarning = message
+				} else {
+					throw new Error(message)
+				}
+			}
 		}
 
-		const snapshot = options.checkUpdates
-			? await refresh_content(path)
-			: await get_content_snapshot(path)
+		const snapshot =
+			options.checkUpdates && !refreshWarning
+				? await refresh_content(path)
+				: await get_content_snapshot(path)
+		if (refreshWarning) {
+			snapshot.warnings.push({
+				code: 'content_refresh_incomplete',
+				message: refreshWarning,
+				provider: null,
+			})
+		}
 		const normalizedItems = snapshot.items.map((item) => {
 			const fileName = item.expectedRelativePath.split('/').pop() ?? item.expectedRelativePath
 			const requiresManualDownload =

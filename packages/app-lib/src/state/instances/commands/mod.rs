@@ -57,6 +57,8 @@ pub(crate) use self::apply_content_install::*;
 pub(crate) use apply_content_install::ProjectFileRecord;
 
 mod check_content_updates;
+pub(crate) mod curseforge_content_updates;
+mod recognize_content_files;
 
 mod instance_upgrade;
 pub(crate) use self::instance_upgrade::{

@@ -256,7 +256,12 @@ import { useWorldDatapacks } from '@/composables/useWorldDatapacks'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version, get_version_many } from '@/helpers/cache.js'
 import { dependencyRefMatchesContentItem } from '@/helpers/content-dependencies'
-import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
+import {
+	applyContentItemUpdates,
+	contentItemProvider,
+	contentItemReference,
+	matchesContentItem,
+} from '@/helpers/content-item-state'
 import { lookupContentWikiIds, translateContentItemTitles } from '@/helpers/content-search'
 import { type CurseForgeFile, getCurseForgeChangelog } from '@/helpers/curseforge'
 import {
@@ -575,7 +580,7 @@ watch(projects, (newProjects) => {
 })
 
 function getMcmodLookup(item: ContentItem) {
-	const provider = item.origin_provider ?? item.provider_refs[0]?.provider
+	const provider = contentItemProvider(item)
 	const slug = item.project?.slug
 	if (!slug || (provider !== 'modrinth' && provider !== 'curseforge')) return null
 
@@ -861,7 +866,7 @@ function duplicateModKey(item: ContentItem): string | null {
 		return item.project?.slug ? `local:${item.project.slug}${scope}` : null
 	}
 
-	const provider = item.origin_provider ?? item.provider_refs[0]?.provider
+	const provider = contentItemProvider(item)
 	if (!provider) return null
 	const normalizedProjectId =
 		provider === 'curseforge' && projectId.startsWith('curseforge:')
@@ -1265,10 +1270,10 @@ function parseCurseForgeProjectId(projectId: string): number | null {
 }
 
 function getCurseForgeProjectIdForItem(item: ContentItem | null | undefined): number | null {
-	if (!item || item.origin_provider !== 'curseforge') return null
+	if (!item || contentItemProvider(item) !== 'curseforge') return null
 
-	const reference = item.provider_refs?.find((ref) => ref.provider === 'curseforge')
-	if (reference) {
+	const reference = contentItemReference(item)
+	if (reference?.provider === 'curseforge') {
 		return reference.project_id
 	}
 
@@ -1342,8 +1347,8 @@ async function getUpdaterProjectVersions(
 	const itemCurseForgeProjectId = getCurseForgeProjectIdForItem(item)
 	const curseForgeProjectId = itemCurseForgeProjectId ?? parseCurseForgeProjectId(projectId)
 	const useCurseForge =
-		item?.origin_provider === 'curseforge' ||
-		isCurseForgeLinkedModpack.value ||
+		contentItemProvider(item) === 'curseforge' ||
+		(!item && isCurseForgeLinkedModpack.value) ||
 		projectId.startsWith('curseforge:')
 	if (useCurseForge) {
 		if (curseForgeProjectId == null) return []
@@ -2204,13 +2209,12 @@ async function checkContentUpdates() {
 		})
 		if (!contentData || isUnmounted || props.instance.id !== instanceId || isInstanceBusy.value)
 			return
-		if (contentData.snapshot.warnings.length > 0) {
-			throw new Error(contentData.snapshot.warnings.map((warning) => warning.message).join('\n'))
-		}
-
 		await translateContentData(contentData)
 		if (isUnmounted || props.instance.id !== instanceId || isInstanceBusy.value) return
 		if (!applyContentData(contentData)) return
+		if (contentData.snapshot.warnings.length > 0) {
+			throw new Error(contentData.snapshot.warnings.map((warning) => warning.message).join('\n'))
+		}
 		const count = [...contentData.contentItems, ...contentData.linkedContentItems].filter(
 			(item) => !isWorldSaveContentItem(item) && item.update != null,
 		).length
@@ -2355,11 +2359,7 @@ function isCurseForgeUpdaterRequest() {
 		return props.instance?.link?.type === 'curseforge_modpack'
 	}
 	const item = updatingProject.value
-	return (
-		item?.origin_provider === 'curseforge' ||
-		!!item?.project?.id.startsWith('curseforge:') ||
-		item?.provider_refs?.some((ref) => ref.provider === 'curseforge')
-	)
+	return contentItemProvider(item) === 'curseforge' || !!item?.project?.id.startsWith('curseforge:')
 }
 
 async function fetchAndSpliceCurseForgeVersion(
@@ -2928,17 +2928,9 @@ provideContentManager({
 			item.instanceEntryId,
 			item.file_path,
 		)
-		const effectiveProvider = item.origin_provider ?? item.provider_refs?.[0]?.provider ?? null
+		const effectiveProvider = contentItemProvider(item)
 
-		const curseForgeProjectId =
-			effectiveProvider === 'curseforge'
-				? item.provider_refs
-						?.find(
-							(ref): ref is { provider: 'curseforge'; project_id: number } =>
-								ref.provider === 'curseforge' && typeof ref.project_id === 'number',
-						)
-						?.project_id.toString()
-				: undefined
+		const curseForgeProjectId = getCurseForgeProjectIdForItem(item)?.toString()
 
 		const projectLink =
 			effectiveProvider && item.project?.id && !item.project.id.startsWith('local:')

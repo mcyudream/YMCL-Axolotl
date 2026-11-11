@@ -2285,6 +2285,8 @@ async fn record_project_files_atomic_with_pending_completion(
                 &mut tx,
             )
             .await?;
+        sqlx::query("DELETE FROM instance_content_update_checks WHERE content_entry_id = ?")
+            .bind(&entry.id).execute(&mut *tx).await?;
         if let Some(provider_ref) = record.provider_ref.as_ref() {
             content_rows::upsert_content_provider_ref_in_transaction(
                 &entry.id,

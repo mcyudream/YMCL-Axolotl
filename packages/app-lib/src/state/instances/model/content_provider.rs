@@ -259,6 +259,31 @@ impl ContentProviderRef {
         self.database_version_id()
             .or_else(|| self.database_file_id())
     }
+
+    /// References are ordered with the install origin first. An exact alias
+    /// may complete that identity only when its provider and project agree.
+    pub(crate) fn primary_reference(
+        references: &[Self],
+        origin: Option<ContentProvider>,
+    ) -> Option<&Self> {
+        let exact =
+            |reference: &&Self| reference.database_release_id().is_some();
+        if let Some(origin) = origin {
+            let source = references
+                .iter()
+                .find(|reference| reference.provider() == origin)?;
+            return references
+                .iter()
+                .filter(|reference| {
+                    reference.provider() == origin
+                        && reference.database_project_id()
+                            == source.database_project_id()
+                })
+                .find(exact)
+                .or(Some(source));
+        }
+        references.iter().find(exact).or_else(|| references.first())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

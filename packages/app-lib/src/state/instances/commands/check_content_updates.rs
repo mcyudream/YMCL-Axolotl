@@ -4,11 +4,14 @@ use crate::state::instances::{
 };
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentProvider, ContentProviderRef,
-    CurseForgeFileId, ModrinthProjectId, ModrinthVersionId, ProjectType,
-    ReleaseChannel, State,
+    ModrinthProjectId, ModrinthVersionId, ProjectType, ReleaseChannel, State,
 };
 use std::collections::HashMap;
 
+use super::curseforge_content_updates::{
+    CurseForgeUpdateCandidate, persist_curseforge_update_checks,
+    resolve_curseforge_content_updates,
+};
 use super::sync_content_files::{
     content_update_cache_key, fetch_content_file_updates,
     installed_modrinth_version_id, modrinth_update_enabled,
@@ -83,7 +86,6 @@ struct InstalledContentContext {
     instance: Instance,
     content_set: ContentSet,
     files: Vec<InstanceFile>,
-    files_by_id: HashMap<String, InstanceFile>,
     entries_by_file_id: HashMap<String, ContentEntry>,
     provider_refs_by_file_id: HashMap<String, Vec<ContentProviderRef>>,
     origin_provider_by_file_id: HashMap<String, Option<ContentProvider>>,
@@ -100,6 +102,10 @@ async fn load_installed_content(
             crate::ErrorKind::InputError("Unknown instance".to_string())
         })?;
     let files = sync_instance_content_files(&instance, state).await?;
+    super::recognize_content_files::recognize_curseforge_content_files(
+        &instance, &files, state,
+    )
+    .await?;
     let _instance_lock = state.lock_instance_content(instance_id).await;
     let content_set =
         content_rows::get_applied_content_set(&instance.id, &state.pool)
@@ -120,10 +126,6 @@ async fn load_installed_content(
                 .as_deref()
                 .map(|file_id| (file_id.to_string(), entry.clone()))
         })
-        .collect();
-    let files_by_id = files
-        .iter()
-        .map(|file| (file.id.clone(), file.clone()))
         .collect();
     let mut provider_refs_by_file_id = HashMap::new();
     let mut origin_provider_by_file_id = HashMap::new();
@@ -147,7 +149,6 @@ async fn load_installed_content(
         instance,
         content_set,
         files,
-        files_by_id,
         entries_by_file_id,
         provider_refs_by_file_id,
         origin_provider_by_file_id,
@@ -319,94 +320,56 @@ async fn resolve_modrinth_updates(
     Ok(output)
 }
 
-/// Phase 3 — resolve CurseForge updates for origin-CurseForge content.
+/// Use the same complete-file selection as the content page.
 async fn resolve_curseforge_updates(
     context: &InstalledContentContext,
     state: &State,
 ) -> crate::Result<Vec<ContentUpdate>> {
-    let mut output = Vec::new();
-    if crate::api::curseforge::capability().status
-        != crate::api::curseforge::CurseForgeCapabilityStatus::Ready
-    {
-        return Ok(output);
-    }
-    let _instance_lock =
-        state.lock_instance_content(&context.instance.id).await;
-    let mut target_files_by_project = HashMap::<u32, Option<u32>>::new();
-    for (file_id, refs) in &context.provider_refs_by_file_id {
-        if context
-            .origin_provider_by_file_id
-            .get(file_id)
-            .and_then(|provider| *provider)
-            != Some(ContentProvider::CurseForge)
-        {
-            continue;
-        }
-        let Some(ContentProviderRef::CurseForge {
-            project_id,
-            file_id: Some(current_file_id),
-        }) = refs.iter().find(|reference| {
-            matches!(reference, ContentProviderRef::CurseForge { .. })
-        })
-        else {
-            continue;
-        };
-        let Some(instance_file) = context.files_by_id.get(file_id) else {
-            continue;
-        };
-        let Some(project_type) = project_type_for_file(instance_file) else {
-            continue;
-        };
-        let target_file_id =
-            match target_files_by_project.get(&project_id.get()) {
-                Some(target_file_id) => *target_file_id,
-                None => {
-                    let target_file_id =
-                        crate::api::curseforge::select_latest_compatible_file(
-                            project_id.get(),
-                            Some(context.content_set.game_version.clone()),
-                            (project_type == ProjectType::Mod)
-                                .then(|| {
-                                    context
-                                        .content_set
-                                        .loader
-                                        .curseforge_loader_type()
-                                })
-                                .flatten(),
-                            Some(context.instance.update_channel),
-                        )
-                        .await?
-                        .map(|file| file.id);
-                    target_files_by_project
-                        .insert(project_id.get(), target_file_id);
-                    target_file_id
-                }
-            };
-        let Some(target_file_id) = target_file_id else {
-            continue;
-        };
-        if target_file_id == current_file_id.get() {
-            continue;
-        }
-        let target_file_id = CurseForgeFileId::new(target_file_id)?;
-        if let Some(entry) = context.entries_by_file_id.get(file_id) {
-            let project_id_string = project_id.get().to_string();
-            let target_file_id_string = target_file_id.get().to_string();
-            content_rows::upsert_content_update_check(
-                &entry.id,
-                context.instance.update_channel,
-                Some(ContentProvider::CurseForge),
-                Some(&project_id_string),
-                Some(&target_file_id_string),
-                &state.pool,
+    let candidates = context
+        .files
+        .iter()
+        .filter_map(|file| {
+            CurseForgeUpdateCandidate::from_references(
+                &file.relative_path,
+                project_type_for_file(file)?,
+                context
+                    .origin_provider_by_file_id
+                    .get(&file.id)
+                    .copied()
+                    .flatten(),
+                context
+                    .provider_refs_by_file_id
+                    .get(&file.id)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
             )
-            .await?;
-        }
-        output.push(ContentUpdate::CurseForge {
-            relative_path: instance_file.relative_path.clone(),
-        });
-    }
-
+        })
+        .collect::<Vec<_>>();
+    let updates = resolve_curseforge_content_updates(
+        &context.instance,
+        &context.content_set,
+        &candidates,
+    )
+    .await?;
+    persist_curseforge_update_checks(
+        &context.instance,
+        &context.content_set,
+        &candidates,
+        &updates,
+        state,
+    )
+    .await?;
+    let output = candidates
+        .into_iter()
+        .filter(|candidate| {
+            updates
+                .get(&candidate.relative_path)
+                .is_some_and(|update| update.target.is_some())
+        })
+        .map(|candidate| ContentUpdate::CurseForge {
+            relative_path: candidate.relative_path,
+        })
+        .collect();
     Ok(output)
 }
 

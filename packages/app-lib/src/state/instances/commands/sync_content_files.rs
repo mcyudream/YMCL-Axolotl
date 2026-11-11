@@ -577,8 +577,8 @@ pub(crate) async fn fetch_content_file_updates(
 /// Whether a file may receive Modrinth update suggestions.
 ///
 /// Files installed from Modrinth (origin `Modrinth`) always qualify. Untracked
-/// or locally recorded files (no origin) qualify as long as no CurseForge
-/// reference ties them to a different provider; CurseForge-origin files are
+/// or locally recorded files (no origin) qualify when their primary verified
+/// identity is Modrinth; CurseForge-origin files are
 /// handled by the CurseForge update path instead.
 pub(crate) fn modrinth_update_enabled(
     origin_provider: Option<ContentProvider>,
@@ -589,9 +589,10 @@ pub(crate) fn modrinth_update_enabled(
         Some(ContentProvider::CurseForge)
         | Some(ContentProvider::McArchive)
         | Some(ContentProvider::Local) => false,
-        None => provider_refs.iter().all(|reference| {
-            matches!(reference, ContentProviderRef::Modrinth { .. })
-        }),
+        None => ContentProviderRef::primary_reference(provider_refs, None)
+            .is_none_or(|reference| {
+                reference.provider() == ContentProvider::Modrinth
+            }),
     }
 }
 

@@ -1,5 +1,37 @@
 import type { ContentItem } from '@modrinth/ui'
 
+export function contentItemReference(
+	item: Pick<ContentItem, 'origin_provider' | 'provider_refs'> | null | undefined,
+) {
+	const references = item?.provider_refs ?? []
+	const source = item?.origin_provider
+		? references.find((reference) => reference.provider === item.origin_provider)
+		: undefined
+	if (item?.origin_provider && !source) return null
+	const candidates = source
+		? references.filter(
+				(reference) =>
+					reference.provider === source.provider && reference.project_id === source.project_id,
+			)
+		: references
+	return (
+		candidates.find((reference) =>
+			reference.provider === 'curseforge'
+				? reference.file_id != null
+				: reference.version_id != null || ('file_id' in reference && reference.file_id != null),
+		) ??
+		source ??
+		references[0] ??
+		null
+	)
+}
+
+export function contentItemProvider(
+	item: Pick<ContentItem, 'origin_provider' | 'provider_refs'> | null | undefined,
+) {
+	return item?.origin_provider ?? contentItemReference(item)?.provider ?? null
+}
+
 export function matchesContentItem(
 	item: ContentItem,
 	target: ContentItem,

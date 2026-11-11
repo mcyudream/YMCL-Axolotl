@@ -76,6 +76,20 @@ async fn get_content_snapshot_inner(
         content_rows::get_instance_files(&instance.id, &state.pool).await?
     };
     let mut warnings = Vec::new();
+    if refresh_remote && !progressive {
+        if let Err(error) =
+            super::recognize_content_files::recognize_curseforge_content_files(
+                &instance, &files, state,
+            )
+            .await
+        {
+            warnings.push(InstanceContentWarning {
+                code: "curseforge_recognition_failed".to_string(),
+                message: error.to_string(),
+                provider: Some(ContentProvider::CurseForge),
+            });
+        }
+    }
     if refresh_remote
         && let InstanceLink::CurseForgeModpack {
             project_id,
@@ -457,8 +471,10 @@ async fn get_content_snapshot_inner(
     )
     .await
     {
-        Ok(enriched) => {
-            let enriched = enriched
+        Ok(listing) => {
+            warnings.extend(listing.warnings);
+            let enriched = listing
+                .items
                 .into_iter()
                 .map(|item| (item.file_path.clone(), item))
                 .collect::<HashMap<_, _>>();
@@ -1861,15 +1877,10 @@ fn snapshot_item(
 fn primary_persistent_ref(
     content: &ContentItem,
 ) -> Option<&ContentProviderRef> {
-    content
-        .origin_provider
-        .and_then(|origin| {
-            content
-                .provider_refs
-                .iter()
-                .find(|reference| reference.provider() == origin)
-        })
-        .or_else(|| content.provider_refs.first())
+    ContentProviderRef::primary_reference(
+        &content.provider_refs,
+        content.origin_provider,
+    )
 }
 
 fn snapshot_materialization_state(

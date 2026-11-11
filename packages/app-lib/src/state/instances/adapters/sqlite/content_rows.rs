@@ -393,6 +393,14 @@ pub(crate) async fn update_content_set(
     let modified = content_set.modified.timestamp();
 
     sqlx::query(
+        "DELETE FROM instance_content_update_checks
+         WHERE content_entry_id IN (SELECT id FROM instance_content_entries WHERE content_set_id = ?)
+           AND EXISTS (SELECT 1 FROM instance_content_sets WHERE id = ? AND (game_version != ? OR loader != ?))",
+    )
+    .bind(id).bind(id).bind(game_version).bind(loader)
+    .execute(&mut **tx).await?;
+
+    sqlx::query(
         "
 		UPDATE instance_content_sets
 		SET
@@ -1421,6 +1429,8 @@ pub(crate) async fn invalidate_exact_provider_refs_for_file_in_transaction(
         )
         .await?;
     }
+    sqlx::query("DELETE FROM instance_content_update_checks WHERE content_entry_id IN (SELECT id FROM instance_content_entries WHERE content_set_id = ? AND file_id = ?)")
+        .bind(content_set_id).bind(file_id).execute(&mut **tx).await?;
     sqlx::query(
         "DELETE FROM instance_content_provider_refs
          WHERE content_entry_id IN (
@@ -2115,10 +2125,14 @@ pub(crate) async fn get_content_mutation_target(
 				NULLIF(entry.project_type, ''),
 				NULLIF(member.project_type, '')
 			) AS project_type,
-			COALESCE(origin.provider, member.provider) AS provider,
-			COALESCE(origin.provider_project_id, member.provider_project_id)
+			COALESCE(origin.provider, recognized.provider, member.provider) AS provider,
+			COALESCE(origin.provider_project_id, recognized.provider_project_id, member.provider_project_id)
 				AS provider_project_id,
-			COALESCE(origin.provider_release_id, member.provider_release_id)
+			CASE
+                WHEN origin.provider IS NOT NULL THEN COALESCE(origin.provider_release_id, recognized.provider_release_id)
+                WHEN recognized.provider IS NOT NULL THEN recognized.provider_release_id
+                ELSE member.provider_release_id
+            END
 				AS provider_release_id
 		 FROM instance_content_sets content_set
 		 INNER JOIN instances instance
@@ -2127,16 +2141,29 @@ pub(crate) async fn get_content_mutation_target(
 			ON member.content_set_id = content_set.id AND member.id = ?
 		 LEFT JOIN instance_content_entries entry
 			ON entry.content_set_id = content_set.id
-			AND (entry.id = ? OR entry.id = member.content_entry_id)
+			AND (entry.id = ? OR entry.id = member.content_entry_id OR entry.file_id = ?)
 		 LEFT JOIN instance_files file
 			ON file.instance_id = instance.id
 			AND (file.id = ? OR file.id = entry.file_id)
 		 LEFT JOIN instance_content_provider_refs origin
 			ON origin.content_entry_id = entry.id AND origin.is_origin = 1
+		 LEFT JOIN instance_content_provider_refs recognized
+			ON recognized.rowid = (
+                SELECT ref.rowid FROM instance_content_provider_refs ref
+                WHERE ref.content_entry_id = entry.id
+                    AND ref.provider_release_id IS NOT NULL
+                    AND (origin.provider IS NULL OR (
+                        ref.provider = origin.provider
+                        AND ref.provider_project_id = origin.provider_project_id
+                    ))
+                ORDER BY ref.is_origin DESC, ref.provider, ref.provider_project_id, ref.provider_release_id
+                LIMIT 1
+            )
 		 WHERE instance.id = ?
 			AND (entry.id = ? OR member.id = ? OR file.id = ?)
 		 LIMIT 1",
     )
+    .bind(target_id)
     .bind(target_id)
     .bind(target_id)
     .bind(target_id)

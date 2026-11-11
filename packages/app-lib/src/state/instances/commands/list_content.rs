@@ -1,3 +1,7 @@
+use super::curseforge_content_updates::{
+    CurseForgeUpdateCandidate, cached_curseforge_updates,
+    persist_curseforge_update_checks, resolve_curseforge_content_updates,
+};
 use super::sync_content_files::{
     content_update_cache_key, fetch_content_file_updates,
     installed_modrinth_version_id, instance_content_root, join_content_path,
@@ -9,8 +13,8 @@ use crate::pack::install_from::{PackFileHash, PackFormat};
 use crate::state::instances::adapters::sqlite;
 use crate::state::instances::{
     ContentEntry, ContentOwnershipKind, ContentRequirement, ContentSet,
-    ContentSourceKind, Instance, InstanceFile, InstanceInstallCandidate,
-    InstanceInstallTarget, InstanceLink,
+    ContentSourceKind, Instance, InstanceContentWarning, InstanceFile,
+    InstanceInstallCandidate, InstanceInstallTarget, InstanceLink,
 };
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentFile, ContentItem, ContentItemOwner,
@@ -34,6 +38,11 @@ use std::path::{Component, Path};
 struct ResolvedContentScope {
     instance: Instance,
     content_set: ContentSet,
+}
+
+pub(crate) struct ContentListing {
+    pub items: Vec<ContentItem>,
+    pub warnings: Vec<InstanceContentWarning>,
 }
 
 struct EntryMaps {
@@ -361,6 +370,7 @@ pub(crate) async fn list_content(
         &files,
         cache_behaviour,
         state,
+        true,
     )
     .await
 }
@@ -370,28 +380,60 @@ pub(crate) async fn list_all_content(
     cache_behaviour: Option<CacheBehaviour>,
     refresh_file_updates: bool,
     state: &State,
-) -> crate::Result<Vec<ContentItem>> {
+) -> crate::Result<ContentListing> {
     let resolved =
         resolve_content_scope_with_instance(instance_id, None, &state.pool)
             .await?;
-    let files = content_projects_for_scope(
+    let source_files = if cache_behaviour == Some(CacheBehaviour::CacheOnly) {
+        sqlite::content_rows::get_instance_files(instance_id, &state.pool)
+            .await?
+    } else {
+        sync_instance_content_files(&resolved.instance, state).await?
+    };
+    let mut warnings = Vec::new();
+    let files = match content_projects_for_files(
         &resolved,
+        source_files.clone(),
         cache_behaviour,
         state,
         ContentFilter::All,
         refresh_file_updates,
     )
-    .await?
+    .await
+    {
+        Ok(files) => files,
+        Err(error) if cache_behaviour != Some(CacheBehaviour::CacheOnly) => {
+            warnings.push(InstanceContentWarning {
+                code: "modrinth_update_check_failed".into(),
+                message: error.to_string(),
+                provider: Some(ContentProvider::Modrinth),
+            });
+            content_projects_for_files(
+                &resolved,
+                source_files,
+                Some(CacheBehaviour::CacheOnly),
+                state,
+                ContentFilter::All,
+                false,
+            )
+            .await?
+        }
+        Err(error) => return Err(error),
+    }
     .into_iter()
     .collect::<Vec<_>>();
 
-    content_files_to_content_items(
+    let mut listing = content_files_to_content_listing(
         &resolved.instance,
         &files,
         cache_behaviour,
         state,
+        refresh_file_updates,
     )
-    .await
+    .await?;
+    warnings.append(&mut listing.warnings);
+    listing.warnings = warnings;
+    Ok(listing)
 }
 
 pub(crate) async fn list_content_by_paths(
@@ -469,6 +511,7 @@ async fn list_content_by_paths_internal(
         &files,
         cache_behaviour,
         state,
+        !refresh,
     )
     .await
 }
@@ -509,6 +552,7 @@ pub(crate) async fn list_linked_modpack_content(
             &files,
             cache_behaviour,
             state,
+            true,
         )
         .await;
     }
@@ -532,6 +576,7 @@ pub(crate) async fn list_linked_modpack_content(
             &files,
             cache_behaviour,
             state,
+            true,
         )
         .await;
     }
@@ -568,6 +613,7 @@ pub(crate) async fn list_linked_modpack_content(
         &files,
         cache_behaviour,
         state,
+        true,
     )
     .await
 }
@@ -1564,39 +1610,75 @@ async fn reconcile_hash_matched_entries(
     file_info_by_hash: &HashMap<String, crate::state::ModrinthHashMatch>,
     state: &State,
 ) -> crate::Result<bool> {
-    let _instance_lock =
-        state.lock_instance_content(&resolved.instance.id).await;
-    let entry_maps =
-        load_entry_maps(&resolved.content_set.id, &state.pool).await?;
+    let references = file_info_by_hash
+        .iter()
+        .filter_map(|(hash, metadata)| {
+            Some((
+                hash.clone(),
+                ContentProviderRef::Modrinth {
+                    project_id: ModrinthProjectId::new(
+                        metadata.project_id.clone(),
+                    )
+                    .ok()?,
+                    version_id: Some(
+                        ModrinthVersionId::new(metadata.version_id.clone())
+                            .ok()?,
+                    ),
+                },
+            ))
+        })
+        .collect();
+    reconcile_exact_provider_matches(
+        &resolved.instance.id,
+        &resolved.content_set.id,
+        files,
+        &references,
+        state,
+    )
+    .await
+}
+
+/// Enrich file identity without changing install origin, ownership or pack defaults.
+pub(super) async fn reconcile_exact_provider_matches(
+    instance_id: &str,
+    content_set_id: &str,
+    files: &[InstanceFile],
+    references: &HashMap<String, ContentProviderRef>,
+    state: &State,
+) -> crate::Result<bool> {
+    let _instance_lock = state.lock_instance_content(instance_id).await;
+    if sqlite::content_rows::get_applied_content_set(instance_id, &state.pool)
+        .await?
+        .is_none_or(|set| set.id != content_set_id)
+    {
+        return Ok(false);
+    }
+    let entry_maps = load_entry_maps(content_set_id, &state.pool).await?;
+    let current_files =
+        sqlite::content_rows::get_instance_files(instance_id, &state.pool)
+            .await?
+            .into_iter()
+            .map(|file| (file.id.clone(), file))
+            .collect::<HashMap<_, _>>();
     let candidates = files
         .iter()
         .filter_map(|file| {
-            if file.missing {
+            let current = current_files.get(&file.id)?;
+            if file.missing
+                || current.missing
+                || file.sha1 != current.sha1
+                || file.size != current.size
+                || file.relative_path != current.relative_path
+            {
                 return None;
             }
-            let metadata = file_info_by_hash.get(&file.sha1)?;
-            let provider_ref = ContentProviderRef::Modrinth {
-                project_id: ModrinthProjectId::new(metadata.project_id.clone())
-                    .ok()?,
-                version_id: Some(
-                    ModrinthVersionId::new(metadata.version_id.clone()).ok()?,
-                ),
-            };
+            let provider_ref = references.get(&file.sha1)?;
             let provider_refs = entry_maps
                 .provider_refs_by_file_id
                 .get(&file.id)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            if provider_refs.iter().any(|reference| {
-                matches!(
-                    reference,
-                    ContentProviderRef::Modrinth {
-                        project_id,
-                        version_id: Some(version_id),
-                    } if project_id.as_str() == metadata.project_id
-                        && version_id.as_str() == metadata.version_id
-                )
-            }) {
+            if provider_refs.contains(provider_ref) {
                 return None;
             }
             let project_type = project_type_for_file(file)?;
@@ -1610,8 +1692,8 @@ async fn reconcile_hash_matched_entries(
 
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlite::content_rows::ensure_content_write_parents(
-        &resolved.instance.id,
-        &resolved.content_set.id,
+        instance_id,
+        content_set_id,
         &mut tx,
     )
     .await?;
@@ -1621,8 +1703,8 @@ async fn reconcile_hash_matched_entries(
         } else {
             sqlite::content_rows::upsert_content_entry_from_parts_in_transaction(
                 sqlite::content_rows::UpsertContentEntry {
-                    instance_id: &resolved.instance.id,
-                    content_set_id: &resolved.content_set.id,
+                    instance_id,
+                    content_set_id,
                     file_id: Some(&file.id),
                     project_type: *project_type,
                     source_kind: ContentSourceKind::Local,
@@ -1644,9 +1726,17 @@ async fn reconcile_hash_matched_entries(
             &mut tx,
         )
         .await?;
+        // An unidentified pack default can gain a download identity only when
+        // these exact bytes are still the original default. Never replace an
+        // existing default or turn an override into the default version.
+        sqlx::query("UPDATE instance_pack_members SET provider = ?, provider_project_id = ?, provider_release_id = ? WHERE content_entry_id = ? AND provider IS NULL AND expected_sha1 = ? AND override_kind IN ('none', 'disabled')")
+            .bind(provider_ref.provider().as_str())
+            .bind(provider_ref.database_project_id())
+            .bind(provider_ref.database_release_id())
+            .bind(&entry_id).bind(&file.sha1).execute(&mut *tx).await?;
     }
     sqlite::content_rows::bump_content_set_revision_in_transaction(
-        &resolved.content_set.id,
+        content_set_id,
         &mut tx,
     )
     .await?;
@@ -1705,7 +1795,32 @@ async fn content_files_to_content_items(
     files: &[(String, ContentFile)],
     cache_behaviour: Option<CacheBehaviour>,
     state: &State,
+    check_curseforge_updates: bool,
 ) -> crate::Result<Vec<ContentItem>> {
+    let listing = content_files_to_content_listing(
+        instance,
+        files,
+        cache_behaviour,
+        state,
+        check_curseforge_updates,
+    )
+    .await?;
+    if let Some(warning) = listing.warnings.first() {
+        return Err(
+            crate::ErrorKind::InputError(warning.message.clone()).into()
+        );
+    }
+    Ok(listing.items)
+}
+
+async fn content_files_to_content_listing(
+    instance: &Instance,
+    files: &[(String, ContentFile)],
+    cache_behaviour: Option<CacheBehaviour>,
+    state: &State,
+    check_curseforge_updates: bool,
+) -> crate::Result<ContentListing> {
+    let mut warnings = Vec::new();
     let mut provider_refs_by_path =
         HashMap::<String, Vec<ContentProviderRef>>::new();
     let mut origin_provider_by_path = HashMap::<String, ContentProvider>::new();
@@ -1718,6 +1833,7 @@ async fn content_files_to_content_items(
          INNER JOIN instance_content_provider_refs ref
             ON ref.content_entry_id = entry.id
          WHERE file.instance_id = ?
+           AND entry.content_set_id = (SELECT applied_content_set_id FROM instances WHERE id = file.instance_id)
          ORDER BY file.relative_path, ref.is_origin DESC, ref.provider,
             ref.provider_project_id, ref.provider_release_id IS NULL,
             ref.provider_release_id",
@@ -1769,19 +1885,94 @@ async fn content_files_to_content_items(
     {
         HashMap::new()
     } else {
-        crate::api::curseforge::get_projects(
+        match crate::api::curseforge::get_projects(
             curseforge_project_ids.into_iter().collect(),
         )
-        .await?
-        .into_iter()
-        .map(|project| (project.id.to_string(), project))
-        .collect::<HashMap<_, _>>()
+        .await
+        {
+            Ok(projects) => projects
+                .into_iter()
+                .map(|project| (project.id.to_string(), project))
+                .collect(),
+            Err(error) => {
+                warnings.push(InstanceContentWarning {
+                    code: "curseforge_metadata_unavailable".into(),
+                    message: error.to_string(),
+                    provider: Some(ContentProvider::CurseForge),
+                });
+                HashMap::new()
+            }
+        }
     };
     let content_set = sqlite::content_rows::get_applied_content_set(
         &instance.id,
         &state.pool,
     )
     .await?;
+    let curseforge_candidates = files
+        .iter()
+        .filter_map(|(path, file)| {
+            CurseForgeUpdateCandidate::from_references(
+                path,
+                file.project_type,
+                origin_provider_by_path.get(path).copied(),
+                provider_refs_by_path
+                    .get(path)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let curseforge_updates = if !check_curseforge_updates
+        || cache_behaviour == Some(CacheBehaviour::CacheOnly)
+    {
+        HashMap::new()
+    } else if let Some(content_set) = content_set.as_ref() {
+        match resolve_curseforge_content_updates(
+            instance,
+            content_set,
+            &curseforge_candidates,
+        )
+        .await
+        {
+            Ok(updates) => updates,
+            Err(error) => {
+                warnings.push(InstanceContentWarning {
+                    code: "curseforge_update_check_failed".into(),
+                    message: error.to_string(),
+                    provider: Some(ContentProvider::CurseForge),
+                });
+                HashMap::new()
+            }
+        }
+    } else {
+        HashMap::new()
+    };
+    if check_curseforge_updates
+        && cache_behaviour != Some(CacheBehaviour::CacheOnly)
+        && let Some(content_set) = content_set.as_ref()
+    {
+        persist_curseforge_update_checks(
+            instance,
+            content_set,
+            &curseforge_candidates,
+            &curseforge_updates,
+            state,
+        )
+        .await?;
+    }
+    let cached_curseforge_updates =
+        if let Some(content_set) = content_set.as_ref() {
+            cached_curseforge_updates(
+                instance,
+                content_set,
+                &curseforge_candidates,
+                state,
+            )
+            .await?
+        } else {
+            HashMap::new()
+        };
     let project_ids = files
         .iter()
         .filter_map(|(_, file)| {
@@ -1801,14 +1992,33 @@ async fn content_files_to_content_items(
             version_ids.insert(version_id.to_string());
         }
     }
-    let meta = resolve_metadata(
+    let meta = match resolve_metadata(
         &project_ids,
         &version_ids,
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
     )
-    .await?;
+    .await
+    {
+        Ok(meta) => meta,
+        Err(error) if cache_behaviour != Some(CacheBehaviour::CacheOnly) => {
+            warnings.push(InstanceContentWarning {
+                code: "modrinth_metadata_unavailable".into(),
+                message: error.to_string(),
+                provider: Some(ContentProvider::Modrinth),
+            });
+            resolve_metadata(
+                &project_ids,
+                &version_ids,
+                Some(CacheBehaviour::CacheOnly),
+                &state.pool,
+                &state.api_semaphore,
+            )
+            .await?
+        }
+        Err(error) => return Err(error),
+    };
     let instance_path = instance_content_root(&state.directories, instance)?;
     let paths = files
         .iter()
@@ -1854,7 +2064,11 @@ async fn content_files_to_content_items(
                 })
                 .unwrap_or_default();
             let origin_provider = origin_provider_by_path.get(path).copied();
-            let curseforge_ref = provider_refs.iter().find(|reference| {
+            let curseforge_ref = ContentProviderRef::primary_reference(
+                &provider_refs,
+                origin_provider,
+            )
+            .filter(|reference| {
                 reference.provider() == ContentProvider::CurseForge
             });
             let curseforge_project = curseforge_ref.and_then(|reference| {
@@ -1865,87 +2079,53 @@ async fn content_files_to_content_items(
                 };
                 curseforge_projects.get(&project_id.get().to_string())
             });
-            let curseforge_file = curseforge_ref.and_then(|reference| {
-                let ContentProviderRef::CurseForge { file_id, .. } = reference
-                else {
-                    return None;
-                };
-                let file_id = file_id.as_ref()?.get();
-                curseforge_project?
-                    .latest_files
-                    .iter()
-                    .find(|file| file.id == file_id)
-            });
-            let curseforge_update_id = curseforge_ref.and_then(|reference| {
-                if origin_provider != Some(ContentProvider::CurseForge) {
-                    return None;
-                }
-                let ContentProviderRef::CurseForge { file_id, .. } = reference
-                else {
-                    return None;
-                };
-                let current_file_id = file_id.as_ref()?.get();
-                let content_set = content_set.as_ref()?;
-                let loader_type = content_set.loader.curseforge_loader_type();
-                let release_type_allowed =
-                    |release_type: u32| match instance.update_channel {
-                        ReleaseChannel::Release => release_type == 1,
-                        ReleaseChannel::Beta => release_type <= 2,
-                        ReleaseChannel::Alpha => true,
+            let curseforge_resolution = curseforge_updates.get(path);
+            let curseforge_file = curseforge_resolution
+                .map(|resolution| &resolution.current)
+                .or_else(|| {
+                    let ContentProviderRef::CurseForge {
+                        file_id: Some(file_id),
+                        ..
+                    } = curseforge_ref?
+                    else {
+                        return None;
                     };
-
-                if let Some(index) = curseforge_project?
-                    .latest_files_indexes
-                    .iter()
-                    .find(|index| {
-                        index.game_version == content_set.game_version
-                            && (file.project_type != ProjectType::Mod
-                                || index.mod_loader == loader_type)
-                            && release_type_allowed(index.release_type)
+                    curseforge_project?
+                        .latest_files
+                        .iter()
+                        .find(|file| file.id == file_id.get())
+                });
+            let curseforge_update =
+                curseforge_resolution.and_then(|resolution| {
+                    let target = resolution.target.as_ref()?;
+                    Some(ContentItemUpdate::CurseForge {
+                        project_id: crate::state::CurseForgeProjectId::new(
+                            resolution.current.mod_id,
+                        )
+                        .ok()?,
+                        current_file_id: crate::state::CurseForgeFileId::new(
+                            resolution.current.id,
+                        )
+                        .ok()?,
+                        target_file_id: crate::state::CurseForgeFileId::new(
+                            target.id,
+                        )
+                        .ok()?,
                     })
-                {
-                    return (index.file_id != current_file_id)
-                        .then(|| index.file_id.to_string());
-                }
-
-                let fallback = curseforge_project?.latest_files.iter().find(
-                    |candidate| {
-                        if !candidate.is_available
-                            || !release_type_allowed(candidate.release_type)
-                        {
-                            return false;
-                        }
-                        let has_game_version = candidate
-                            .game_versions
-                            .iter()
-                            .any(|value| value == &content_set.game_version);
-                        if !has_game_version {
-                            return false;
-                        }
-                        if file.project_type != ProjectType::Mod {
-                            return true;
-                        }
-                        candidate.game_versions.iter().any(|value| {
-                            match curseforge_loader_from_name(value) {
-                                Some("forge") => loader_type == Some(1),
-                                Some("fabric") => loader_type == Some(4),
-                                Some("quilt") => loader_type == Some(5),
-                                Some("neoforge") => loader_type == Some(6),
-                                _ => false,
-                            }
-                        })
-                    },
-                )?;
-                (fallback.id != current_file_id)
-                    .then(|| fallback.id.to_string())
-            });
-            let project = file.modrinth.as_ref().and_then(|metadata| {
+                });
+            let curseforge_update = curseforge_update
+                .or_else(|| cached_curseforge_updates.get(path).cloned());
+            let use_curseforge_identity = curseforge_ref.is_some();
+            let modrinth_metadata =
+                file.modrinth.as_ref().filter(|_| !use_curseforge_identity);
+            let project = modrinth_metadata.and_then(|metadata| {
                 meta.projects
                     .iter()
                     .find(|project| project.id == metadata.project_id.as_str())
             });
-            let installed_version_id =
-                installed_modrinth_version_id(&provider_refs);
+            let installed_version_id = (!use_curseforge_identity)
+                .then(|| installed_modrinth_version_id(&provider_refs))
+                .flatten();
             let version = installed_version_id
                 .as_ref()
                 .and_then(|version_id| {
@@ -1954,7 +2134,7 @@ async fn content_files_to_content_items(
                         .find(|version| version.id == version_id.as_str())
                 })
                 .or_else(|| {
-                    file.modrinth.as_ref().and_then(|metadata| {
+                    modrinth_metadata.and_then(|metadata| {
                         meta.versions.iter().find(|version| {
                             version.id == metadata.version_id.as_str()
                         })
@@ -1968,7 +2148,7 @@ async fn content_files_to_content_items(
                         .find(|version| version.id == version_id.as_str())
                 })
                 .or_else(|| {
-                    file.modrinth.as_ref().and_then(|metadata| {
+                    modrinth_metadata.and_then(|metadata| {
                         meta.versions_v3.iter().find(|version| {
                             version.id == metadata.version_id.as_str()
                         })
@@ -2039,6 +2219,31 @@ async fn content_files_to_content_items(
                         })
                     })
                     .or_else(|| {
+                        use_curseforge_identity
+                            .then(|| {
+                                let ContentProviderRef::CurseForge {
+                                    project_id,
+                                    ..
+                                } = curseforge_ref?
+                                else {
+                                    return None;
+                                };
+                                Some(ContentItemProject {
+                                    id: project_id.get().to_string(),
+                                    slug: None,
+                                    title: local_mod
+                                        .as_ref()
+                                        .and_then(|meta| meta.name.clone())
+                                        .unwrap_or_else(|| {
+                                            file.file_name.clone()
+                                        }),
+                                    icon_url: cached_icon.clone(),
+                                    license: None,
+                                })
+                            })
+                            .flatten()
+                    })
+                    .or_else(|| {
                         local_mod.as_ref().map(|meta| ContentItemProject {
                             id: format!("local:{}", meta.mod_id),
                             slug: Some(meta.mod_id.clone()),
@@ -2087,6 +2292,27 @@ async fn content_files_to_content_items(
                         })
                     })
                     .or_else(|| {
+                        if !use_curseforge_identity {
+                            return None;
+                        }
+                        let ContentProviderRef::CurseForge {
+                            file_id: Some(file_id),
+                            ..
+                        } = curseforge_ref?
+                        else {
+                            return None;
+                        };
+                        Some(ContentItemVersion {
+                            id: file_id.get().to_string(),
+                            version_number: local_mod
+                                .as_ref()
+                                .and_then(|meta| meta.version.clone())
+                                .unwrap_or_else(|| file_id.get().to_string()),
+                            file_name: file.file_name.clone(),
+                            date_published: None,
+                        })
+                    })
+                    .or_else(|| {
                         local_mod.as_ref().and_then(|meta| {
                             meta.version.clone().map(|v| ContentItemVersion {
                                 id: format!("local:{}", meta.mod_id),
@@ -2119,29 +2345,7 @@ async fn content_files_to_content_items(
                             })
                         })
                     }),
-                update: file.update.clone().or_else(|| {
-                    curseforge_update_id.and_then(|target| {
-                        let reference =
-                            provider_refs.iter().find_map(|reference| {
-                                match reference {
-                                    ContentProviderRef::CurseForge {
-                                        project_id,
-                                        file_id: Some(current_file_id),
-                                    } => Some((*project_id, *current_file_id)),
-                                    _ => None,
-                                }
-                            })?;
-                        Some(ContentItemUpdate::CurseForge {
-                            project_id: reference.0,
-                            current_file_id: reference.1,
-                            target_file_id:
-                                crate::state::CurseForgeFileId::new(
-                                    target.parse().ok()?,
-                                )
-                                .ok()?,
-                        })
-                    })
-                }),
+                update: file.update.clone().or(curseforge_update),
                 date_added: modification_times[index].clone(),
                 provider_refs,
                 origin_provider,
@@ -2159,7 +2363,7 @@ async fn content_files_to_content_items(
         .collect::<Vec<_>>();
     sort_content_items(&mut items);
 
-    Ok(items)
+    Ok(ContentListing { items, warnings })
 }
 
 fn rollback_for_content_file(

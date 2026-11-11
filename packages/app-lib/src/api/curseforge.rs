@@ -5744,7 +5744,10 @@ pub async fn update_installed_file(
             ON content_set.id = entry.content_set_id
          INNER JOIN instances instance ON instance.id = file.instance_id
          WHERE file.instance_id = ? AND file.relative_path = ?
-         ORDER BY entry.modified_at DESC
+           AND content_set.id = instance.applied_content_set_id
+           AND ref.provider_release_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM instance_content_provider_refs origin WHERE origin.content_entry_id = entry.id AND origin.is_origin = 1 AND (origin.provider != 'curseforge' OR origin.provider_project_id != ref.provider_project_id))
+         ORDER BY ref.is_origin DESC, entry.modified_at DESC
          LIMIT 1",
     )
     .bind(instance_id)
@@ -5782,21 +5785,28 @@ pub async fn update_installed_file(
     let mod_loader_type = (project_type == "mod")
         .then(|| loader_type(&loader))
         .flatten();
-    let latest = select_latest_compatible_file(
-        project_id,
-        Some(game_version.clone()),
-        mod_loader_type,
-        Some(update_channel),
-    )
-    .await?
-    .ok_or_else(|| {
+    let current_file_id = current_file_id.ok_or_else(|| {
         ErrorKind::InputError(
-            "No compatible CurseForge update was found".to_string(),
+            "The selected CurseForge file has no verified version".to_string(),
         )
     })?;
-    if current_file_id == Some(latest.id) {
+    let current = get_file(project_id, current_file_id).await?;
+    let files = get_files(
+        project_id,
+        CurseForgeFilesRequest {
+            game_version: Some(game_version.clone()),
+            mod_loader_type: None,
+            game_version_type_id: None,
+            index: 0,
+            page_size: MAX_PAGE_SIZE,
+        },
+    )
+    .await?;
+    let Some(latest) = crate::state::instances::commands::curseforge_content_updates::select_update(
+        &files.files, &current, &game_version, mod_loader_type, update_channel,
+    ) else {
         return Ok(CurseForgeInstallResult::default());
-    }
+    };
 
     install_selected_file(
         instance_id,
@@ -5829,8 +5839,12 @@ pub async fn switch_installed_file_version(
             ON ref.content_entry_id = entry.id AND ref.provider = 'curseforge'
          INNER JOIN instance_content_sets content_set
             ON content_set.id = entry.content_set_id
+         INNER JOIN instances instance ON instance.id = file.instance_id
          WHERE file.instance_id = ? AND file.relative_path = ?
-         ORDER BY entry.modified_at DESC
+           AND content_set.id = instance.applied_content_set_id
+           AND ref.provider_release_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM instance_content_provider_refs origin WHERE origin.content_entry_id = entry.id AND origin.is_origin = 1 AND (origin.provider != 'curseforge' OR origin.provider_project_id != ref.provider_project_id))
+         ORDER BY ref.is_origin DESC, entry.modified_at DESC
          LIMIT 1",
     )
     .bind(instance_id)
@@ -7318,34 +7332,6 @@ fn manual_download_target_folder(
     .into())
 }
 
-pub(crate) async fn select_latest_compatible_file(
-    project_id: u32,
-    game_version: Option<String>,
-    mod_loader_type: Option<u32>,
-    release_channel: Option<ReleaseChannel>,
-) -> crate::Result<Option<CurseForgeFile>> {
-    let response = get_files(
-        project_id,
-        CurseForgeFilesRequest {
-            game_version,
-            mod_loader_type,
-            game_version_type_id: None,
-            index: 0,
-            page_size: MAX_PAGE_SIZE,
-        },
-    )
-    .await?;
-
-    Ok(response.files.into_iter().find(|file| {
-        file.is_available
-            && match release_channel {
-                Some(ReleaseChannel::Release) => file.release_type == 1,
-                Some(ReleaseChannel::Beta) => file.release_type <= 2,
-                Some(ReleaseChannel::Alpha) | None => true,
-            }
-    }))
-}
-
 /// Why a dependency file was selected. This makes fallback provenance
 /// explicit rather than allowing it to look like a native declaration.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -7785,7 +7771,7 @@ fn dependency_release_rank(file: &CurseForgeFile) -> u8 {
 }
 
 /// Checks unfiltered fallback candidates against the instance target.
-fn file_matches_dependency_target(
+pub(crate) fn file_matches_dependency_target(
     file: &CurseForgeFile,
     game_version: Option<&str>,
     mod_loader_type: Option<u32>,
@@ -9088,7 +9074,7 @@ async fn read_curseforge_verification_chunk(
     }
 }
 
-async fn fingerprint_and_sha1_file(
+pub(crate) async fn fingerprint_and_sha1_file(
     path: &Path,
     cancellation: Option<&CancellationToken>,
 ) -> crate::Result<(u64, String, u32)> {

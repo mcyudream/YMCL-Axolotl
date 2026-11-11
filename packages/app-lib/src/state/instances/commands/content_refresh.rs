@@ -306,6 +306,27 @@ async fn refresh_online_content(
     context: &RefreshContext,
     state: &State,
 ) -> crate::Result<()> {
+    let instance =
+        instance_rows::get_instance_by_id(&context.instance_id, &state.pool)
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError("Unknown instance".into())
+            })?;
+    let files =
+        super::super::adapters::sqlite::content_rows::get_instance_files(
+            &context.instance_id,
+            &state.pool,
+        )
+        .await?;
+    let mut provider_errors = Vec::new();
+    if let Err(error) =
+        super::recognize_content_files::recognize_curseforge_content_files(
+            &instance, &files, state,
+        )
+        .await
+    {
+        provider_errors.push(error.to_string());
+    }
     let paths = sqlx::query_scalar::<_, String>("SELECT relative_path FROM instance_content_refresh_files WHERE instance_id = ? AND state = 'local_ready' ORDER BY relative_path")
         .bind(&context.instance_id).fetch_all(&context.pool).await?;
     for paths in paths.chunks(8) {
@@ -345,8 +366,27 @@ async fn refresh_online_content(
         context.notify().await;
     }
     context.check_cancelled()?;
-    super::content_snapshot::finish_content_refresh(&context.instance_id, state)
+    if let Err(error) =
+        super::curseforge_content_updates::refresh_curseforge_content_updates(
+            &instance, &files, state,
+        )
         .await
+    {
+        provider_errors.push(error.to_string());
+    }
+    if let Err(error) = super::content_snapshot::finish_content_refresh(
+        &context.instance_id,
+        state,
+    )
+    .await
+    {
+        provider_errors.push(error.to_string());
+    }
+    if provider_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(crate::ErrorKind::InputError(provider_errors.join("\n")).into())
+    }
 }
 
 pub async fn cancel_content_refresh(instance_id: &str) -> crate::Result<()> {
