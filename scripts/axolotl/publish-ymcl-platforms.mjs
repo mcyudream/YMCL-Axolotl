@@ -13,6 +13,7 @@ export const updatePlatforms = [{ origin: 'https://www.yudream.online', secret: 
 const pluginPath = '/api/plugins/ymcl-content'
 const expectedTargets = ['windows-x86_64']
 const retryableUploadErrors = new Set([7, 18, 28, 35, 52, 55, 56, 92, 'ECONNRESET', 'ETIMEDOUT'])
+const retryableUploadStatuses = new Set([408, 413, 429, 500, 502, 503, 504, 554])
 
 function failureDetails(error, secrets = []) {
 	const seen = new Set()
@@ -130,7 +131,8 @@ function canUseVerifiedReleaseUrl(error) {
 		const current = pending.pop()
 		if (!current || seen.has(current)) continue
 		seen.add(current)
-		if (retryableUploadErrors.has(current.code)) return true
+		if (retryableUploadErrors.has(current.code) || retryableUploadStatuses.has(current.status))
+			return true
 		pending.push(current.cause, ...(current.errors ?? []))
 	}
 	return false
@@ -265,7 +267,9 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 				`[${new URL(origin).hostname}] HTTP ${response.status} in ${Date.now() - started}ms`,
 			)
 			if (optional && response.status === 404) return null
-			if (!response.ok || response.status === 204) throw new Error(`HTTP ${response.status}`)
+			if (!response.ok || response.status === 204) {
+				throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
+			}
 			const data = await response.json()
 			if (data.code !== undefined && data.code !== 200 && data.code !== 0) {
 				throw new Error('API rejected request')

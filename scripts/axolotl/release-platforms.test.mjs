@@ -232,6 +232,7 @@ function platformMock({
 	stringSizes = false,
 	portableUrl,
 	resetUpload = false,
+	uploadStatus,
 } = {}) {
 	const state = new Map()
 	const requests = []
@@ -277,6 +278,7 @@ function platformMock({
 				throw new TypeError('fetch failed', {
 					cause: Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
 				})
+			if (uploadStatus) return Response.json({ message: 'upload failed' }, { status: uploadStatus })
 			const body = options.body
 			assert.deepEqual(Buffer.from(await body.get('file').arrayBuffer()), bytes)
 			const uploaded = Object.fromEntries(
@@ -336,6 +338,9 @@ test('portable downloads register the versioned GitHub URL without a second larg
 		/portable download URL or metadata mismatch/,
 	)
 	assert.equal(invalid.state.get(updatePlatforms[0].origin).enabled, false)
+	const rejected = platformMock({ uploadStatus: 554 })
+	await publishPlatforms(release, { YUDREAM_API_KEY: 'test-yudream' }, rejected.fetcher)
+	assert.equal(rejected.state.get(updatePlatforms[0].origin).enabled, true)
 })
 
 test('uploads to YuDream and safely reuses verified published artifacts', async () => {
