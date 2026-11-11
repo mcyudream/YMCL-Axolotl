@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -12,6 +13,7 @@ import {
 	publishPlatforms,
 	publishPlatform,
 	updatePlatforms,
+	uploadMultipart,
 } from './publish-ymcl-platforms.mjs'
 
 const version = '1.9.7-beta.10'
@@ -44,6 +46,91 @@ const release = {
 	externalUrl: `https://github.com/mcyudream/YMCL-Axolotl/releases/tag/${tag}`,
 	artifacts,
 }
+
+async function withUploadServer(handler, run) {
+	const errors = []
+	const server = createServer(async (request, response) => {
+		try {
+			const chunks = []
+			for await (const chunk of request) chunks.push(chunk)
+			const body = await new Response(Buffer.concat(chunks), {
+				headers: { 'Content-Type': request.headers['content-type'] },
+			}).formData()
+			await handler(request, response, body)
+		} catch (error) {
+			errors.push(error)
+			response.writeHead(500).end('{}')
+		}
+	})
+	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+	try {
+		await run(`http://127.0.0.1:${server.address().port}/upload`)
+		assert.deepEqual(errors, [])
+	} finally {
+		server.closeAllConnections()
+		await new Promise((resolve) => server.close(resolve))
+	}
+}
+
+test('multipart uploads retry resets and transient HTTP failures without losing file data', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-upload-transport-test-'))
+	try {
+		const file = join(directory, 'binary; "quoted".zip')
+		await writeFile(file, bytes)
+		const body = new FormData()
+		body.append('file', new Blob([bytes]), 'binary; "quoted".zip')
+		body.append('id', 'test-artifact')
+		body.append('signature', signature)
+		let requests = 0
+		await withUploadServer(
+			async (request, response, uploaded) => {
+				requests++
+				assert.equal(request.headers['x-api-key'], 'test-upload-key')
+				assert.equal(uploaded.get('id'), 'test-artifact')
+				assert.equal(uploaded.get('signature'), signature)
+				assert.equal(uploaded.get('file').name, 'binary; "quoted".zip')
+				assert.deepEqual(Buffer.from(await uploaded.get('file').arrayBuffer()), bytes)
+				if (requests === 1) request.socket.destroy()
+				else response.writeHead(requests === 2 ? 503 : 200).end('{"uploaded":true}')
+			},
+			async (url) => {
+				const response = await uploadMultipart(url, 'test-upload-key', body, file)
+				assert.equal(response.status, 200)
+				assert.deepEqual(await response.json(), { uploaded: true })
+			},
+		)
+		assert.equal(requests, 3)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
+
+test('multipart uploads reject invalid credentials and do not retry auth errors or follow redirects', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'ymcl-upload-rejection-test-'))
+	try {
+		const file = join(directory, 'binary.zip')
+		await writeFile(file, bytes)
+		const body = new FormData()
+		body.append('file', new Blob([bytes]), 'binary.zip')
+		let requests = 0
+		await withUploadServer(
+			(request, response) => {
+				requests++
+				assert.equal(request.url, '/upload')
+				response.writeHead(requests === 1 ? 403 : 302, { Location: '/redirect-target' }).end('{}')
+			},
+			async (url) => {
+				await assert.rejects(uploadMultipart(url, 'invalid\ncredential', body, file), /credential/)
+				assert.equal(requests, 0)
+				assert.equal((await uploadMultipart(url, 'test-upload-key', body, file)).status, 403)
+				assert.equal((await uploadMultipart(url, 'test-upload-key', body, file)).status, 302)
+			},
+		)
+		assert.equal(requests, 2)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+})
 
 test('production secrets fail closed without printing secret values', () => {
 	const environment = Object.fromEntries(releaseSecrets.map((name) => [name, 'test-private-value']))

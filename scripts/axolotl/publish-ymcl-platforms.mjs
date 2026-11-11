@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createWriteStream, openAsBlob } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -160,6 +161,60 @@ export async function downloadArtifact(artifact, directory, fetcher = fetch) {
 	}
 }
 
+export async function uploadMultipart(url, apiKey, body, file) {
+	if (/[\r\n]/.test(apiKey)) throw new Error('Invalid upload credential')
+	const quote = (value) => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+	const args = [
+		'--silent',
+		'--show-error',
+		'--connect-timeout',
+		'30',
+		'--max-time',
+		'600',
+		'--header',
+		'@-',
+		'--write-out',
+		'\n%{http_code}',
+	]
+	for (const [name, value] of body) {
+		if (name === 'file') {
+			args.push('--form', `file=@${quote(file)};filename=${quote(value.name)}`)
+		} else {
+			args.push('--form-string', `${name}=${value}`)
+		}
+	}
+	args.push('--url', url)
+	const attempts = 4
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		let response
+		try {
+			const output = await new Promise((resolve, reject) => {
+				const child = execFile(
+					'curl',
+					args,
+					{ timeout: 610_000, maxBuffer: 2 * 1024 * 1024 },
+					(error, stdout) => (error ? reject(error) : resolve(stdout)),
+				)
+				child.stdin.on('error', () => {})
+				child.stdin.end(`Accept: application/json\nX-API-Key: ${apiKey}\n`)
+			})
+			const boundary = output.lastIndexOf('\n')
+			const status = Number(output.slice(boundary + 1))
+			response = new Response([204, 205, 304].includes(status) ? null : output.slice(0, boundary), {
+				status,
+			})
+			if (![408, 429, 500, 502, 503, 504].includes(response.status) || attempt === attempts)
+				return response
+		} catch (error) {
+			if (![7, 18, 28, 35, 52, 55, 56].includes(error.code) || attempt === attempts) throw error
+		}
+		console.log(
+			`[${new URL(url).hostname}] Upload interrupted${response ? ` (HTTP ${response.status})` : ''}; retrying (${attempt}/${attempts - 1})`,
+		)
+		await new Promise((resolve) => setTimeout(resolve, attempt * 1000))
+	}
+}
+
 export async function publishPlatform(platform, apiKey, release, artifactFile, fetcher = fetch) {
 	const { origin, secret } = platform
 	if (!updatePlatforms.some((site) => site.origin === origin))
@@ -169,14 +224,14 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 	const releasePath = `${admin}/${encodeURIComponent(release.version)}`
 	async function request(
 		path,
-		{ method = 'GET', body, publicRequest = false, optional = false } = {},
+		{ method = 'GET', body, file, publicRequest = false, optional = false } = {},
 	) {
 		const multipart = body instanceof FormData
 		const started = Date.now()
 		const context = `${origin}: ${method} ${path}`
 		console.log(`[${new URL(origin).hostname}] ${method} ${path}`)
 		try {
-			const response = await fetcher(`${origin}${path}`, {
+			const options = {
 				method,
 				headers: {
 					Accept: 'application/json',
@@ -186,7 +241,11 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 				...(body ? { body: multipart ? body : JSON.stringify(body) } : {}),
 				signal: AbortSignal.timeout(multipart ? 10 * 60_000 : 30_000),
 				redirect: 'error',
-			})
+			}
+			const response =
+				multipart && file && fetcher === fetch
+					? await uploadMultipart(`${origin}${path}`, apiKey, body, file)
+					: await fetcher(`${origin}${path}`, options)
 			console.log(
 				`[${new URL(origin).hostname}] HTTP ${response.status} in ${Date.now() - started}ms`,
 			)
@@ -253,7 +312,7 @@ export async function publishPlatform(platform, apiKey, release, artifactFile, f
 			}
 			body.append('id', artifact.filename)
 			body.append('targetPlatforms', (artifact.targetPlatforms ?? []).join(','))
-			staged = await request(`${releasePath}/artifacts/upload`, { method: 'POST', body })
+			staged = await request(`${releasePath}/artifacts/upload`, { method: 'POST', body, file })
 			if (
 				!staged.artifacts?.some(
 					(actual) => matchesArtifact(actual, artifact) && actual.hostedLocally,
