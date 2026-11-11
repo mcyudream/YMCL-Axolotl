@@ -167,6 +167,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 	const args = [
 		'--silent',
 		'--show-error',
+		'--http1.1',
 		'--connect-timeout',
 		'30',
 		'--max-time',
@@ -206,7 +207,7 @@ export async function uploadMultipart(url, apiKey, body, file) {
 			if (![408, 429, 500, 502, 503, 504].includes(response.status) || attempt === attempts)
 				return response
 		} catch (error) {
-			if (![7, 18, 28, 35, 52, 55, 56].includes(error.code) || attempt === attempts) throw error
+			if (![7, 18, 28, 35, 52, 55, 56, 92].includes(error.code) || attempt === attempts) throw error
 		}
 		console.log(
 			`[${new URL(url).hostname}] Upload interrupted${response ? ` (HTTP ${response.status})` : ''}; retrying (${attempt}/${attempts - 1})`,
