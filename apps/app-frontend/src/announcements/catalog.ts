@@ -28,6 +28,42 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.2',
+		version: '2.2.2',
+		publishedAt: '2026-11-11',
+		title: {
+			'en-US': 'YMCL 2.2.2',
+			'zh-CN': 'YMCL 2.2.2',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed missing CurseForge update checks for local mods and resources, including files bundled in MRPACK modpacks.',
+					'zh-CN':
+						'修复本地 Mod 和资源无法检查 CurseForge 更新的问题，包括 MRPACK 整合包内的文件。',
+				},
+				{
+					'en-US':
+						'Fixed missed CurseForge updates by checking all releases compatible with the instance game version, mod loader, and update channel.',
+					'zh-CN':
+						'修复 CurseForge 更新漏检的问题，现在会完整检查符合实例游戏版本、加载器和更新通道的发布版本。',
+				},
+				{
+					'en-US':
+						'Fixed available updates being discarded when another content platform failed, while keeping the failed checks visible.',
+					'zh-CN':
+						'修复某个平台检查失败时丢失其他平台可用更新的问题，并保留失败提示。',
+				},
+				{
+					'en-US':
+						'Fixed outdated update indicators remaining after content files, the game version, or the mod loader changed.',
+					'zh-CN': '修复内容文件、游戏版本或加载器改变后仍显示过期更新提示的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.1',
 		version: '2.2.1',
 		publishedAt: '2026-11-11',
