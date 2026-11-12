@@ -18208,6 +18208,24 @@
 	"app.ymcl.landing.retry": {
 		"message": "重试"
 	},
+	"app.ymcl.landing.error.network": {
+		"message": "下载连接中断，请检查网络后重试，或切换服务器。"
+	},
+	"app.ymcl.landing.error.auth": {
+		"message": "域登录状态已失效或访问权限不足，请重新登录后重试。"
+	},
+	"app.ymcl.landing.error.space": {
+		"message": "磁盘空间不足，请清理空间后重试。"
+	},
+	"app.ymcl.landing.error.generic": {
+		"message": "此服务器暂时无法准备，请重试或切换服务器，可查看错误详情。"
+	},
+	"app.ymcl.landing.error.details": {
+		"message": "错误详情"
+	},
+	"app.ymcl.landing.error.title": {
+		"message": "错误详情 · {server}"
+	},
 	"app.ymcl.landing.select-server": {
 		"message": "选择服务器"
 	},

@@ -8,7 +8,14 @@ import {
 	TerminalSquareIcon,
 	TriangleAlertIcon,
 } from '@modrinth/assets'
-import { ButtonStyled, defineMessages, ProgressBar, useFormatBytes, useVIntl } from '@modrinth/ui'
+import {
+	ButtonStyled,
+	defineMessages,
+	NewModal,
+	ProgressBar,
+	useFormatBytes,
+	useVIntl,
+} from '@modrinth/ui'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -36,6 +43,8 @@ import { injectDownloadManager } from '@/providers/download-manager'
 import { useYmclStore } from '@/store/ymcl'
 
 import { domainHomeTransferProgress } from './domain-home-transfer'
+import { domainHomeErrorKind } from './domain-home-error'
+import { inspectDomainHomeServer } from './domain-home-inspection'
 import { useDomainHomeSession } from './domain-home-session'
 import DomainHomeServerPicker from './DomainHomeServerPicker.vue'
 
@@ -77,6 +86,8 @@ const launching = ref(false)
 const launched = ref(false)
 const requestError = ref('')
 const fileError = ref('')
+const detailsModal = ref<InstanceType<typeof NewModal>>()
+const errorDetails = ref({ server: '', message: '' })
 const operationScope = computed(() => ({
 	domainId: store.activeDomainId,
 	userId: store.session?.session.user_id ?? null,
@@ -141,6 +152,30 @@ const messages = defineMessages({
 	create: { id: 'app.ymcl.landing.transfer.create', defaultMessage: 'Create an instance' },
 	retry: { id: 'app.ymcl.landing.retry', defaultMessage: 'Retry' },
 	failed: { id: 'app.ymcl.landing.transfer.failed', defaultMessage: 'Could not prepare the game' },
+	errorNetwork: {
+		id: 'app.ymcl.landing.error.network',
+		defaultMessage:
+			'The download connection was interrupted. Check your network and retry, or switch servers.',
+	},
+	errorAuth: {
+		id: 'app.ymcl.landing.error.auth',
+		defaultMessage:
+			'Your domain session or access permission needs attention. Sign in again and retry.',
+	},
+	errorSpace: {
+		id: 'app.ymcl.landing.error.space',
+		defaultMessage: 'There is not enough disk space. Free some space and retry.',
+	},
+	errorGeneric: {
+		id: 'app.ymcl.landing.error.generic',
+		defaultMessage:
+			'This server could not be prepared. Retry or switch servers; details are available below.',
+	},
+	errorDetails: { id: 'app.ymcl.landing.error.details', defaultMessage: 'Error details' },
+	errorDetailsTitle: {
+		id: 'app.ymcl.landing.error.title',
+		defaultMessage: 'Error details · {server}',
+	},
 	none: {
 		id: 'app.ymcl.landing.no-servers',
 		defaultMessage: 'No servers are available in this domain yet.',
@@ -195,6 +230,15 @@ const messages = defineMessages({
 		defaultMessage: 'The active domain changed. Continue from the original domain.',
 	},
 })
+
+function errorSummary(message: string) {
+	return formatMessage(messages[domainHomeErrorKind(message)])
+}
+
+function showErrorDetails(message: string, event: MouseEvent) {
+	errorDetails.value = { server: server.value?.name ?? '', message }
+	detailsModal.value?.show(event)
+}
 
 const installed = computed(() => {
 	if (preview.value?.installed) return preview.value.installed
@@ -303,31 +347,34 @@ async function inspect() {
 	const request = ++generation
 	const domainId = store.activeDomainId
 	const userId = store.session?.session.user_id
+	const current = () =>
+		!disposed &&
+		request === generation &&
+		store.activeDomainId === domainId &&
+		store.session?.session.user_id === userId &&
+		server.value?.serverId === selected.serverId
 	checking.value = true
 	try {
-		const [next, local] = await Promise.all([ymcl.joinPreview(selected.serverId), list()])
-		const localId = next.installed?.instance_id ?? selected.install?.instanceId
-		const check = localId ? await ymcl.preLaunchCheck(localId) : null
-		if (
-			disposed ||
-			request !== generation ||
-			store.activeDomainId !== domainId ||
-			store.session?.session.user_id !== userId
+		const result = await inspectDomainHomeServer(
+			{ serverId: selected.serverId, instanceId: selected.install?.instanceId },
+			{ preview: ymcl.joinPreview, instances: list, check: ymcl.preLaunchCheck },
+			current,
 		)
-			return
+		if (!result || !current()) return
+		const { preview: next, instances: local, check } = result
 		preview.value = next
 		updateCheck.value = check
 		instances.value = local
+		const matching = local.filter(
+			(instance) => !next.required_version || instance.game_version === next.required_version,
+		)
 		if (
-			!local.some((instance) => `instance:${instance.id}` === localChoice.value) &&
+			!matching.some((instance) => `instance:${instance.id}` === localChoice.value) &&
 			!(localChoice.value === 'vanilla' && next.required_version) &&
 			!(localChoice.value === 'enhanced' && next.optional_pack_id)
 		) {
-			const matching = local.find(
-				(instance) => !next.required_version || instance.game_version === next.required_version,
-			)
-			localChoice.value = matching
-				? `instance:${matching.id}`
+			localChoice.value = matching[0]
+				? `instance:${matching[0].id}`
 				: next.required_version
 					? 'vanilla'
 					: next.optional_pack_id
@@ -336,7 +383,7 @@ async function inspect() {
 		}
 		requestError.value = ''
 	} catch (cause) {
-		if (!disposed && request === generation) requestError.value = ymclErrorMessage(cause)
+		if (current()) requestError.value = ymclErrorMessage(cause)
 	} finally {
 		if (request === generation) checking.value = false
 	}
@@ -465,8 +512,10 @@ async function execute() {
 		if (!instanceId.value) return
 		launching.value = true
 		const next = await ymcl.joinPreview(selectedId)
+		requireContext()
 		const targetInstance = instanceId.value
 		const running = await get_by_instance_id(targetInstance)
+		requireContext()
 		const check = await ymcl.preLaunchCheck(targetInstance)
 		requireContext()
 		if (!next.available) throw new Error(next.reason || formatMessage(messages.unavailable))
@@ -513,6 +562,11 @@ async function openLocalFiles() {
 	}
 }
 
+async function refreshAndInspect() {
+	await refresh()
+	if (!disposed) await inspect()
+}
+
 watch(
 	[() => store.activeDomainId, () => server.value?.serverId, () => store.session?.session.user_id],
 	() => {
@@ -529,7 +583,7 @@ watch(
 		checking.value = false
 		void inspect()
 	},
-	{ immediate: true },
+	{ immediate: true, flush: 'sync' },
 )
 watch(
 	() => task.value?.result,
@@ -577,75 +631,170 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<section class="min-w-0 text-white" :aria-label="formatMessage(messages.title)">
+	<section
+		class="flex min-h-0 max-h-full min-w-0 flex-col text-white"
+		:aria-label="formatMessage(messages.title)"
+	>
 		<template v-if="server">
 			<DomainHomeServerPicker
 				:servers="servers"
 				:selected-id="server.serverId"
-				:disabled="working || props.preview"
+				:disabled="working || launching || props.preview"
 				@select="chosenServerId = $event"
 			/>
 
-			<fieldset
-				v-if="preview && !preview.has_pack && !installed && !busy"
-				class="m-0 mt-4 min-w-0 border-0 p-0"
-			>
-				<legend class="mb-2 text-xs text-white/60">{{ formatMessage(messages.instance) }}</legend>
-				<div class="flex gap-2 overflow-x-auto pb-1">
+			<div class="min-h-0 overflow-y-auto overscroll-contain">
+				<div v-if="loadError" role="alert" class="mt-3 flex items-center gap-3 text-xs text-orange">
+					<p class="m-0 flex-1">{{ formatMessage(messages.serverError) }}</p>
 					<button
-						v-for="option in instanceOptions"
-						:key="option.value"
 						type="button"
-						:aria-pressed="localChoice === option.value"
-						class="shrink-0 cursor-pointer rounded-lg border px-3 py-2 text-xs transition-colors active:bg-white/20"
-						:class="
-							localChoice === option.value
-								? 'border-white/30 bg-white/15 text-white'
-								: 'border-white/10 bg-black/15 text-white/60 hover:bg-white/10 hover:text-white'
-						"
-						:disabled="props.preview"
-						@click="localChoice = option.value"
+						class="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-inherit underline disabled:cursor-not-allowed disabled:opacity-50"
+						:disabled="loading || busy || launching || props.preview"
+						@click="refreshAndInspect"
 					>
-						{{ option.label }}
+						{{ formatMessage(messages.retry) }}
 					</button>
 				</div>
-			</fieldset>
-
-			<div
-				v-if="busy"
-				class="mt-4 rounded-2xl border border-white/15 bg-black/30 p-5 backdrop-blur-xl"
-			>
-				<div class="flex items-center justify-between gap-4" role="status" aria-live="polite">
-					<h2 class="m-0 flex min-w-0 items-center gap-2 text-lg font-semibold">
-						<TriangleAlertIcon v-if="waiting" class="size-5 shrink-0 text-orange" />
-						<SpinnerIcon
-							v-else
-							class="size-5 shrink-0 animate-spin text-white/60 motion-reduce:animate-none"
-						/>
-						{{ formatMessage(statusTitle) }}
-					</h2>
-					<span
-						v-if="working && percentage !== null && !waiting && !launching"
-						class="shrink-0 text-lg font-medium tabular-nums"
-						>{{ percentage }}%</span
-					>
-				</div>
-				<p v-if="versionText && operation" class="mb-0 mt-2 text-xs text-white/60">
-					{{ versionText }}
-				</p>
-				<ProgressBar
-					v-if="!waiting"
-					class="mt-4"
-					:progress="working ? (transfer.fraction ?? 0) : 0"
-					:waiting="!working || transfer.fraction === null"
-					:gradient-border="false"
-					full-width
-				/>
-				<div
-					v-if="progressDetail || (operation && !store.isRouteHidden('/downloads'))"
-					class="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-white/60"
+				<fieldset
+					v-if="preview && !preview.has_pack && !installed && !busy"
+					class="m-0 mt-4 min-w-0 border-0 p-0"
 				>
-					<span v-if="progressDetail && !waiting">{{ progressDetail }}</span>
+					<legend class="mb-2 text-xs text-white/60">{{ formatMessage(messages.instance) }}</legend>
+					<div class="flex gap-2 overflow-x-auto pb-1">
+						<button
+							v-for="option in instanceOptions"
+							:key="option.value"
+							type="button"
+							:aria-pressed="localChoice === option.value"
+							class="shrink-0 cursor-pointer rounded-lg border px-3 py-2 text-xs transition-colors active:bg-white/20"
+							:class="
+								localChoice === option.value
+									? 'border-white/30 bg-white/15 text-white'
+									: 'border-white/10 bg-black/15 text-white/60 hover:bg-white/10 hover:text-white'
+							"
+							:disabled="props.preview"
+							@click="localChoice = option.value"
+						>
+							{{ option.label }}
+						</button>
+					</div>
+				</fieldset>
+
+				<div
+					v-if="busy"
+					class="mt-4 rounded-2xl border border-white/15 bg-black/30 p-5 backdrop-blur-xl"
+				>
+					<div class="flex items-center justify-between gap-4" role="status" aria-live="polite">
+						<h2 class="m-0 flex min-w-0 items-center gap-2 text-lg font-semibold">
+							<TriangleAlertIcon v-if="waiting" class="size-5 shrink-0 text-orange" />
+							<SpinnerIcon
+								v-else
+								class="size-5 shrink-0 animate-spin text-white/60 motion-reduce:animate-none"
+							/>
+							{{ formatMessage(statusTitle) }}
+						</h2>
+						<span
+							v-if="working && percentage !== null && !waiting && !launching"
+							class="shrink-0 text-lg font-medium tabular-nums"
+							>{{ percentage }}%</span
+						>
+					</div>
+					<p v-if="versionText && operation" class="mb-0 mt-2 text-xs text-white/60">
+						{{ versionText }}
+					</p>
+					<ProgressBar
+						v-if="!waiting"
+						class="mt-4"
+						:progress="working ? (transfer.fraction ?? 0) : 0"
+						:waiting="!working || transfer.fraction === null"
+						:gradient-border="false"
+						full-width
+					/>
+					<div
+						v-if="progressDetail || (operation && !store.isRouteHidden('/downloads'))"
+						class="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-white/60"
+					>
+						<span v-if="progressDetail && !waiting">{{ progressDetail }}</span>
+						<RouterLink
+							v-if="operation && !store.isRouteHidden('/downloads')"
+							:to="
+								operation.jobId
+									? { path: '/downloads', query: { job: operation.jobId } }
+									: '/downloads'
+							"
+							class="ml-auto cursor-pointer text-white/80 hover:text-white hover:underline"
+						>
+							{{ formatMessage(messages.downloads) }} →
+						</RouterLink>
+					</div>
+				</div>
+				<template v-else>
+					<div v-if="error" role="alert" class="mt-3 text-sm leading-relaxed text-orange">
+						<p class="m-0">{{ errorSummary(error) }}</p>
+						<button
+							type="button"
+							class="mt-1 cursor-pointer border-0 bg-transparent p-0 text-xs text-inherit underline"
+							@click="showErrorDetails(error, $event)"
+						>
+							{{ formatMessage(messages.errorDetails) }}
+						</button>
+					</div>
+					<p v-else-if="preview && !preview.available" class="mb-0 mt-3 text-sm text-white/60">
+						{{ preview.reason || formatMessage(messages.unavailable) }}
+					</p>
+					<div v-if="outcome?.warning" class="mt-3 text-xs leading-relaxed text-orange">
+						<p class="m-0 line-clamp-2">{{ outcome.warning }}</p>
+						<button
+							type="button"
+							class="mt-1 cursor-pointer border-0 bg-transparent p-0 text-inherit underline"
+							@click="showErrorDetails(outcome.warning, $event)"
+						>
+							{{ formatMessage(messages.errorDetails) }}
+						</button>
+					</div>
+					<p v-if="outcome?.update?.skipped_files.length" class="mb-0 mt-3 text-xs text-orange">
+						{{ formatMessage(messages.skipped, { count: outcome.update.skipped_files.length }) }}
+					</p>
+					<p v-else-if="outcome?.update" class="mb-0 mt-3 text-xs text-white/60">
+						{{
+							formatMessage(messages.changed, {
+								count: outcome.update.staged_files,
+								deleted: outcome.update.deleted_files,
+							})
+						}}
+					</p>
+					<p
+						v-else-if="
+							needsUpdate &&
+							updateCheck &&
+							((updateCheck.pending_changes ?? 0) > 0 || (updateCheck.pending_deletions ?? 0) > 0)
+						"
+						class="mb-0 mt-3 text-xs text-white/60"
+					>
+						{{
+							formatMessage(messages.pending, {
+								count: updateCheck.pending_changes ?? 0,
+								deleted: updateCheck.pending_deletions ?? 0,
+							})
+						}}
+					</p>
+				</template>
+
+				<details
+					v-if="updateCheck?.notes?.trim() && (needsUpdate || working || outcome)"
+					class="mt-3 text-xs text-white/60"
+				>
+					<summary class="cursor-pointer hover:text-white">
+						{{ formatMessage(messages.notes) }}
+					</summary>
+					<p class="mb-0 max-h-32 overflow-y-auto whitespace-pre-line leading-relaxed">
+						{{ updateCheck.notes.trim() }}
+					</p>
+				</details>
+				<nav
+					v-if="!busy && (instanceId || operation)"
+					class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-white/50"
+				>
 					<RouterLink
 						v-if="operation && !store.isRouteHidden('/downloads')"
 						:to="
@@ -653,164 +802,101 @@ onUnmounted(() => {
 								? { path: '/downloads', query: { job: operation.jobId } }
 								: '/downloads'
 						"
-						class="ml-auto cursor-pointer text-white/80 hover:text-white hover:underline"
+						class="cursor-pointer hover:text-white"
+						>{{ formatMessage(messages.downloads) }}</RouterLink
 					>
-						{{ formatMessage(messages.downloads) }} →
-					</RouterLink>
+					<button
+						v-if="instanceId"
+						type="button"
+						class="flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-[inherit] text-inherit hover:text-white"
+						@click="openLocalFiles"
+					>
+						<FolderOpenIcon class="size-3.5" />{{ formatMessage(messages.localFiles) }}
+					</button>
+					<button
+						v-if="instanceId && !launched"
+						type="button"
+						class="ml-auto flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-[inherit] text-inherit hover:text-white"
+						:disabled="loading || props.preview"
+						@click="refreshAndInspect"
+					>
+						<RefreshCwIcon class="size-3.5" />{{ formatMessage(messages.check) }}
+					</button>
+				</nav>
+				<div v-if="fileError" role="alert" class="mt-2 text-xs text-orange">
+					<p class="m-0">{{ errorSummary(fileError) }}</p>
+					<button
+						type="button"
+						class="mt-1 cursor-pointer border-0 bg-transparent p-0 text-inherit underline"
+						@click="showErrorDetails(fileError, $event)"
+					>
+						{{ formatMessage(messages.errorDetails) }}
+					</button>
 				</div>
 			</div>
-			<template v-else>
-				<div class="mt-5 flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
-					<div class="min-w-0 flex-1" role="status" aria-live="polite">
-						<h2
-							class="m-0 flex items-center gap-2 text-lg font-semibold"
-							:class="error ? 'text-orange' : 'text-white'"
-						>
-							<TriangleAlertIcon v-if="error" class="size-5 shrink-0" />
-							<span v-else-if="launched" class="size-2 shrink-0 rounded-full bg-green" />
-							{{ formatMessage(statusTitle) }}
-						</h2>
-						<p v-if="versionText && !error && !launched" class="mb-0 mt-1.5 text-xs text-white/60">
-							{{ versionText }}
-						</p>
-						<p
-							v-else-if="action === 'download' && !error"
-							class="mb-0 mt-1.5 text-xs text-white/60"
-						>
-							{{ formatMessage(messages.defaultFeatures) }}
-						</p>
-					</div>
-					<ButtonStyled
-						v-if="
-							launched &&
-							instanceId &&
-							!store.isRouteHidden(`/instance/${encodeURIComponent(instanceId)}/logs`)
-						"
-						size="large"
-						color="brand"
+			<div
+				v-if="!busy"
+				class="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-3"
+			>
+				<div class="min-w-0 flex-1" role="status" aria-live="polite">
+					<h2
+						class="m-0 flex items-center gap-2 text-lg font-semibold"
+						:class="error ? 'text-orange' : 'text-white'"
 					>
-						<RouterLink :to="`/instance/${encodeURIComponent(instanceId)}/logs`"
-							><TerminalSquareIcon />{{ formatMessage(messages.logs) }}</RouterLink
-						>
-					</ButtonStyled>
-					<ButtonStyled
-						v-else-if="
-							action === 'create' &&
-							!error &&
-							preview?.available &&
-							!store.isRouteHidden('/create') &&
-							!store.isEntranceHidden('create-instance')
-						"
-						size="large"
-						color="brand"
-					>
-						<RouterLink to="/create">{{ formatMessage(messages.create) }}</RouterLink>
-					</ButtonStyled>
-					<ButtonStyled
-						v-else-if="(!launched && action !== 'create') || error"
-						size="large"
-						color="brand"
-					>
-						<button
-							type="button"
-							:disabled="(!error && (!preview || !preview.available)) || props.preview"
-							@click="execute"
-						>
-							<RefreshCwIcon v-if="error || action === 'update'" /><DownloadIcon
-								v-else-if="action === 'download'"
-							/><PlayIcon v-else />
-							{{ formatMessage(error ? messages.retry : messages[action]) }}
-						</button>
-					</ButtonStyled>
+						<TriangleAlertIcon v-if="error" class="size-5 shrink-0" />
+						<span v-else-if="launched" class="size-2 shrink-0 rounded-full bg-green" />
+						{{ formatMessage(statusTitle) }}
+					</h2>
+					<p v-if="versionText && !error && !launched" class="mb-0 mt-1.5 text-xs text-white/60">
+						{{ versionText }}
+					</p>
+					<p v-else-if="action === 'download' && !error" class="mb-0 mt-1.5 text-xs text-white/60">
+						{{ formatMessage(messages.defaultFeatures) }}
+					</p>
 				</div>
-				<p
-					v-if="error"
-					role="alert"
-					class="mb-0 mt-3 break-words text-sm leading-relaxed text-orange"
+				<ButtonStyled
+					v-if="
+						launched &&
+						instanceId &&
+						!store.isRouteHidden(`/instance/${encodeURIComponent(instanceId)}/logs`)
+					"
+					size="large"
+					color="brand"
 				>
-					{{ error }}
-				</p>
-				<p v-else-if="preview && !preview.available" class="mb-0 mt-3 text-sm text-white/60">
-					{{ preview.reason || formatMessage(messages.unavailable) }}
-				</p>
-				<p v-if="outcome?.warning" class="mb-0 mt-3 text-xs leading-relaxed text-orange">
-					{{ outcome.warning }}
-				</p>
-				<p v-if="outcome?.update?.skipped_files.length" class="mb-0 mt-3 text-xs text-orange">
-					{{ formatMessage(messages.skipped, { count: outcome.update.skipped_files.length }) }}
-				</p>
-				<p v-else-if="outcome?.update" class="mb-0 mt-3 text-xs text-white/60">
-					{{
-						formatMessage(messages.changed, {
-							count: outcome.update.staged_files,
-							deleted: outcome.update.deleted_files,
-						})
-					}}
-				</p>
-				<p
+					<RouterLink :to="`/instance/${encodeURIComponent(instanceId)}/logs`"
+						><TerminalSquareIcon />{{ formatMessage(messages.logs) }}</RouterLink
+					>
+				</ButtonStyled>
+				<ButtonStyled
 					v-else-if="
-						needsUpdate &&
-						updateCheck &&
-						((updateCheck.pending_changes ?? 0) > 0 || (updateCheck.pending_deletions ?? 0) > 0)
+						action === 'create' &&
+						!error &&
+						preview?.available &&
+						!store.isRouteHidden('/create') &&
+						!store.isEntranceHidden('create-instance')
 					"
-					class="mb-0 mt-3 text-xs text-white/60"
+					size="large"
+					color="brand"
 				>
-					{{
-						formatMessage(messages.pending, {
-							count: updateCheck.pending_changes ?? 0,
-							deleted: updateCheck.pending_deletions ?? 0,
-						})
-					}}
-				</p>
-			</template>
-
-			<details
-				v-if="updateCheck?.notes?.trim() && (needsUpdate || working || outcome)"
-				class="mt-3 text-xs text-white/60"
-			>
-				<summary class="cursor-pointer hover:text-white">
-					{{ formatMessage(messages.notes) }}
-				</summary>
-				<p class="mb-0 max-h-32 overflow-y-auto whitespace-pre-line leading-relaxed">
-					{{ updateCheck.notes.trim() }}
-				</p>
-			</details>
-			<nav
-				v-if="!busy && (instanceId || operation)"
-				class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-white/50"
-			>
-				<RouterLink
-					v-if="operation && !store.isRouteHidden('/downloads')"
-					:to="
-						operation.jobId ? { path: '/downloads', query: { job: operation.jobId } } : '/downloads'
-					"
-					class="cursor-pointer hover:text-white"
-					>{{ formatMessage(messages.downloads) }}</RouterLink
+					<RouterLink to="/create">{{ formatMessage(messages.create) }}</RouterLink>
+				</ButtonStyled>
+				<ButtonStyled
+					v-else-if="(!launched && action !== 'create') || error"
+					size="large"
+					color="brand"
 				>
-				<button
-					v-if="instanceId"
-					type="button"
-					class="flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-[inherit] text-inherit hover:text-white"
-					@click="openLocalFiles"
-				>
-					<FolderOpenIcon class="size-3.5" />{{ formatMessage(messages.localFiles) }}
-				</button>
-				<button
-					v-if="instanceId && !launched"
-					type="button"
-					class="ml-auto flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-[inherit] text-inherit hover:text-white"
-					:disabled="loading || props.preview"
-					@click="
-						async () => {
-							await refresh()
-							await inspect()
-						}
-					"
-				>
-					<RefreshCwIcon class="size-3.5" />{{ formatMessage(messages.check) }}
-				</button>
-			</nav>
-			<p v-if="fileError" role="alert" class="mb-0 mt-2 text-xs text-orange">{{ fileError }}</p>
+					<button
+						type="button"
+						:disabled="(!error && (!preview || !preview.available)) || props.preview"
+						@click="execute"
+					>
+						<RefreshCwIcon v-if="error || action === 'update'" /><DownloadIcon
+							v-else-if="action === 'download'"
+						/><PlayIcon v-else />
+						{{ formatMessage(error ? messages.retry : messages[action]) }}
+					</button>
+				</ButtonStyled>
+			</div>
 		</template>
 		<p v-else-if="loading" class="m-0 flex items-center gap-2 text-sm text-white/60" role="status">
 			<SpinnerIcon class="size-4 animate-spin motion-reduce:animate-none" />{{
@@ -826,5 +912,16 @@ onUnmounted(() => {
 			>
 		</div>
 		<p v-else class="m-0 text-sm text-white/60">{{ formatMessage(messages.none) }}</p>
+		<NewModal
+			ref="detailsModal"
+			:header="formatMessage(messages.errorDetailsTitle, { server: errorDetails.server })"
+			width="44rem"
+			max-width="calc(100vw - 2rem)"
+			scrollable
+		>
+			<pre
+				class="m-0 whitespace-pre-wrap break-words rounded-xl bg-surface-2 p-4 text-xs leading-relaxed text-secondary [overflow-wrap:anywhere]"
+				>{{ errorDetails.message }}</pre>
+		</NewModal>
 	</section>
 </template>

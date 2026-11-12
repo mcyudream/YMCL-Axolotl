@@ -7,10 +7,12 @@ import {
 	PlayIcon,
 } from '@modrinth/assets'
 import { defineMessages, useVIntl } from '@modrinth/ui'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useDocumentVisibility, usePreferredReducedMotion } from '@vueuse/core'
 import { computed, ref } from 'vue'
 
 import DomainImg from '@/components/ymcl/DomainImg.vue'
+import { ymcl } from '@/helpers/ymcl'
 import { resolveDomainImageUrl } from '@/helpers/ymcl-domain-image'
 import { useYmclStore } from '@/store/ymcl'
 
@@ -24,6 +26,7 @@ import DomainHomeLaunch from './DomainHomeLaunch.vue'
 import DomainHomeMusic from './DomainHomeMusic.vue'
 import DomainHomeProfile from './DomainHomeProfile.vue'
 import { releaseDomainHomeVideo, useDomainHomeCarousel } from './use-domain-home-carousel'
+import { useDomainHomeVideo } from './use-domain-home-video'
 
 const props = withDefaults(
 	defineProps<{
@@ -73,10 +76,13 @@ const {
 	reducedMotion: () => reducedMotion.value === 'reduce',
 	video,
 })
-const videoSource = computed(() =>
+const remoteVideoSource = computed(() =>
 	currentFailed.value
 		? null
 		: resolveDomainImageUrl(currentSlide.value?.video, store.activeDomain?.origin),
+)
+const videoSource = useDomainHomeVideo(remoteVideoSource, async (url) =>
+	convertFileSrc(await ymcl.cacheHomeVideo(url)),
 )
 const copy = computed(() => ({
 	title:
@@ -108,7 +114,7 @@ function onFocusOut(event: FocusEvent) {
 
 <template>
 	<section
-		class="domain-home min-h-full gap-[clamp(1rem,3vh,2rem)] overflow-hidden"
+		class="domain-home box-border h-full min-h-0 gap-[clamp(0.75rem,2vh,1.5rem)] overflow-hidden"
 		:class="{ 'domain-home-preview': preview, 'domain-home-inactive': !active }"
 		:style="{ '--domain-home-overlay': config.overlay / 100 }"
 	>
@@ -155,12 +161,10 @@ function onFocusOut(event: FocusEvent) {
 		</header>
 
 		<div
-			class="domain-home-main grid min-w-0 flex-1 items-stretch gap-8 py-[clamp(0.5rem,2vh,2rem)]"
+			class="domain-home-main grid min-h-0 min-w-0 flex-1 items-stretch gap-8 overflow-y-auto overscroll-contain py-[clamp(0.5rem,2vh,2rem)]"
 			:class="{ 'has-focus': config.focusSources.length > 0 }"
 		>
-			<div
-				class="domain-home-intro min-w-0 self-start pt-[clamp(1rem,15vh,10rem)] max-[900px]:pt-0"
-			>
+			<div class="domain-home-intro min-w-0 self-center">
 				<p class="domain-home-eyebrow">
 					{{
 						playerName
@@ -234,8 +238,10 @@ function onFocusOut(event: FocusEvent) {
 			</button>
 		</nav>
 
-		<footer class="domain-home-footer mt-auto shrink-0">
-			<div class="domain-home-ambience flex min-w-0 flex-col items-start gap-3">
+		<footer
+			class="grid min-h-0 max-h-[60%] shrink-0 grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)] grid-rows-[minmax(0,1fr)] items-end gap-6 max-[900px]:flex max-[900px]:flex-col max-[900px]:items-stretch"
+		>
+			<div class="domain-home-ambience flex min-w-0 shrink-0 flex-col items-start gap-3">
 				<DomainHomeProfile v-if="!preview" />
 				<DomainHomeMusic v-if="config.music.url" :music="config.music" :preview="preview" />
 			</div>
@@ -257,6 +263,7 @@ function onFocusOut(event: FocusEvent) {
 	color: #fff;
 }
 .domain-home-preview {
+	height: 38rem;
 	min-height: 38rem;
 	border-radius: var(--radius-xl);
 }
@@ -416,12 +423,6 @@ function onFocusOut(event: FocusEvent) {
 	width: 1.5rem;
 	background: #fff;
 }
-.domain-home-footer {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(22rem, 28rem);
-	align-items: end;
-	gap: 1.5rem;
-}
 .domain-home > :not(.domain-home-scenery, .domain-home-shade) {
 	opacity: 1;
 	transform: translate3d(0, 0, 0);
@@ -452,9 +453,6 @@ function onFocusOut(event: FocusEvent) {
 }
 @media (max-width: 900px) {
 	.domain-home-main.has-focus {
-		grid-template-columns: minmax(0, 1fr);
-	}
-	.domain-home-footer {
 		grid-template-columns: minmax(0, 1fr);
 	}
 	.domain-home-ambience:empty {

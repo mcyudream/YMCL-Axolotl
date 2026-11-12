@@ -28,6 +28,52 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.4',
+		version: '2.2.4',
+		publishedAt: '2026-11-12',
+		title: {
+			'en-US': 'YMCL 2.2.4',
+			'zh-CN': 'YMCL 2.2.4',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Added local caching for domain home video backgrounds, with automatic cleanup of old cached videos.',
+					'zh-CN': '新增域首页视频背景本地缓存，并自动清理旧视频缓存。',
+				},
+			],
+			changed: [
+				{
+					'en-US':
+						'Moved domain home server selection into a searchable dialog with a clear indicator for the selected server.',
+					'zh-CN': '域首页服务器选择改为独立弹窗，支持搜索并明确标记当前服务器。',
+				},
+				{
+					'en-US':
+						'Improved domain home error messages with short explanations, retry actions, and a separate dialog for technical details.',
+					'zh-CN': '改进域首页报错，显示简明原因和重试操作，并在独立弹窗中提供技术详情。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed domain home content stretching the background and obscuring the launch button in smaller windows.',
+					'zh-CN': '修复域首页内容撑大背景、较小窗口中启动游戏按钮被遮挡的问题。',
+				},
+				{
+					'en-US':
+						'Fixed results from a previous server overwriting the current server after switching servers or domains.',
+					'zh-CN': '修复切换服务器或域后，旧服务器的检查结果覆盖当前服务器状态的问题。',
+				},
+				{
+					'en-US': 'Fixed failed server list refreshes clearing the existing list and selection.',
+					'zh-CN': '修复服务器列表刷新失败时清空已有列表和当前选择的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.3',
 		version: '2.2.3',
 		publishedAt: '2026-11-12',

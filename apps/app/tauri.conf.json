@@ -120,7 +120,7 @@
 				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
 				"worker-src": "'self' blob:",
 				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' asset: http://asset.localhost https://asset.localhost http://axolotl-skin.localhost axolotl-skin://localhost",
-				"media-src": "'self' https: http: data: blob:"
+				"media-src": "'self' https: http: asset: data: blob:"
 			},
 			"csp": {
 				"default-src": "'self' customprotocol: asset:",
@@ -131,7 +131,7 @@
 				"script-src": "'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
 				"worker-src": "'self' blob:",
 				"frame-src": "https://www.youtube.com https://www.youtube-nocookie.com https://discord.com 'self' asset: http://asset.localhost https://asset.localhost axolotl-skin://localhost http://axolotl-skin.localhost",
-				"media-src": "'self' https: http: data: blob:"
+				"media-src": "'self' https: http: asset: data: blob:"
 			}
 		}
 	}

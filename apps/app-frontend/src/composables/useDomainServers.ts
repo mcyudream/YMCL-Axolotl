@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 
 import { list } from '@/helpers/instance'
 import { PERSONAL_DOMAIN_ID, ymcl, ymclErrorMessage } from '@/helpers/ymcl'
@@ -185,6 +185,8 @@ export function useDomainServers() {
 	const loading = ref(false)
 	const loadError = ref('')
 	const servers = ref<DomainServerRow[]>([])
+	let revision = 0
+	let loadedScope = ''
 
 	const hasDomainFace = computed(() => ymclStore.activeDomainId !== PERSONAL_DOMAIN_ID)
 
@@ -225,9 +227,7 @@ export function useDomainServers() {
 		}
 	}
 
-	async function loadPackPreviews(
-		bound: ServerOption[],
-	): Promise<Map<string, PackPreview>> {
+	async function loadPackPreviews(bound: ServerOption[]): Promise<Map<string, PackPreview>> {
 		const previews = await Promise.all(
 			bound.map(async (server) => {
 				try {
@@ -336,9 +336,19 @@ export function useDomainServers() {
 	}
 
 	async function refresh() {
+		const request = ++revision
+		const scope = JSON.stringify([ymclStore.activeDomainId, ymclStore.session?.session.user_id])
+		const current = () =>
+			request === revision &&
+			scope === JSON.stringify([ymclStore.activeDomainId, ymclStore.session?.session.user_id])
+		if (scope !== loadedScope) {
+			servers.value = []
+			loadedScope = scope
+		}
 		if (!hasDomainFace.value) {
 			servers.value = []
 			loadError.value = ''
+			loading.value = false
 			return
 		}
 		loading.value = true
@@ -346,13 +356,16 @@ export function useDomainServers() {
 		try {
 			// Keep the shared pack catalog warm so install identity matches the library.
 			await packsApi.refresh()
+			if (!current()) return
 			const rawServers = await invoke<ServerOption[]>('plugin:ymcl|ymcl_mip_servers')
+			if (!current()) return
 			const bound = rawServers.filter((server) => !!server.binding?.packId)
 			const [previews, installs, yapRecords] = await Promise.all([
 				loadPackPreviews(bound),
 				loadInstalls(),
 				loadYapEnrichment(),
 			])
+			if (!current()) return
 
 			servers.value = rawServers.map((server): DomainServerRow => {
 				const name = server.name || server.serverId
@@ -360,8 +373,7 @@ export function useDomainServers() {
 				const preview = previews.get(server.serverId)
 				const packId = server.binding?.packId || preview?.pack_id || undefined
 				const targetVersion = preview?.target_version ?? undefined
-				const requiredVersion =
-					preview?.required_version ?? server.binding?.mcVersion ?? undefined
+				const requiredVersion = preview?.required_version ?? server.binding?.mcVersion ?? undefined
 				const install = installs.get(server.serverId)
 				const hasPack = !!packId
 				const hasUpdate =
@@ -376,9 +388,7 @@ export function useDomainServers() {
 					status: normalizeStatus(server.status),
 					...(primaryAddress ? { primaryAddress } : {}),
 					backupAddresses: [],
-					endpoints: primaryAddress
-						? [{ address: primaryAddress, primary: true }]
-						: [],
+					endpoints: primaryAddress ? [{ address: primaryAddress, primary: true }] : [],
 					...(server.currentSeason?.name ? { seasonName: server.currentSeason.name } : {}),
 					hasPack,
 					...(packId ? { packId } : {}),
@@ -395,7 +405,11 @@ export function useDomainServers() {
 
 				// Bound packs need a successful preview to expose a resolvable version;
 				// unbound servers still list from the MIP face alone.
-				if (bound.some((item) => item.serverId === server.serverId) && preview && !preview.available) {
+				if (
+					bound.some((item) => item.serverId === server.serverId) &&
+					preview &&
+					!preview.available
+				) {
 					row.available = false
 					row.unavailableReason = preview.reason ?? undefined
 				}
@@ -404,16 +418,16 @@ export function useDomainServers() {
 				return row
 			})
 		} catch (error) {
-			servers.value = []
-			loadError.value = ymclErrorMessage(error)
+			if (current()) loadError.value = ymclErrorMessage(error)
 		} finally {
-			loading.value = false
+			if (current()) loading.value = false
 		}
 	}
 
 	watch(
-		() => ymclStore.activeDomainId,
+		[() => ymclStore.activeDomainId, () => ymclStore.session?.session.user_id],
 		() => void refresh(),
+		{ flush: 'sync' },
 	)
 	watch(
 		() => ymclStore.dataEpoch,
@@ -423,6 +437,7 @@ export function useDomainServers() {
 	// and would otherwise re-enter through this watcher.
 
 	onMounted(() => void refresh())
+	onScopeDispose(() => revision++)
 
 	return {
 		loading,

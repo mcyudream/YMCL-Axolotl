@@ -875,6 +875,7 @@ fn main() {
                         "ymcl_interop_pack_download_origin",
                         "ymcl_manifest_get",
                         "ymcl_manifest_refresh",
+                        "ymcl_home_video_cache",
                         "ymcl_simple_mode_unlocked",
                         "ymcl_simple_mode_unlock",
                         "ymcl_data_fetch",

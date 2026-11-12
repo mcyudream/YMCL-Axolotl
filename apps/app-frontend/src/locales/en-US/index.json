@@ -18206,6 +18206,24 @@
 	"app.ymcl.landing.retry": {
 		"message": "Retry"
 	},
+	"app.ymcl.landing.error.network": {
+		"message": "The download connection was interrupted. Check your network and retry, or switch servers."
+	},
+	"app.ymcl.landing.error.auth": {
+		"message": "Your domain session or access permission needs attention. Sign in again and retry."
+	},
+	"app.ymcl.landing.error.space": {
+		"message": "There is not enough disk space. Free some space and retry."
+	},
+	"app.ymcl.landing.error.generic": {
+		"message": "This server could not be prepared. Retry or switch servers; details are available below."
+	},
+	"app.ymcl.landing.error.details": {
+		"message": "Error details"
+	},
+	"app.ymcl.landing.error.title": {
+		"message": "Error details · {server}"
+	},
 	"app.ymcl.landing.select-server": {
 		"message": "Choose a server"
 	},

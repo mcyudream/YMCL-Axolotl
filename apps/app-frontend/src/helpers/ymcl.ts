@@ -635,6 +635,7 @@ export const ymcl = {
 		invoke<YmclDomainsState>('plugin:ymcl|ymcl_domain_activate', { id }),
 	manifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_get'),
 	refreshManifest: () => invoke<YmclManifest | null>('plugin:ymcl|ymcl_manifest_refresh'),
+	cacheHomeVideo: (url: string) => invoke<string>('plugin:ymcl|ymcl_home_video_cache', { url }),
 	simpleModeUnlocked: () => invoke<string[]>('plugin:ymcl|ymcl_simple_mode_unlocked'),
 	unlockSimpleMode: (domainId: string) =>
 		invoke<string[]>('plugin:ymcl|ymcl_simple_mode_unlock', { domainId }),

@@ -99,7 +99,7 @@ function onWheel(event: WheelEvent) {
 	>
 		<section
 			ref="landingPage"
-			class="absolute inset-0 overflow-y-auto overscroll-contain outline-none"
+			class="absolute inset-0 overflow-hidden outline-none"
 			:inert="page !== 0"
 			:aria-hidden="page !== 0"
 			:aria-label="formatMessage(messages.landing)"

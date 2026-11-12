@@ -10,6 +10,7 @@ pub mod data;
 pub mod download_sources;
 #[cfg(feature = "tauri")]
 pub mod events;
+pub mod home_media;
 pub mod interop;
 pub mod manifest;
 pub mod mip;

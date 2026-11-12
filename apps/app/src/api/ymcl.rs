@@ -32,6 +32,7 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
             ymcl_domain_activate,
             ymcl_manifest_get,
             ymcl_manifest_refresh,
+            ymcl_home_video_cache,
             ymcl_simple_mode_unlocked,
             ymcl_simple_mode_unlock,
             ymcl_data_fetch,
@@ -92,6 +93,11 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
 #[tauri::command]
 pub async fn ymcl_domains_state() -> Result<YmclDomainsState> {
     Ok(registry::domains_state().await?)
+}
+
+#[tauri::command]
+pub async fn ymcl_home_video_cache(url: String) -> Result<String> {
+    Ok(theseus::ymcl::home_media::cache_video(&url).await?)
 }
 
 // Add a domain by probing its adapter capabilities
