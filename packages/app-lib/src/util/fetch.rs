@@ -6167,29 +6167,28 @@ pub async fn sha1_async(bytes: Bytes) -> crate::Result<String> {
 pub async fn sha1_file_async(
     path: impl AsRef<Path>,
 ) -> crate::Result<(u64, String)> {
-    let path = path.as_ref();
-    // Local files can be multi-gigabyte .mrpacks, so hash them without materializing bytes.
-    let mut file = File::open(path)
-        .await
-        .map_err(|e| IOError::with_path(e, path))?;
-    let mut hasher = sha1_smol::Sha1::new();
-    let mut size = 0;
-    let mut buffer = vec![0; 262144];
+    let path = path.as_ref().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
 
-    loop {
-        let bytes_read = file
-            .read(&mut buffer)
-            .await
-            .map_err(|e| IOError::with_path(e, path))?;
-        if bytes_read == 0 {
-            break;
+        let mut file = std::fs::File::open(&path)
+            .map_err(|e| IOError::with_path(e, &path))?;
+        let mut hasher = sha1_smol::Sha1::new();
+        let mut size = 0;
+        let mut buffer = vec![0; 262144];
+        loop {
+            let bytes_read = file
+                .read(&mut buffer)
+                .map_err(|e| IOError::with_path(e, &path))?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+            size += bytes_read as u64;
         }
-
-        hasher.update(&buffer[..bytes_read]);
-        size += bytes_read as u64;
-    }
-
-    Ok((size, hasher.digest().to_string()))
+        Ok((size, hasher.digest().to_string()))
+    })
+    .await?
 }
 
 /// Streaming sha512 for local files: mrpack/MIP index entries must carry a
@@ -6257,6 +6256,25 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn file_sha1_worker_preserves_streamed_hashes_and_path_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        for size in [0, 1, 262143, 262144, 262145, 524289] {
+            let path = directory.path().join(format!("content-{size}.jar"));
+            let bytes = (0..size)
+                .map(|index| (index % 251) as u8)
+                .collect::<Vec<_>>();
+            std::fs::write(&path, &bytes).unwrap();
+            let (actual_size, sha1) = sha1_file_async(&path).await.unwrap();
+            assert_eq!(actual_size, size as u64);
+            assert_eq!(sha1, sha1_smol::Sha1::from(&bytes).hexdigest());
+        }
+        let error = sha1_file_async(directory.path().join("missing.jar"))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("missing.jar"));
+    }
 
     static RANGE_SPLITTING_TEST_LOCK: LazyLock<AsyncMutex<()>> =
         LazyLock::new(|| AsyncMutex::new(()));

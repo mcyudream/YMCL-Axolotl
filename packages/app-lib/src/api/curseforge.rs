@@ -37,7 +37,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -1051,6 +1050,7 @@ fn default_true() -> bool {
 pub struct CurseForgeFingerprintMatch {
     pub id: u32,
     pub file: CurseForgeFile,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub latest_files: Vec<CurseForgeFile>,
 }
 
@@ -1058,17 +1058,17 @@ pub struct CurseForgeFingerprintMatch {
 #[serde(rename_all = "camelCase")]
 pub struct CurseForgeFingerprintResult {
     pub is_cache_built: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub exact_matches: Vec<CurseForgeFingerprintMatch>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub exact_fingerprints: Vec<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub partial_matches: Vec<Value>,
     #[serde(default)]
     pub partial_match_fingerprints: Value,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub installed_fingerprints: Vec<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub unmatched_fingerprints: Vec<u64>,
 }
 
@@ -9057,29 +9057,38 @@ struct VerifiedInstalledCurseForgeFile {
     pending_completion: CurseForgePendingCompletionProof,
 }
 
-async fn read_curseforge_verification_chunk(
-    file: &mut tokio::fs::File,
+fn read_curseforge_verification_chunk(
+    file: &mut std::fs::File,
     buffer: &mut [u8],
     cancellation: Option<&CancellationToken>,
 ) -> crate::Result<usize> {
-    match cancellation {
-        Some(cancellation) => tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => Err(ErrorKind::OtherError(
-                "CurseForge fingerprint verification canceled".to_string(),
-            ).into()),
-            result = file.read(buffer) => Ok(result?),
-        },
-        None => Ok(file.read(buffer).await?),
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        return Err(ErrorKind::OtherError(
+            "CurseForge fingerprint verification canceled".to_string(),
+        )
+        .into());
     }
+    Ok(file.read(buffer)?)
 }
 
 pub(crate) async fn fingerprint_and_sha1_file(
     path: &Path,
     cancellation: Option<&CancellationToken>,
 ) -> crate::Result<(u64, String, u32)> {
+    let path = path.to_path_buf();
+    let cancellation = cancellation.cloned();
+    tokio::task::spawn_blocking(move || {
+        fingerprint_and_sha1_file_blocking(&path, cancellation.as_ref())
+    })
+    .await?
+}
+
+fn fingerprint_and_sha1_file_blocking(
+    path: &Path,
+    cancellation: Option<&CancellationToken>,
+) -> crate::Result<(u64, String, u32)> {
     const BUFFER_SIZE: usize = 256 * 1024;
-    let mut file = tokio::fs::File::open(path).await?;
+    let mut file = std::fs::File::open(path)?;
     let mut buffer = vec![0_u8; BUFFER_SIZE];
     let mut sha1 = sha1_smol::Sha1::new();
     let mut size = 0_u64;
@@ -9089,8 +9098,7 @@ pub(crate) async fn fingerprint_and_sha1_file(
             &mut file,
             &mut buffer,
             cancellation,
-        )
-        .await?;
+        )?;
         if read == 0 {
             break;
         }
@@ -9103,7 +9111,7 @@ pub(crate) async fn fingerprint_and_sha1_file(
             .count() as u64;
     }
 
-    let mut file = tokio::fs::File::open(path).await?;
+    file.rewind()?;
     let mut fingerprint =
         CurseForgeFingerprintHasher::new(normalized_size as u32);
     loop {
@@ -9111,8 +9119,7 @@ pub(crate) async fn fingerprint_and_sha1_file(
             &mut file,
             &mut buffer,
             cancellation,
-        )
-        .await?;
+        )?;
         if read == 0 {
             break;
         }
@@ -11147,6 +11154,124 @@ mod tests {
         assert!(file.modules.is_empty());
     }
 
+    fn fingerprint_response_fixture() -> Value {
+        let file = stage8_curseforge_file(
+            123,
+            456,
+            "pack-member.jar",
+            42,
+            vec![CurseForgeFileHash {
+                value: "a".repeat(40),
+                algo: 1,
+            }],
+            789,
+        );
+        json!({
+            "data": {
+                "isCacheBuilt": true,
+                "exactMatches": [{
+                    "id": 123,
+                    "file": file,
+                    "latestFiles": [file]
+                }],
+                "exactFingerprints": [789],
+                "partialMatches": [],
+                "partialMatchFingerprints": {},
+                "installedFingerprints": [789],
+                "unmatchedFingerprints": [987]
+            }
+        })
+    }
+
+    #[test]
+    fn fingerprint_response_accepts_null_and_missing_lists() {
+        for field in [
+            "exactMatches",
+            "exactFingerprints",
+            "partialMatches",
+            "installedFingerprints",
+            "unmatchedFingerprints",
+        ] {
+            for value in [None, Some(Value::Null), Some(json!([]))] {
+                let mut input = fingerprint_response_fixture();
+                if let Some(value) = value {
+                    input["data"][field] = value;
+                } else {
+                    input["data"].as_object_mut().unwrap().remove(field);
+                }
+                let bytes = serde_json::to_vec(&input).unwrap();
+                let response: CurseForgeResponse<CurseForgeFingerprintResult> =
+                    serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+                        panic!("fingerprint field {field}: {error}")
+                    });
+                let normalized = serde_json::to_value(&response.data).unwrap();
+                assert_eq!(normalized[field], json!([]));
+                if field != "exactMatches" {
+                    assert_eq!(response.data.exact_matches.len(), 1);
+                    assert_eq!(response.data.exact_matches[0].file.id, 456);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fingerprint_response_preserves_matches_with_null_latest_files() {
+        for value in [None, Some(Value::Null), Some(json!([]))] {
+            let mut input = fingerprint_response_fixture();
+            let matched = &mut input["data"]["exactMatches"][0];
+            if let Some(value) = value {
+                matched["latestFiles"] = value;
+            } else {
+                matched.as_object_mut().unwrap().remove("latestFiles");
+            }
+            let bytes = serde_json::to_vec(&input).unwrap();
+            let response: CurseForgeResponse<CurseForgeFingerprintResult> =
+                serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(response.data.exact_matches.len(), 1);
+            let matched = &response.data.exact_matches[0];
+            assert_eq!(matched.id, 123);
+            assert_eq!(matched.file.id, 456);
+            assert_eq!(matched.file.file_length, 42);
+            assert_eq!(matched.file.hashes[0].value, "a".repeat(40));
+            assert!(matched.latest_files.is_empty());
+            assert_eq!(response.data.exact_fingerprints, vec![789]);
+            assert_eq!(response.data.installed_fingerprints, vec![789]);
+            assert_eq!(response.data.unmatched_fingerprints, vec![987]);
+        }
+    }
+
+    #[test]
+    fn fingerprint_response_preserves_lists_and_rejects_wrong_types() {
+        let input = fingerprint_response_fixture();
+        let response: CurseForgeResponse<CurseForgeFingerprintResult> =
+            serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(response.data.exact_matches[0].latest_files[0].id, 456);
+        for field in [
+            "exactMatches",
+            "exactFingerprints",
+            "partialMatches",
+            "installedFingerprints",
+            "unmatchedFingerprints",
+            "latestFiles",
+        ] {
+            for invalid in [json!({}), json!("invalid"), json!(42)] {
+                let mut invalid_input = input.clone();
+                if field == "latestFiles" {
+                    invalid_input["data"]["exactMatches"][0][field] = invalid;
+                } else {
+                    invalid_input["data"][field] = invalid;
+                }
+                assert!(
+                    serde_json::from_value::<
+                        CurseForgeResponse<CurseForgeFingerprintResult>,
+                    >(invalid_input)
+                    .is_err(),
+                    "invalid fingerprint field {field} must be rejected"
+                );
+            }
+        }
+    }
+
     #[test]
     fn fingerprint_ignores_curseforge_whitespace() {
         assert_eq!(
@@ -11205,6 +11330,84 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("canceled"));
+    }
+
+    #[tokio::test]
+    #[ignore = "manual comparison of serial and bounded parallel content hashing"]
+    async fn benchmark_content_hash_parallelism() {
+        use futures::TryStreamExt;
+        use std::time::Instant;
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        let mut total_bytes = 0;
+        for index in 0..32 {
+            let path = directory.path().join(format!("mod-{index}.jar"));
+            let bytes = (0..512 * 1024 + index)
+                .map(|offset| ((offset * 31 + index) % 251) as u8)
+                .collect::<Vec<_>>();
+            total_bytes += bytes.len();
+            crate::util::io::write(&path, &bytes).await.unwrap();
+            paths.push(path);
+        }
+        let workers = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .clamp(1, 4);
+        for fingerprint in [false, true] {
+            let mut expected = None;
+            let mut serial = Vec::new();
+            let mut parallel = Vec::new();
+            for round in 0..4 {
+                for concurrency in [1, workers] {
+                    let started = Instant::now();
+                    let jobs = paths
+                        .iter()
+                        .cloned()
+                        .map(|path| async move {
+                            if fingerprint {
+                                fingerprint_and_sha1_file(&path, None).await
+                            } else {
+                                sha1_file_async(&path)
+                                    .await
+                                    .map(|(size, sha1)| (size, sha1, 0))
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let results: Vec<_> = stream::iter(jobs)
+                        .buffered(concurrency)
+                        .try_collect()
+                        .await
+                        .unwrap();
+                    let elapsed = started.elapsed().as_secs_f64();
+                    if let Some(expected) = expected.as_ref() {
+                        assert_eq!(&results, expected);
+                    } else {
+                        expected = Some(results);
+                    }
+                    if round > 0 {
+                        if concurrency == 1 {
+                            serial.push(elapsed);
+                        } else {
+                            parallel.push(elapsed);
+                        }
+                    }
+                }
+            }
+            if workers == 1 {
+                eprintln!("Only one hashing worker is available");
+                continue;
+            }
+            serial.sort_by(f64::total_cmp);
+            parallel.sort_by(f64::total_cmp);
+            eprintln!(
+                "CONTENT_HASH_BENCH fingerprint={fingerprint} files={} bytes={total_bytes} workers={workers} serial_ms={:.1} parallel_ms={:.1} speedup={:.2}",
+                paths.len(),
+                serial[1] * 1000.0,
+                parallel[1] * 1000.0,
+                serial[1] / parallel[1]
+            );
+        }
     }
 
     #[test]

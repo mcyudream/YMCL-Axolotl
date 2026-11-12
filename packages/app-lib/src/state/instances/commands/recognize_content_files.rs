@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
+use futures::{StreamExt, stream};
+
 use crate::api::curseforge::{
     self, CurseForgeCapabilityStatus, CurseForgeFingerprintResult,
 };
@@ -14,8 +16,11 @@ use crate::util::fetch::sha1_file_async;
 
 use super::list_content::reconcile_exact_provider_matches;
 use super::sync_content_files::{
-    instance_content_root, join_content_path, project_type_for_file,
+    content_hash_concurrency, instance_content_root, join_content_path,
+    project_type_for_file,
 };
+
+const FINGERPRINT_LOOKUP_CONCURRENCY: usize = 4;
 
 /// File recognition supplies aliases, independently of how the file was installed.
 pub(crate) async fn recognize_curseforge_content_files(
@@ -36,8 +41,8 @@ async fn recognize_with<F, Fut>(
     lookup: F,
 ) -> crate::Result<()>
 where
-    F: Fn(Vec<u64>) -> Fut,
-    Fut: Future<Output = crate::Result<CurseForgeFingerprintResult>>,
+    F: Fn(Vec<u64>) -> Fut + Sync,
+    Fut: Future<Output = crate::Result<CurseForgeFingerprintResult>> + Send,
 {
     let Some(content_set) =
         content_rows::get_applied_content_set(&instance.id, &state.pool)
@@ -57,30 +62,49 @@ where
     .into_iter()
     .collect::<HashSet<_>>();
     let root = instance_content_root(&state.directories, instance)?;
-    let mut by_fingerprint = HashMap::<u64, Vec<&InstanceFile>>::new();
-    for file in files {
-        if file.missing
-            || recognized.contains(&file.id)
-            || project_type_for_file(file).is_none()
-        {
-            continue;
-        }
-        let path = join_content_path(&root, &file.relative_path);
-        let (size, sha1, fingerprint) =
-            curseforge::fingerprint_and_sha1_file(&path, None).await?;
+    let mut by_fingerprint = HashMap::<u64, Vec<usize>>::new();
+    let hash_jobs = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| {
+            !file.missing
+                && !recognized.contains(&file.id)
+                && project_type_for_file(file).is_some()
+        })
+        .map(|(index, file)| {
+            let path = join_content_path(&root, &file.relative_path);
+            async move {
+                let result =
+                    curseforge::fingerprint_and_sha1_file(&path, None).await;
+                (index, result)
+            }
+        })
+        .collect::<Vec<_>>();
+    let hash_results =
+        stream::iter(hash_jobs).buffered(content_hash_concurrency());
+    futures::pin_mut!(hash_results);
+    while let Some((index, result)) = hash_results.next().await {
+        let file = &files[index];
+        let (size, sha1, fingerprint) = result?;
         // A file can change while the scan or network request is in progress.
         if size == file.size && sha1 == file.sha1 && fingerprint != 0 {
             by_fingerprint
                 .entry(fingerprint as u64)
                 .or_default()
-                .push(file);
+                .push(index);
         }
     }
     let fingerprints = by_fingerprint.keys().copied().collect::<Vec<_>>();
-    let mut references = HashMap::new();
-    let mut verified_files = Vec::new();
-    for batch in fingerprints.chunks(1000) {
-        for matched in lookup(batch.to_vec()).await?.exact_matches {
+    let mut verification_candidates = Vec::new();
+    let lookup_jobs = fingerprints
+        .chunks(1000)
+        .map(|batch| lookup(batch.to_vec()))
+        .collect::<Vec<_>>();
+    let responses =
+        stream::iter(lookup_jobs).buffered(FINGERPRINT_LOOKUP_CONCURRENCY);
+    futures::pin_mut!(responses);
+    while let Some(response) = responses.next().await {
+        for matched in response?.exact_matches {
             let Some(candidates) =
                 by_fingerprint.get(&matched.file.file_fingerprint)
             else {
@@ -90,7 +114,8 @@ where
                 project_id: CurseForgeProjectId::new(matched.file.mod_id)?,
                 file_id: Some(CurseForgeFileId::new(matched.file.id)?),
             };
-            for file in candidates {
+            for &index in candidates {
+                let file = &files[index];
                 if matched.file.file_length != file.size
                     || !matched.file.hashes.iter().any(|hash| {
                         hash.algo == 1
@@ -99,15 +124,34 @@ where
                 {
                     continue;
                 }
-                let path = join_content_path(&root, &file.relative_path);
-                let (size, sha1) = sha1_file_async(&path).await?;
-                if size != file.size || sha1 != file.sha1 {
-                    continue;
-                }
-                references.insert(sha1, reference.clone());
-                verified_files.push((*file).clone());
+                verification_candidates.push((index, reference.clone()));
             }
         }
+    }
+    let verification_jobs = verification_candidates
+        .into_iter()
+        .map(|(index, reference)| {
+            let file = &files[index];
+            let path = join_content_path(&root, &file.relative_path);
+            async move {
+                let result = sha1_file_async(&path).await;
+                (index, reference, result)
+            }
+        })
+        .collect::<Vec<_>>();
+    let verified =
+        stream::iter(verification_jobs).buffered(content_hash_concurrency());
+    futures::pin_mut!(verified);
+    let mut references = HashMap::new();
+    let mut verified_files = Vec::new();
+    while let Some((index, reference, result)) = verified.next().await {
+        let file = &files[index];
+        let (size, sha1) = result?;
+        if size != file.size || sha1 != file.sha1 {
+            continue;
+        }
+        references.insert(sha1, reference);
+        verified_files.push(file.clone());
     }
     reconcile_exact_provider_matches(
         &instance.id,
@@ -193,8 +237,12 @@ mod tests {
                     "fileFingerprint": curseforge::compute_fingerprint(bytes),
                     "hashes": [{ "algo": 1, "value": sha1_smol::Sha1::from(bytes).hexdigest() }]
                 },
-                "latestFiles": []
-            }]
+                "latestFiles": null
+            }],
+            "exactFingerprints": null,
+            "partialMatches": null,
+            "installedFingerprints": null,
+            "unmatchedFingerprints": null
         })).unwrap()
     }
 
@@ -326,6 +374,72 @@ mod tests {
                 .unwrap()
                 .revision,
                 set.revision + 1
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn parallel_recognition_keeps_each_file_with_its_matching_project() {
+        let (_root, state, instance) = fixture().await;
+        let root =
+            instance_content_root(&state.directories, &instance).unwrap();
+        let mut matches = HashMap::new();
+        for index in 0..12_u32 {
+            let path = format!(
+                "mods/member-{index}.jar{}",
+                if index % 3 == 0 { ".disabled" } else { "" }
+            );
+            let bytes = vec![index as u8 + 65; 256 * 1024 + index as usize];
+            crate::util::io::write(root.join(&path), &bytes)
+                .await
+                .unwrap();
+            let mut matched = response(&bytes).exact_matches.remove(0);
+            matched.id = 1000 + index;
+            matched.file.mod_id = matched.id;
+            matched.file.id = 2000 + index;
+            matches.insert(matched.file.file_fingerprint, matched);
+        }
+        let files = sync_instance_content_files(&instance, &state)
+            .await
+            .unwrap();
+        assert_eq!(files.len(), 12);
+        recognize_with(&instance, &files, &state, |fingerprints| {
+            let mut result = response(b"unused");
+            result.exact_matches = fingerprints
+                .into_iter()
+                .rev()
+                .map(|fingerprint| matches[&fingerprint].clone())
+                .collect();
+            async move { Ok(result) }
+        })
+        .await
+        .unwrap();
+        let rows = sqlx::query(
+            "SELECT file.relative_path, ref.provider_project_id, ref.provider_release_id
+             FROM instance_files file
+             JOIN instance_content_entries entry ON entry.file_id = file.id
+             JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id
+             WHERE file.instance_id = ? AND ref.provider = 'curseforge'",
+        )
+        .bind(&instance.id)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 12);
+        use sqlx::Row;
+        for row in rows {
+            let project: String = row.get("provider_project_id");
+            let index = project.parse::<u32>().unwrap() - 1000;
+            assert_eq!(
+                row.get::<String, _>("provider_release_id"),
+                (2000 + index).to_string()
+            );
+            assert_eq!(
+                row.get::<String, _>("relative_path"),
+                format!(
+                    "mods/member-{index}.jar{}",
+                    if index % 3 == 0 { ".disabled" } else { "" }
+                )
             );
         }
     }

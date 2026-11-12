@@ -28,6 +28,31 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.3',
+		version: '2.2.3',
+		publishedAt: '2026-11-12',
+		title: {
+			'en-US': 'YMCL 2.2.3',
+			'zh-CN': 'YMCL 2.2.3',
+		},
+		changes: {
+			changed: [
+				{
+					'en-US':
+						'Improved mod and resource update checks with parallel local file verification and concurrent CurseForge queries.',
+					'zh-CN': '通过并行校验本地文件和并发查询 CurseForge，加快 Mod 和资源更新检查。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed mod update checks failing with a JSON serialization error when CurseForge returned null lists.',
+					'zh-CN': '修复 CurseForge 响应中包含空值时，检查 Mod 更新出现 JSON 序列化错误的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.2',
 		version: '2.2.2',
 		publishedAt: '2026-11-11',

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 
 use chrono::{DateTime, FixedOffset};
 use futures::{StreamExt, stream};
@@ -6,6 +7,7 @@ use sqlx::Row;
 
 use crate::api::curseforge::{
     self, CurseForgeCapabilityStatus, CurseForgeFile, CurseForgeFilesRequest,
+    CurseForgeFilesResponse,
 };
 use crate::state::instances::{
     ContentSet, Instance, InstanceFile, adapters::sqlite::content_rows,
@@ -14,6 +16,67 @@ use crate::state::{
     ContentItemUpdate, ContentProvider, ContentProviderRef, CurseForgeFileId,
     CurseForgeProjectId, ProjectType, ReleaseChannel, State,
 };
+
+const UPDATE_LOOKUP_CONCURRENCY: usize = 4;
+
+enum FileLookup {
+    Current(Vec<u32>),
+    Project(u32),
+}
+
+async fn fetch_update_files<F, Fut, G, Gut>(
+    file_ids: HashSet<u32>,
+    projects: HashSet<u32>,
+    request: CurseForgeFilesRequest,
+    current_lookup: F,
+    project_lookup: G,
+) -> crate::Result<(
+    HashMap<u32, CurseForgeFile>,
+    HashMap<u32, Vec<CurseForgeFile>>,
+)>
+where
+    F: Fn(Vec<u32>) -> Fut + Sync,
+    Fut: Future<Output = crate::Result<Vec<CurseForgeFile>>> + Send,
+    G: Fn(u32, CurseForgeFilesRequest) -> Gut + Sync,
+    Gut: Future<Output = crate::Result<CurseForgeFilesResponse>> + Send,
+{
+    let file_ids = file_ids.into_iter().collect::<Vec<_>>();
+    let lookups = file_ids
+        .chunks(50)
+        .map(|batch| FileLookup::Current(batch.to_vec()))
+        .chain(projects.into_iter().map(FileLookup::Project));
+    let lookup_jobs = lookups
+        .map(|lookup| {
+            let current_lookup = &current_lookup;
+            let project_lookup = &project_lookup;
+            let request = request.clone();
+            async move {
+                match lookup {
+                    FileLookup::Current(ids) => {
+                        current_lookup(ids).await.map(|files| (None, files))
+                    }
+                    FileLookup::Project(id) => project_lookup(id, request)
+                        .await
+                        .map(|response| (Some(id), response.files)),
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    let responses =
+        stream::iter(lookup_jobs).buffer_unordered(UPDATE_LOOKUP_CONCURRENCY);
+    futures::pin_mut!(responses);
+    let mut current_files = HashMap::new();
+    let mut files_by_project = HashMap::new();
+    while let Some(response) = responses.next().await {
+        let (project_id, files) = response?;
+        if let Some(project_id) = project_id {
+            files_by_project.insert(project_id, files);
+        } else {
+            current_files.extend(files.into_iter().map(|file| (file.id, file)));
+        }
+    }
+    Ok((current_files, files_by_project))
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct CurseForgeUpdateCandidate {
@@ -68,43 +131,26 @@ pub(super) async fn resolve_curseforge_content_updates(
         .iter()
         .map(|candidate| candidate.current_file_id.get())
         .collect::<HashSet<_>>();
-    let mut current_files = HashMap::new();
-    for batch in file_ids.into_iter().collect::<Vec<_>>().chunks(50) {
-        current_files.extend(
-            curseforge::get_files_many(batch.to_vec())
-                .await?
-                .into_iter()
-                .map(|file| (file.id, file)),
-        );
-    }
     let projects = candidates
         .iter()
         .map(|candidate| candidate.project_id.get())
         .collect::<HashSet<_>>();
     // Fetch all compatible-game pages rather than a project's small latest-files summary.
     // Loader compatibility is checked locally, including responses from mirrors.
-    let responses = stream::iter(projects)
-        .map(|project_id| async move {
-            let response = curseforge::get_files(
-                project_id,
-                CurseForgeFilesRequest {
-                    game_version: Some(content_set.game_version.clone()),
-                    mod_loader_type: None,
-                    game_version_type_id: None,
-                    index: 0,
-                    page_size: 50,
-                },
-            )
-            .await;
-            (project_id, response)
-        })
-        .buffer_unordered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let mut files_by_project = HashMap::new();
-    for (project_id, response) in responses {
-        files_by_project.insert(project_id, response?.files);
-    }
+    let (current_files, files_by_project) = fetch_update_files(
+        file_ids,
+        projects,
+        CurseForgeFilesRequest {
+            game_version: Some(content_set.game_version.clone()),
+            mod_loader_type: None,
+            game_version_type_id: None,
+            index: 0,
+            page_size: 50,
+        },
+        curseforge::get_files_many,
+        curseforge::get_files,
+    )
+    .await?;
     let mut output = HashMap::new();
     for candidate in candidates {
         let Some(current) = current_files
@@ -332,6 +378,155 @@ fn published(file: &CurseForgeFile) -> Option<DateTime<FixedOffset>> {
 mod tests {
     use super::*;
     use crate::state::ModLoader;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    fn files_request() -> CurseForgeFilesRequest {
+        CurseForgeFilesRequest {
+            game_version: Some("1.12.2".into()),
+            mod_loader_type: None,
+            game_version_type_id: None,
+            index: 0,
+            page_size: 50,
+        }
+    }
+
+    #[tokio::test]
+    async fn parallel_update_lookups_share_a_limit_and_preserve_all_results() {
+        let active = AtomicUsize::new(0);
+        let current_active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let batches = AtomicUsize::new(0);
+        let project_calls = AtomicUsize::new(0);
+        let overlapping = AtomicBool::new(false);
+        let release_slow_batch = tokio::sync::Notify::new();
+        let future = fetch_update_files(
+            (1..=151).collect(),
+            (201..=207).collect(),
+            files_request(),
+            |ids| {
+                assert!(!ids.is_empty() && ids.len() <= 50);
+                let slow = batches.fetch_add(1, Ordering::SeqCst) == 0;
+                let active = &active;
+                let current_active = &current_active;
+                let peak = &peak;
+                let release_slow_batch = &release_slow_batch;
+                async move {
+                    let running = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(running, Ordering::SeqCst);
+                    current_active.fetch_add(1, Ordering::SeqCst);
+                    if slow {
+                        release_slow_batch.notified().await;
+                    } else {
+                        tokio::task::yield_now().await;
+                    }
+                    current_active.fetch_sub(1, Ordering::SeqCst);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(ids
+                        .into_iter()
+                        .map(|id| {
+                            file(
+                                id,
+                                "2026-01-01T00:00:00Z",
+                                "1.12.2",
+                                "Forge",
+                                1,
+                            )
+                        })
+                        .collect())
+                }
+            },
+            |id, request| {
+                assert_eq!(request.game_version.as_deref(), Some("1.12.2"));
+                assert_eq!(request.index, 0);
+                assert_eq!(request.page_size, 50);
+                assert!(request.mod_loader_type.is_none());
+                let active = &active;
+                let current_active = &current_active;
+                let peak = &peak;
+                let overlapping = &overlapping;
+                let release_slow_batch = &release_slow_batch;
+                project_calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if current_active.load(Ordering::SeqCst) > 0 {
+                        overlapping.store(true, Ordering::SeqCst);
+                    }
+                    release_slow_batch.notify_one();
+                    let running = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(running, Ordering::SeqCst);
+                    tokio::task::yield_now().await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    let mut candidate = file(
+                        id + 1000,
+                        "2026-02-01T00:00:00Z",
+                        "1.12.2",
+                        "Forge",
+                        1,
+                    );
+                    candidate.mod_id = id;
+                    Ok(CurseForgeFilesResponse {
+                        files: vec![candidate],
+                        pagination: curseforge::CurseForgePagination {
+                            index: 0,
+                            page_size: 50,
+                            result_count: 1,
+                            total_count: 1,
+                        },
+                    })
+                }
+            },
+        );
+        let (current, projects) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            future,
+        )
+        .await
+        .expect("project lookups must not wait for every current-file batch")
+        .unwrap();
+        assert_eq!(peak.load(Ordering::SeqCst), UPDATE_LOOKUP_CONCURRENCY);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert_eq!(batches.load(Ordering::SeqCst), 4);
+        assert_eq!(project_calls.load(Ordering::SeqCst), 7);
+        assert!(overlapping.load(Ordering::SeqCst));
+        assert_eq!(current.len(), 151);
+        for id in 1..=151 {
+            assert_eq!(current[&id].id, id);
+        }
+        assert_eq!(projects.len(), 7);
+        for id in 201..=207 {
+            assert_eq!(projects[&id][0].id, id + 1000);
+            assert_eq!(projects[&id][0].mod_id, id);
+        }
+    }
+
+    #[tokio::test]
+    async fn parallel_update_lookups_do_not_return_partial_results_on_failure()
+    {
+        let error = fetch_update_files(
+            (1..=51).collect(),
+            (201..=207).collect(),
+            files_request(),
+            |_| async {
+                Err(crate::ErrorKind::OtherError(
+                    "fixture update batch failure".into(),
+                )
+                .into())
+            },
+            |_, _| async {
+                Ok(CurseForgeFilesResponse {
+                    files: Vec::new(),
+                    pagination: curseforge::CurseForgePagination {
+                        index: 0,
+                        page_size: 50,
+                        result_count: 0,
+                        total_count: 0,
+                    },
+                })
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("fixture update batch failure"));
+    }
 
     fn file(
         id: u32,

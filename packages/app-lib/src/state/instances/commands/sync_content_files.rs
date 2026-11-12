@@ -9,9 +9,17 @@ use crate::state::{
 use crate::util::fetch::{self, FetchSemaphore};
 use crate::util::io;
 use chrono::Utc;
+use futures::{StreamExt, stream};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+pub(super) fn content_hash_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .clamp(1, 4)
+}
 
 /// Resolves the directory whose game content (`mods`, `resourcepacks`, ...)
 /// belongs to this instance.
@@ -152,18 +160,29 @@ pub(crate) async fn sync_instance_content_files_with_progress(
     let mut claimed_reclaim_ids = HashSet::new();
     let mut externally_changed_file_ids = HashSet::new();
 
-    for file in scanned {
+    let hash_jobs = scanned
+        .into_iter()
+        .filter(|file| {
+            progress
+                .is_none_or(|progress| progress.includes(&file.relative_path))
+        })
+        .map(|file| {
+            let path = join_content_path(&content_root, &file.relative_path);
+            async move {
+                let result = fetch::sha1_file_async(&path).await;
+                (file, result)
+            }
+        })
+        .collect::<Vec<_>>();
+    let hash_results =
+        stream::iter(hash_jobs).buffered(content_hash_concurrency());
+    futures::pin_mut!(hash_results);
+    while let Some((file, result)) = hash_results.next().await {
         if let Some(progress) = progress {
             progress.check_cancelled()?;
-            if !progress.includes(&file.relative_path) {
-                continue;
-            }
         }
         let existing_file = existing_files_by_path.get(&file.relative_path);
-        let path = join_content_path(&content_root, &file.relative_path);
-        let (scanned_sha1, scanned_size) = match fetch::sha1_file_async(&path)
-            .await
-        {
+        let (scanned_sha1, scanned_size) = match result {
             Ok((size, sha1)) => (sha1, size),
             Err(error) => {
                 if let Some(progress) = progress {
