@@ -28,6 +28,35 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.5',
+		version: '2.2.5',
+		publishedAt: '2026-11-15',
+		title: {
+			'en-US': 'YMCL 2.2.5',
+			'zh-CN': 'YMCL 2.2.5',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed invalid Minecraft access tokens blocking launches with domain accounts. The current profile is now restored automatically when the domain sign-in is still valid.',
+					'zh-CN':
+						'修复域 Minecraft 令牌失效后启动游戏报「访问令牌无效」的问题，域登录仍有效时自动恢复当前角色，无需手动切换角色。',
+				},
+				{
+					'en-US':
+						'Fixed domain sign-in sessions failing to renew before expiry or after the server rejected a token ahead of its local expiry.',
+					'zh-CN': '修复域登录会话临近过期或被服务端提前判定失效时未能正常续期的问题。',
+				},
+				{
+					'en-US':
+						'Fixed concurrent refreshes reusing old tokens and background renewal undoing an account switch.',
+					'zh-CN': '修复并发刷新重复使用旧令牌，以及后台续期覆盖当前账号选择的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.4',
 		version: '2.2.4',
 		publishedAt: '2026-11-12',
