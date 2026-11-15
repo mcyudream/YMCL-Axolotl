@@ -834,19 +834,23 @@ pub async fn logout(domain_id: &str) -> crate::Result<()> {
 /// Concurrent callers for the same domain coalesce on one refresh. When the
 /// host rotates the refresh token only sometimes, the previous token is kept
 /// so a response without `refreshToken` does not wipe silent renewal.
+/// `expected_access_token` identifies the session that needs renewal; local
+/// expiry must not suppress proactive refreshes or recovery after a host 401.
 pub async fn refresh_session(
     domain_id: &str,
+    expected_access_token: &str,
 ) -> crate::Result<Option<YmclStoredSession>> {
     let lock = REFRESH_LOCKS
         .entry(domain_id.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone();
     let _guard = lock.lock().await;
-    refresh_session_locked(domain_id).await
+    refresh_session_locked(domain_id, expected_access_token).await
 }
 
 async fn refresh_session_locked(
     domain_id: &str,
+    expected_access_token: &str,
 ) -> crate::Result<Option<YmclStoredSession>> {
     let state = State::get().await?;
     let Some(stored) = ymcl_session::get(domain_id, &state.pool).await? else {
@@ -856,7 +860,7 @@ async fn refresh_session_locked(
         return Ok(None);
     }
     // Another waiter may have already renewed while we queued on the lock.
-    if !stored.needs_refresh(0) {
+    if session_already_renewed(&stored, expected_access_token) {
         return Ok(Some(stored));
     }
     let previous_refresh_token = stored.refresh_token.clone();
@@ -934,6 +938,13 @@ async fn refresh_session_locked(
     .map(Some)
 }
 
+fn session_already_renewed(
+    stored: &YmclStoredSession,
+    expected_access_token: &str,
+) -> bool {
+    stored.access_token != expected_access_token && !stored.is_expired()
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct YmclYggProfile {
     pub id: String,
@@ -954,6 +965,16 @@ pub struct YmclYggExchange {
 /// `profile_name` picks among multiple owned profiles; `None` selects the
 /// first one.
 pub async fn ygg_exchange(
+    domain_id: &str,
+    profile_name: Option<&str>,
+) -> crate::Result<YmclYggExchange> {
+    let exchange = request_ygg_exchange(domain_id, profile_name).await?;
+    let state = State::get().await?;
+    exchange.credentials.upsert(&state.pool).await?;
+    Ok(exchange)
+}
+
+async fn request_ygg_exchange(
     domain_id: &str,
     profile_name: Option<&str>,
 ) -> crate::Result<YmclYggExchange> {
@@ -1093,11 +1114,77 @@ pub async fn ygg_exchange(
         },
         &login,
     );
-    credentials.upsert(&state.pool).await?;
     Ok(YmclYggExchange {
         credentials,
         profiles,
     })
+}
+
+/// A dead Minecraft token cannot refresh itself on hosts that remove expired
+/// sessions. Recover through its owning domain login, like the profile switcher,
+/// without selecting another account or silently accepting another profile.
+pub(crate) async fn recover_ygg_credentials(
+    credentials: &crate::state::Credentials,
+    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+) -> crate::Result<Option<crate::state::Credentials>> {
+    let Some(account) = credentials.yggdrasil.as_ref() else {
+        return Ok(None);
+    };
+    let domains: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT d.id, d.origin, s.session_json FROM ymcl_domains d \
+         JOIN ymcl_sessions s ON s.domain_id = d.id WHERE d.kind = 'yap'",
+    )
+    .fetch_all(exec)
+    .await?;
+    for (domain_id, origin, session_json) in domains {
+        let Ok(session) =
+            serde_json::from_str::<YmclSessionInfo>(&session_json)
+        else {
+            continue;
+        };
+        if !domain_owns_ygg_account(&origin, &session, account) {
+            continue;
+        }
+        let exchange = request_ygg_exchange(
+            &domain_id,
+            Some(&credentials.offline_profile.name),
+        )
+        .await?;
+        return restore_ygg_account(credentials, exchange.credentials)
+            .map(Some);
+    }
+    Ok(None)
+}
+
+fn domain_owns_ygg_account(
+    origin: &str,
+    session: &YmclSessionInfo,
+    account: &crate::state::YggdrasilAccount,
+) -> bool {
+    !account.login.is_empty()
+        && session.username == account.login
+        && super::yggroot::YmclYggEndpoints::candidates(origin)
+            .iter()
+            .any(|endpoints| {
+                endpoints.yggdrasil_root
+                    == account.api_root.trim_end_matches('/')
+            })
+}
+
+fn restore_ygg_account(
+    current: &crate::state::Credentials,
+    mut renewed: crate::state::Credentials,
+) -> crate::Result<crate::state::Credentials> {
+    if renewed.offline_profile.id != current.offline_profile.id {
+        return Err(crate::ErrorKind::OtherError(
+            "The domain did not return the requested Minecraft profile"
+                .to_string(),
+        )
+        .into());
+    }
+    renewed.account_id = current.account_id.clone();
+    renewed.active = current.active;
+    Ok(renewed)
 }
 
 /// Lists the Minecraft profiles the signed-in user owns on the domain's
@@ -1201,7 +1288,7 @@ pub async fn ensure_session(
         return Ok(Some(session));
     }
     let was_expired = session.is_expired();
-    match refresh_session(domain_id).await {
+    match refresh_session(domain_id, &session.access_token).await {
         Ok(Some(renewed)) => Ok(Some(renewed)),
         Ok(None) => Ok(Some(session)),
         Err(error) if !was_expired => {
@@ -1255,7 +1342,7 @@ async fn keep_sessions_alive() -> crate::Result<()> {
             continue;
         };
         if session.can_refresh() && session.needs_refresh(REFRESH_SKEW_SECS) {
-            match refresh_session(&domain_id).await {
+            match refresh_session(&domain_id, &session.access_token).await {
                 Ok(Some(_)) => {
                     tracing::info!(
                         "Silently renewed domain session for {domain_id}"
@@ -1385,29 +1472,29 @@ async fn retry_on_rejected_token(
     url: &str,
     method: Method,
     json_body: Option<serde_json::Value>,
-    can_refresh: bool,
-    had_session: bool,
+    session: Option<&YmclStoredSession>,
     loading_bar: Option<(&LoadingBarId, f64)>,
     error: crate::Error,
 ) -> crate::Result<bytes::Bytes> {
     if !is_unauthorized_error(&error) {
         return Err(error);
     }
-    if !can_refresh {
+    let Some(session) = session else {
+        return Err(error);
+    };
+    if !session.can_refresh() {
         // Dead token and nothing to renew it with — pop the domain login
         // dialog instead of the raw HTTP status. Endpoints that legitimately
         // serve anonymous callers (no session attached) keep the raw error.
-        if had_session {
-            emit_session_expired(domain_id).await;
-            return Err(session_expired_error());
-        }
-        return Err(error);
+        emit_session_expired(domain_id).await;
+        return Err(session_expired_error());
     }
     // The host invalidated the token before its local expiry; renew it via
     // the refresh token and retry once — silent re-login. Only a host-rejected
     // refresh (refresh token itself dead) degrades to the login dialog;
     // transport failures keep the session for a later retry.
-    let renewed = match refresh_session(domain_id).await {
+    let renewed = match refresh_session(domain_id, &session.access_token).await
+    {
         Ok(Some(renewed)) => renewed,
         Ok(None) => {
             emit_session_expired(domain_id).await;
@@ -1469,14 +1556,12 @@ pub async fn domain_request(
         )
         .into());
     };
-    let can_refresh = session.can_refresh();
-    let token = session.access_token;
     match send_domain_request(
         state,
         url,
         method.clone(),
         json_body.clone(),
-        Some(&token),
+        Some(&session.access_token),
         None,
     )
     .await
@@ -1489,8 +1574,7 @@ pub async fn domain_request(
                 url,
                 method,
                 json_body,
-                can_refresh,
-                true,
+                Some(&session),
                 None,
                 error,
             )
@@ -1525,9 +1609,6 @@ pub async fn domain_request_opt_with_bar(
     loading_bar: Option<(&LoadingBarId, f64)>,
 ) -> crate::Result<bytes::Bytes> {
     let session = ensure_session(domain_id).await?;
-    let can_refresh =
-        session.as_ref().is_some_and(YmclStoredSession::can_refresh);
-    let had_session = session.is_some();
     let token = session
         .as_ref()
         .map(|session| session.access_token.as_str());
@@ -1549,8 +1630,7 @@ pub async fn domain_request_opt_with_bar(
                 url,
                 method,
                 json_body,
-                can_refresh,
-                had_session,
+                session.as_ref(),
                 loading_bar,
                 error,
             )
@@ -1760,6 +1840,25 @@ mod session_renewal_tests {
         );
     }
 
+    #[test]
+    fn local_expiry_does_not_skip_requested_renewal() {
+        // Both proactive renewal and a host rejection must renew the token
+        // the caller actually used, even if the local expiry is in the future.
+        for expires_in in [None, Some(60), Some(7200), Some(-1)] {
+            let session = stored(expires_in, Some("refresh"));
+            assert!(!session_already_renewed(&session, "access"));
+        }
+    }
+
+    #[test]
+    fn concurrent_renewal_reuses_only_a_new_usable_token() {
+        let mut session = stored(Some(7200), Some("refresh"));
+        session.access_token = "renewed".to_string();
+        assert!(session_already_renewed(&session, "access"));
+        session.expires_at = Some(Utc::now().timestamp() - 1);
+        assert!(!session_already_renewed(&session, "access"));
+    }
+
     /// Blank refresh tokens are treated as missing so the keeper skips them.
     #[test]
     fn blank_refresh_token_cannot_renew() {
@@ -1790,6 +1889,90 @@ mod session_renewal_tests {
         let local: crate::Error =
             crate::ErrorKind::OtherError("disk full".to_string()).into();
         assert!(!is_host_auth_rejection(&local));
+    }
+}
+
+#[cfg(test)]
+mod ygg_recovery_tests {
+    use super::*;
+    use crate::state::{
+        YggdrasilMetadata, YggdrasilProfile, create_credentials,
+    };
+
+    fn credentials() -> crate::state::Credentials {
+        create_credentials(
+            YggdrasilProfile {
+                id: uuid::Uuid::new_v4(),
+                name: "Player".to_string(),
+            },
+            "old-access".to_string(),
+            "client".to_string(),
+            YggdrasilMetadata {
+                api_root:
+                    super::super::yggroot::YmclYggEndpoints::authlib_injector(
+                        "https://example.com",
+                    )
+                    .yggdrasil_root,
+                server_name: "Example".to_string(),
+                raw: String::new(),
+            },
+            "domain-user",
+        )
+    }
+
+    #[test]
+    fn recovery_requires_the_owning_domain_and_same_login() {
+        let mut account = credentials().yggdrasil.unwrap();
+        let mut session = YmclSessionInfo {
+            username: "domain-user".to_string(),
+            ..Default::default()
+        };
+        for endpoints in super::super::yggroot::YmclYggEndpoints::candidates(
+            "https://example.com",
+        ) {
+            account.api_root = endpoints.yggdrasil_root;
+            assert!(domain_owns_ygg_account(
+                "https://example.com",
+                &session,
+                &account
+            ));
+            assert!(!domain_owns_ygg_account(
+                "https://other.example.com",
+                &session,
+                &account
+            ));
+        }
+        session.username = "another-user".to_string();
+        assert!(!domain_owns_ygg_account(
+            "https://example.com",
+            &session,
+            &account
+        ));
+    }
+
+    #[test]
+    fn recovery_preserves_profile_and_account_selection() {
+        let mut current = credentials();
+        current.active = false;
+        let mut renewed = credentials();
+        renewed.offline_profile.id = current.offline_profile.id;
+        renewed.active = true;
+        renewed.access_token = "renewed-access".to_string();
+        renewed.account_id = None;
+        let restored = restore_ygg_account(&current, renewed).unwrap();
+        assert_eq!(restored.access_token, "renewed-access");
+        assert_eq!(restored.account_id(), current.account_id());
+        assert_eq!(restored.offline_profile.id, current.offline_profile.id);
+        assert!(!restored.active);
+    }
+
+    #[test]
+    fn recovery_rejects_a_different_profile_returned_by_the_host() {
+        // Hosts may fall back to their first profile if the requested name
+        // no longer exists. That must not silently change the launch identity.
+        let current = credentials();
+        let renewed = credentials();
+        assert!(restore_ygg_account(&current, renewed).is_err());
     }
 }
 

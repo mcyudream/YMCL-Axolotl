@@ -838,6 +838,22 @@ impl Credentials {
         Self::get_active_with_refresh(exec, false).await
     }
 
+    pub(crate) async fn get_without_refresh(
+        account_id: &str,
+        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+    ) -> crate::Result<Option<Self>> {
+        let stored = sqlx::query_as::<_, StoredCredentials>(
+            "SELECT account_id, uuid, active, username, account_type, \
+             access_token, refresh_token, expires, yggdrasil_api_root, \
+             yggdrasil_server_name, yggdrasil_login, yggdrasil_client_token \
+             FROM minecraft_users WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .fetch_optional(exec)
+        .await?;
+        Ok(stored.map(Self::from_stored))
+    }
+
     async fn get_active_with_refresh(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         refresh: bool,

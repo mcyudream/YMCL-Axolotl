@@ -22,6 +22,9 @@ const PENDING_LOGIN_LIFETIME: StdDuration = StdDuration::from_secs(600);
 static PENDING_LOGINS: LazyLock<Mutex<HashMap<Uuid, PendingYggdrasilLogin>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+static REFRESH_LOCKS: LazyLock<dashmap::DashMap<String, Arc<Mutex<()>>>> =
+    LazyLock::new(dashmap::DashMap::new);
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct YggdrasilAccount {
     pub api_root: String,
@@ -336,6 +339,22 @@ pub async fn refresh_yggdrasil_credentials(
         return Ok(());
     }
 
+    let account_id = credentials.account_id();
+    let lock = REFRESH_LOCKS
+        .entry(account_id.clone())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone();
+    let _guard = lock.lock().await;
+    // Another reader may have already rotated this token while we waited.
+    if let Some(stored) =
+        Credentials::get_without_refresh(&account_id, exec).await?
+    {
+        *credentials = stored;
+        if credentials.expires > Utc::now() {
+            return Ok(());
+        }
+    }
+
     let account = credentials.yggdrasil.clone().ok_or_else(|| {
         ErrorKind::OtherError(
             "Yggdrasil credentials are missing provider information"
@@ -355,8 +374,7 @@ pub async fn refresh_yggdrasil_credentials(
 
     if response.status().is_success() {
         credentials.expires = Utc::now() + Duration::minutes(5);
-        credentials.upsert(exec).await?;
-        return Ok(());
+        return persist_refreshed_credentials(credentials, exec).await;
     }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         tracing::warn!(
@@ -364,14 +382,13 @@ pub async fn refresh_yggdrasil_credentials(
             account.server_name
         );
         credentials.expires = Utc::now() + Duration::minutes(1);
-        credentials.upsert(exec).await?;
-        return Ok(());
+        return persist_refreshed_credentials(credentials, exec).await;
     }
     if response.status().as_u16() != 403 && response.status().as_u16() != 401 {
         return Err(response_error(response).await);
     }
 
-    let refreshed = refresh_selected_profile(
+    let response = refresh_selected_profile_response(
         &account.api_root,
         &credentials.access_token,
         &account.client_token,
@@ -381,21 +398,74 @@ pub async fn refresh_yggdrasil_credentials(
         },
     )
     .await?;
+    if !response.status().is_success() {
+        let rejected = matches!(response.status().as_u16(), 401 | 403);
+        let error = response_error(response).await;
+        if rejected {
+            if let Some(renewed) =
+                crate::api::ymcl::auth::recover_ygg_credentials(
+                    credentials,
+                    exec,
+                )
+                .await?
+            {
+                *credentials = renewed;
+                return persist_refreshed_credentials(credentials, exec).await;
+            }
+        }
+        return Err(error);
+    }
+    let refreshed: RefreshResponse = response.json().await?;
     let profile = refreshed.selected_profile.ok_or_else(|| {
         ErrorKind::OtherError(
             "The Yggdrasil service rejected the selected profile".to_string(),
         )
         .as_error()
     })?;
+    if profile.id != credentials.offline_profile.id {
+        return Err(ErrorKind::OtherError(
+            "The Yggdrasil service returned a different profile".to_string(),
+        )
+        .as_error());
+    }
 
     credentials.access_token = refreshed.access_token;
-    credentials.offline_profile.id = profile.id;
     credentials.offline_profile.name = profile.name;
     if let Some(account) = credentials.yggdrasil.as_mut() {
         account.client_token = refreshed.client_token;
     }
     credentials.expires = Utc::now() + Duration::minutes(5);
-    credentials.upsert(exec).await?;
+    persist_refreshed_credentials(credentials, exec).await
+}
+
+/// Token renewal must not reselect an inactive account or undo a profile
+/// switch that completed while its HTTP request was in flight.
+async fn persist_refreshed_credentials(
+    credentials: &Credentials,
+    exec: impl sqlx::Executor<'_, Database = Sqlite> + Copy,
+) -> crate::Result<()> {
+    let account = credentials.yggdrasil.as_ref().ok_or_else(|| {
+        ErrorKind::OtherError(
+            "Yggdrasil credentials are missing provider information"
+                .to_string(),
+        )
+        .as_error()
+    })?;
+    sqlx::query(
+        "UPDATE minecraft_users SET username = $2, access_token = $3, \
+         expires = $4, yggdrasil_api_root = $5, yggdrasil_server_name = $6, \
+         yggdrasil_login = $7, yggdrasil_client_token = $8 WHERE account_id = $1",
+    )
+    .bind(credentials.account_id())
+    .bind(&credentials.offline_profile.name)
+    .bind(&credentials.access_token)
+    .bind(credentials.expires.timestamp())
+    .bind(&account.api_root)
+    .bind(&account.server_name)
+    .bind(&account.login)
+    .bind(&account.client_token)
+    .execute(exec)
+    .await?;
     Ok(())
 }
 
@@ -555,17 +625,36 @@ async fn refresh_selected_profile(
     client_token: &str,
     profile: &YggdrasilProfile,
 ) -> crate::Result<RefreshResponse> {
-    post_json(
+    let response = refresh_selected_profile_response(
         api_root,
-        "refresh",
-        json!({
+        access_token,
+        client_token,
+        profile,
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(response_error(response).await);
+    }
+    Ok(response.json().await?)
+}
+
+async fn refresh_selected_profile_response(
+    api_root: &str,
+    access_token: &str,
+    client_token: &str,
+    profile: &YggdrasilProfile,
+) -> crate::Result<reqwest::Response> {
+    Ok(INSECURE_REQWEST_CLIENT
+        .post(endpoint(api_root, "refresh")?)
+        .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN")
+        .json(&json!({
             "accessToken": access_token,
             "clientToken": client_token,
             "selectedProfile": profile,
             "requestUser": true,
-        }),
-    )
-    .await
+        }))
+        .send()
+        .await?)
 }
 
 async fn post_json<T: for<'de> Deserialize<'de>>(
@@ -643,6 +732,210 @@ pub(crate) fn create_credentials(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    struct AuthServer {
+        root: String,
+        requests: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for AuthServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn auth_server(profile_id: Uuid, refresh_status: u16) -> AuthServer {
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 4096];
+                let (headers, body) = loop {
+                    let read = socket.read(&mut buffer).await.unwrap();
+                    assert_ne!(read, 0);
+                    request.extend_from_slice(&buffer[..read]);
+                    let Some(end) = request
+                        .windows(4)
+                        .position(|bytes| bytes == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let headers =
+                        String::from_utf8_lossy(&request[..end]).to_string();
+                    let length = headers
+                        .lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| {
+                            name.eq_ignore_ascii_case("content-length")
+                        })
+                        .map(|(_, length)| {
+                            length.trim().parse::<usize>().unwrap()
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break (headers, request[end + 4..].to_vec());
+                    }
+                };
+                let path = headers.lines().next().unwrap().to_string();
+                let (status, body) = if path.starts_with("POST ") {
+                    captured.lock().await.push((
+                        path.clone(),
+                        serde_json::from_slice(&body).unwrap(),
+                    ));
+                    if path.contains("/authserver/refresh ") {
+                        let body = if refresh_status == 200 {
+                            json!({
+                                "accessToken": "renewed-access",
+                                "clientToken": "renewed-client",
+                                "selectedProfile": {"id": profile_id.simple().to_string(), "name": "Player"},
+                            })
+                        } else {
+                            json!({"error": "ForbiddenOperationException", "errorMessage": "访问令牌无效"})
+                        };
+                        (refresh_status, body.to_string())
+                    } else {
+                        (
+                            403,
+                            json!({"errorMessage": "访问令牌已过期"})
+                                .to_string(),
+                        )
+                    }
+                } else {
+                    (204, String::new())
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        AuthServer {
+            root,
+            requests,
+            task,
+        }
+    }
+
+    async fn pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn expired_account(
+        pool: &sqlx::SqlitePool,
+        api_root: &str,
+        profile_id: Uuid,
+    ) -> Credentials {
+        let mut credentials = create_credentials(
+            YggdrasilProfile {
+                id: profile_id,
+                name: "Player".to_string(),
+            },
+            "old-access".to_string(),
+            "old-client".to_string(),
+            YggdrasilMetadata {
+                api_root: api_root.to_string(),
+                server_name: "Test".to_string(),
+                raw: String::new(),
+            },
+            "domain-user",
+        );
+        credentials.expires = Utc::now() - Duration::minutes(1);
+        credentials.upsert(pool).await.unwrap();
+        credentials
+    }
+
+    #[tokio::test]
+    async fn concurrent_refreshes_reuse_the_rotated_token() {
+        let profile_id = Uuid::new_v4();
+        let server = auth_server(profile_id, 200).await;
+        let pool = pool().await;
+        let mut first = expired_account(&pool, &server.root, profile_id).await;
+        let mut second =
+            Credentials::get_without_refresh(&first.account_id(), &pool)
+                .await
+                .unwrap()
+                .unwrap();
+        let (first_result, second_result) = tokio::join!(
+            refresh_yggdrasil_credentials(&mut first, &pool),
+            refresh_yggdrasil_credentials(&mut second, &pool),
+        );
+        first_result.unwrap();
+        second_result.unwrap();
+        assert_eq!(first.access_token, "renewed-access");
+        assert_eq!(second.access_token, first.access_token);
+        assert_eq!(second.yggdrasil.unwrap().client_token, "renewed-client");
+        let requests = server.requests.lock().await;
+        assert_eq!(requests.len(), 2, "only one validation and refresh");
+        assert!(requests[0].0.contains("/authserver/validate "));
+        assert!(requests[1].0.contains("/authserver/refresh "));
+        assert_eq!(
+            requests[1].1["selectedProfile"]["id"],
+            profile_id.simple().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_external_token_keeps_the_original_error() {
+        let profile_id = Uuid::new_v4();
+        let server = auth_server(profile_id, 403).await;
+        let pool = pool().await;
+        let mut credentials =
+            expired_account(&pool, &server.root, profile_id).await;
+        let error = refresh_yggdrasil_credentials(&mut credentials, &pool)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("访问令牌无效"));
+        let stored = Credentials::get_active_without_refresh(&pool)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.access_token, "old-access");
+        assert_eq!(server.requests.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn saving_renewed_tokens_does_not_undo_an_account_switch() {
+        let profile_id = Uuid::new_v4();
+        let server = auth_server(profile_id, 200).await;
+        let pool = pool().await;
+        let mut credentials =
+            expired_account(&pool, &server.root, profile_id).await;
+        let selected = Credentials::offline("OtherPlayer").unwrap();
+        selected.upsert(&pool).await.unwrap();
+        // This in-flight request still has the previous active=true snapshot.
+        assert!(credentials.active);
+        credentials.access_token = "renewed-access".to_string();
+        persist_refreshed_credentials(&credentials, &pool)
+            .await
+            .unwrap();
+        let active = Credentials::get_active_without_refresh(&pool)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.account_id(), selected.account_id());
+        let refreshed = Credentials::get_all_without_refresh(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|account| account.account_id() == credentials.account_id())
+            .unwrap();
+        assert!(!refreshed.active);
+        assert_eq!(refreshed.access_token, "renewed-access");
+    }
 
     #[test]
     fn normalizes_api_roots() {
