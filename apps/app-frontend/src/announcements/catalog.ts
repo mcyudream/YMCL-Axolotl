@@ -28,6 +28,33 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.6',
+		version: '2.2.6',
+		publishedAt: '2026-11-20',
+		title: {
+			'en-US': 'YMCL 2.2.6',
+			'zh-CN': 'YMCL 2.2.6',
+		},
+		changes: {
+			added: [
+				{
+					'en-US':
+						'Persisted server lists and pack information across restarts so installed instances can still launch when refreshing fails, with a saved-information notice.',
+					'zh-CN':
+						'新增服务器列表与整合包信息的持久缓存，刷新失败时可使用缓存启动已有匹配实例，并显示缓存提示。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed server pack preparation failing after an interrupted manifest response by automatically retrying with a compatible connection.',
+					'zh-CN':
+						'修复清单传输中途断开导致准备游戏失败的问题，现会自动切换兼容连接重试。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.5',
 		version: '2.2.5',
 		publishedAt: '2026-11-15',

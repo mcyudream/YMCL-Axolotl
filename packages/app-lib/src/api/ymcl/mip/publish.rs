@@ -489,17 +489,7 @@ pub async fn list_servers()
 -> crate::Result<Vec<super::update::MipServerBinding>> {
     let state = State::get().await?;
     let mip_base = active_mip_base().await?;
-    let value = super::update::fetch_json(
-        &state,
-        &super::update::servers_url(&mip_base),
-    )
-    .await?;
-    let servers: Vec<super::update::MipServerBinding> = serde_json::from_value(
-        value
-            .get("servers")
-            .cloned()
-            .unwrap_or(serde_json::Value::Array(Vec::new())),
-    )?;
+    let (servers, _) = super::update::fetch_servers(&state, &mip_base).await?;
     Ok(servers)
 }
 

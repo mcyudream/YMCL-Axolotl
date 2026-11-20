@@ -443,6 +443,7 @@ export interface YmclExternalPoll {
 
 export interface YmclUpdateCheck {
 	managed: boolean
+	using_cache?: boolean
 	pack_id?: string | null
 	current_version?: string | null
 	target_version?: string | null
@@ -465,6 +466,7 @@ export interface YmclJoinFeature {
 
 export interface YmclJoinPreview {
 	available: boolean
+	using_cache?: boolean
 	reason?: string | null
 	server_id?: string | null
 	server_name?: string | null

@@ -9569,6 +9569,9 @@
 	"app.ymcl.landing.transfer.available": {
 		"message": "Download to start playing"
 	},
+	"app.ymcl.landing.transfer.cached": {
+		"message": "Could not refresh server information. Using saved information; installed instances can still be launched."
+	},
 	"app.ymcl.landing.transfer.changed": {
 		"message": "Updated {count} files; removed {deleted} old files."
 	},

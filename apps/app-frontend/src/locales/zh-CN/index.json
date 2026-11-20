@@ -9586,6 +9586,9 @@
 	"app.ymcl.landing.transfer.available": {
 		"message": "下载后即可开始"
 	},
+	"app.ymcl.landing.transfer.cached": {
+		"message": "暂未获取到服务器新内容，正在使用缓存信息；已安装的实例可直接启动。"
+	},
 	"app.ymcl.landing.transfer.changed": {
 		"message": "已更新 {count} 个文件，移除 {deleted} 个旧文件。"
 	},

@@ -1126,6 +1126,11 @@ pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {
     let mut chain = String::new();
     let mut source = error.source();
     while let Some(next) = source {
+        // An h2 I/O error can render as just "broken pipe", without any
+        // HTTP/2 marker in its message.
+        if next.is::<h2::Error>() {
+            return true;
+        }
         if !chain.is_empty() {
             chain.push(' ');
         }
@@ -1187,6 +1192,11 @@ pub(crate) fn build_configured_client(
 }
 
 pub async fn configured_client() -> crate::Result<reqwest::Client> {
+    // Local HTTP fixtures do not initialize the application's global state.
+    #[cfg(test)]
+    if !crate::State::initialized() {
+        return Ok(INSECURE_REQWEST_CLIENT.clone());
+    }
     Ok(crate::State::get().await?.configured_http_client())
 }
 
@@ -1270,6 +1280,38 @@ static DIRECT_FETCH_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .build()
         .expect("client configuration should be valid")
 });
+
+async fn metadata_http1_client(
+    proxy: ProxyPolicy,
+    protected_headers: bool,
+    mirror_without_redirects: bool,
+) -> crate::Result<reqwest::Client> {
+    let mut builder = reqwest_client_builder().http1_only();
+    if protected_headers || mirror_without_redirects {
+        builder = builder.redirect(reqwest::redirect::Policy::none());
+    }
+    match proxy {
+        ProxyPolicy::System => {
+            if let Some(state) = crate::State::get_if_initialized() {
+                let settings = crate::state::Settings::get(&state.pool).await?;
+                builder = state.proxy_config().await?.apply(
+                    builder.danger_accept_invalid_certs(
+                        settings.ignore_ssl_errors,
+                    ),
+                )?;
+            }
+        }
+        ProxyPolicy::Direct => {
+            builder = builder.no_proxy();
+            #[cfg(not(test))]
+            {
+                builder = builder.https_only(true);
+            }
+        }
+        ProxyPolicy::Loopback => builder = builder.no_proxy(),
+    }
+    Ok(builder.build()?)
+}
 
 const FETCH_RETRY_DELAYS: [time::Duration; 3] = [
     time::Duration::from_millis(100),
@@ -2041,6 +2083,9 @@ async fn fetch_advanced_with_client_and_progress(
             attempt_budget
         };
         let mut retried_server_error = false;
+        let mut use_http1 = url_authority(request_url)
+            .is_some_and(|authority| authority_uses_http1_fallback(&authority));
+        let mut http1_client = None;
         let mut route_attempts = 0;
         while total_attempts < attempt_budget {
             let remaining_routes = request_routes.len() - route_index - 1;
@@ -2064,17 +2109,31 @@ async fn fetch_advanced_with_client_and_progress(
             let protected_headers = creds.is_some()
                 || download_meta_header.is_some()
                 || header.is_some_and(|header| is_sensitive_header(header.0));
-            let route_client = match (route.proxy, protected_headers) {
-                (ProxyPolicy::System, false)
-                    if is_mirror && modrinth_request_kind.is_some() =>
-                {
-                    &*NO_REDIRECT_REQWEST_CLIENT
+            if use_http1 && http1_client.is_none() {
+                http1_client = Some(
+                    metadata_http1_client(
+                        route.proxy,
+                        protected_headers,
+                        is_mirror && modrinth_request_kind.is_some(),
+                    )
+                    .await?,
+                );
+            }
+            let route_client = if let Some(client) = http1_client.as_ref() {
+                client
+            } else {
+                match (route.proxy, protected_headers) {
+                    (ProxyPolicy::System, false)
+                        if is_mirror && modrinth_request_kind.is_some() =>
+                    {
+                        &*NO_REDIRECT_REQWEST_CLIENT
+                    }
+                    (ProxyPolicy::System, false) => client,
+                    (ProxyPolicy::System, true) => &*NO_REDIRECT_REQWEST_CLIENT,
+                    (ProxyPolicy::Loopback, _) => &*LOOPBACK_FETCH_CLIENT,
+                    (ProxyPolicy::Direct, false) => &*DIRECT_FETCH_CLIENT,
+                    (ProxyPolicy::Direct, true) => &*DIRECT_REQWEST_CLIENT,
                 }
-                (ProxyPolicy::System, false) => client,
-                (ProxyPolicy::System, true) => &*NO_REDIRECT_REQWEST_CLIENT,
-                (ProxyPolicy::Loopback, _) => &*LOOPBACK_FETCH_CLIENT,
-                (ProxyPolicy::Direct, false) => &*DIRECT_FETCH_CLIENT,
-                (ProxyPolicy::Direct, true) => &*DIRECT_REQWEST_CLIENT,
             };
             let mut req = route_client.request(method.clone(), request_url);
             if modrinth_request_kind == Some("CDN") && !is_mrpack_download {
@@ -2546,9 +2605,30 @@ async fn fetch_advanced_with_client_and_progress(
                         return Ok(bytes);
                     } else if let Err(err) = bytes {
                         record_route_failure(route, resource, None);
+                        let retry_http1 = !use_http1
+                            && has_more_attempts
+                            && err.chain().any(|source| {
+                                source
+                                    .downcast_ref::<reqwest::Error>()
+                                    .is_some_and(is_h2_protocol_failure)
+                            });
+                        if retry_http1 {
+                            use_http1 = true;
+                            if let Some(authority) =
+                                url_authority(&response_url)
+                            {
+                                record_authority_h2_failure(&authority);
+                            }
+                            tracing::warn!(
+                                url = %log_request_url,
+                                "HTTP/2 response body failed; retrying metadata over HTTP/1.1"
+                            );
+                        }
                         let error_message = err.to_string();
                         let error: crate::Error = err.into();
-                        let decision = if has_next_route {
+                        let decision = if retry_http1 {
+                            "retry_http1"
+                        } else if has_next_route {
                             "switch_route"
                         } else if has_more_attempts {
                             "retry_same_route"
@@ -2566,7 +2646,7 @@ async fn fetch_advanced_with_client_and_progress(
                             Some(http_version),
                         );
                         last_error = Some(error);
-                        if has_next_route {
+                        if has_next_route && !retry_http1 {
                             if modrinth_request_kind.is_some() {
                                 tracing::warn!(
                                     request_target,
@@ -2617,9 +2697,24 @@ async fn fetch_advanced_with_client_and_progress(
                         DOWNLOAD_DNS_RESOLVER.pre_resolve(&host).await;
                     }
                     record_route_failure(route, resource, None);
+                    let retry_http1 = !use_http1
+                        && has_more_attempts
+                        && is_h2_protocol_failure(&err);
+                    if retry_http1 {
+                        use_http1 = true;
+                        if let Some(authority) = url_authority(request_url) {
+                            record_authority_h2_failure(&authority);
+                        }
+                        tracing::warn!(
+                            url = %log_request_url,
+                            "HTTP/2 request failed; retrying metadata over HTTP/1.1"
+                        );
+                    }
                     let error_message = err.to_string();
                     let error: crate::Error = err.into();
-                    let decision = if has_next_route {
+                    let decision = if retry_http1 {
+                        "retry_http1"
+                    } else if has_next_route {
                         "switch_route"
                     } else if has_more_attempts {
                         "retry_same_route"
@@ -2637,7 +2732,7 @@ async fn fetch_advanced_with_client_and_progress(
                         None,
                     );
                     last_error = Some(error);
-                    if has_next_route {
+                    if has_next_route && !retry_http1 {
                         if modrinth_request_kind.is_some() {
                             tracing::warn!(
                                 request_target,
@@ -7692,6 +7787,129 @@ mod tests {
             let delay = fetch_retry_delay(attempt);
             assert!(delay >= minimum, "attempt {attempt}: {delay:?}");
             assert!(delay <= maximum, "attempt {attempt}: {delay:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_recovers_from_http2_body_disconnect_over_http1() {
+        for streaming in [false, true] {
+            let listener =
+                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let host = format!("metadata-{}.localhost", address.port());
+            set_download_dns_host_override(&host, "127.0.0.1").unwrap();
+            let url = format!("http://{host}:{}/manifest", address.port());
+            let http2_requests = Arc::new(AtomicUsize::new(0));
+            let http1_requests = Arc::new(AtomicUsize::new(0));
+            let (h2_count, h1_count) =
+                (Arc::clone(&http2_requests), Arc::clone(&http1_requests));
+            let server = tokio::spawn(async move {
+                loop {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let (h2_count, h1_count) =
+                        (Arc::clone(&h2_count), Arc::clone(&h1_count));
+                    tokio::spawn(async move {
+                        let mut prefix = [0; 24];
+                        let read = stream.peek(&mut prefix).await.unwrap();
+                        if prefix[..read].starts_with(b"PRI ") {
+                            let mut connection =
+                                h2::server::handshake(stream).await.unwrap();
+                            let (_, mut respond) =
+                                connection.accept().await.unwrap().unwrap();
+                            h2_count.fetch_add(1, Ordering::Relaxed);
+                            let driver = tokio::spawn(async move {
+                                while connection.accept().await.is_some() {}
+                            });
+                            let mut body = respond
+                                .send_response(http::Response::new(()), false)
+                                .unwrap();
+                            body.send_data(Bytes::from_static(b"{"), false)
+                                .unwrap();
+                            // Flush HTTP 200 and a partial body, then break the
+                            // connection without sending END_STREAM.
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            driver.abort();
+                        } else {
+                            let mut request = Vec::new();
+                            let mut buffer = [0; 1024];
+                            loop {
+                                let read =
+                                    stream.read(&mut buffer).await.unwrap();
+                                if read == 0 {
+                                    return;
+                                }
+                                request.extend_from_slice(&buffer[..read]);
+                                if request
+                                    .windows(4)
+                                    .any(|part| part == b"\r\n\r\n")
+                                {
+                                    break;
+                                }
+                            }
+                            assert!(
+                                String::from_utf8_lossy(&request)
+                                    .to_ascii_lowercase()
+                                    .contains("x-recovery: retained")
+                            );
+                            h1_count.fetch_add(1, Ordering::Relaxed);
+                            stream
+                                .write_all(
+                                    b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\nConnection: close\r\n\r\n{\"version\":1}",
+                                )
+                                .await
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            let client = reqwest_client_builder()
+                .no_proxy()
+                .http2_prior_knowledge()
+                .build()
+                .unwrap();
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .connect_lazy("sqlite::memory:")
+                .unwrap();
+            let mut progress = |_,
+                                _|
+             -> Pin<
+                Box<dyn Future<Output = crate::Result<()>> + Send>,
+            > { Box::pin(async { Ok(()) }) };
+            let bytes = tokio::time::timeout(
+                Duration::from_secs(5),
+                fetch_advanced_with_client_and_progress(
+                    Method::GET,
+                    &url,
+                    Some(
+                        &sha1_smol::Sha1::from(br#"{"version":1}"#)
+                            .digest()
+                            .to_string(),
+                    ),
+                    None,
+                    Some(("X-Recovery", "retained")),
+                    None,
+                    None,
+                    None,
+                    &FetchSemaphore(Semaphore::new(1)),
+                    &pool,
+                    &client,
+                    Some(crate::state::DownloadSourceMode::OfficialOnly),
+                    if streaming { Some(&mut progress) } else { None },
+                    None,
+                    METADATA_ATTEMPT_BUDGET,
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(bytes, Bytes::from_static(br#"{"version":1}"#));
+            assert_eq!(http2_requests.load(Ordering::Relaxed), 1);
+            assert_eq!(http1_requests.load(Ordering::Relaxed), 1);
+            server.abort();
+            clear_download_dns_host_override(&host).unwrap();
+            H2_FALLBACK_AUTHORITIES
+                .lock()
+                .remove(&url_authority(&url).unwrap());
         }
     }
 

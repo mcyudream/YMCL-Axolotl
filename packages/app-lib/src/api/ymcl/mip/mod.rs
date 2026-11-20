@@ -5,6 +5,7 @@ pub mod apply;
 pub mod diff;
 pub mod first_install;
 pub mod manifest;
+mod metadata_cache;
 pub mod mirrors;
 pub mod publish;
 pub mod state;

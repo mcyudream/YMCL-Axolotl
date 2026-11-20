@@ -178,6 +178,8 @@ export function useDomainPacks() {
 	const loadError = ref('')
 	/** 逐服务器的解析诊断（空态时展示，定位绑定/包状态）。 */
 	const serverDiagnostics = ref<DomainPackServerDiagnostic[]>([])
+	let refreshGeneration = 0
+	let loadedScope = ''
 
 	const hasDomainFace = computed(() => ymclStore.activeDomainId !== PERSONAL_DOMAIN_ID)
 
@@ -205,11 +207,23 @@ export function useDomainPacks() {
 	}
 
 	async function refresh() {
+		const request = ++refreshGeneration
+		const scope = JSON.stringify([
+			ymclStore.activeDomainId,
+			ymclStore.session?.session.user_id ?? null,
+		])
+		if (loadedScope !== scope) {
+			packs.value = []
+			installsByPack.value = new Map()
+			serverDiagnostics.value = []
+			loadedScope = scope
+		}
 		if (!hasDomainFace.value) {
 			packs.value = []
 			installsByPack.value = new Map()
 			serverDiagnostics.value = []
 			emptyReason.value = 'none'
+			loading.value = false
 			return
 		}
 		loading.value = true
@@ -217,6 +231,7 @@ export function useDomainPacks() {
 		loadError.value = ''
 		try {
 			const servers = await invoke<ServerOption[]>('plugin:ymcl|ymcl_mip_servers')
+			if (request !== refreshGeneration) return
 			const bound = servers.filter((server) => server.binding?.packId)
 			if (bound.length === 0) {
 				packs.value = []
@@ -281,6 +296,7 @@ export function useDomainPacks() {
 					},
 				),
 			)
+			if (request !== refreshGeneration) return
 			serverDiagnostics.value = previews.map((item) => item.diagnostic)
 			// 同一个包可能被多个服务器绑定：只保留首个入口。
 			const seen = new Set<string>()
@@ -297,6 +313,7 @@ export function useDomainPacks() {
 			}
 
 			const instances = await list().catch(() => [])
+			if (request !== refreshGeneration) return
 			const installs = await Promise.all(
 				instances.map(async (instance): Promise<DomainPackInstall | null> => {
 					try {
@@ -314,6 +331,7 @@ export function useDomainPacks() {
 					}
 				}),
 			)
+			if (request !== refreshGeneration) return
 			const grouped = new Map<string, DomainPackInstall[]>()
 			for (const install of installs) {
 				if (!install) continue
@@ -323,13 +341,14 @@ export function useDomainPacks() {
 			}
 			installsByPack.value = grouped
 		} catch (error) {
+			if (request !== refreshGeneration) return
 			// 服务器列表都拿不到（无 MIP 面/会话失效/权限点未授权）：面板显示
 			// 失败原因而不是无声消失。
 			packs.value = []
 			emptyReason.value = 'load-failed'
 			loadError.value = ymclErrorMessage(error)
 		} finally {
-			loading.value = false
+			if (request === refreshGeneration) loading.value = false
 		}
 	}
 
@@ -576,7 +595,7 @@ export function useDomainPacks() {
 	}
 
 	watch(
-		() => ymclStore.activeDomainId,
+		[() => ymclStore.activeDomainId, () => ymclStore.session?.session.user_id],
 		() => void refresh(),
 	)
 	// 发布/绑定推送到达后重拉：否则面板停留在发布前的旧条目上

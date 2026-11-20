@@ -76,7 +76,7 @@ const server = computed(
 		servers.value.find((row) => row.available) ??
 		servers.value[0],
 )
-const preview = ref<YmclJoinPreview | null>(null)
+const joinPreview = ref<YmclJoinPreview | null>(null)
 const updateCheck = ref<YmclUpdateCheck | null>(null)
 const instances = ref<GameInstance[]>([])
 const localChoice = ref('')
@@ -217,6 +217,11 @@ const messages = defineMessages({
 	logs: { id: 'app.ymcl.landing.transfer.logs', defaultMessage: 'Game logs' },
 	localFiles: { id: 'app.ymcl.landing.transfer.local-files', defaultMessage: 'Local files' },
 	check: { id: 'app.ymcl.landing.transfer.check', defaultMessage: 'Check for updates' },
+	cached: {
+		id: 'app.ymcl.landing.transfer.cached',
+		defaultMessage:
+			'Could not refresh server information. Using saved information; installed instances can still be launched.',
+	},
 	addressMissing: {
 		id: 'app.ymcl.landing.address-missing',
 		defaultMessage: 'This server has no connection address.',
@@ -241,7 +246,7 @@ function showErrorDetails(message: string, event: MouseEvent) {
 }
 
 const installed = computed(() => {
-	if (preview.value?.installed) return preview.value.installed
+	if (joinPreview.value?.installed) return joinPreview.value.installed
 	const local = server.value?.install
 	return local
 		? {
@@ -255,7 +260,8 @@ const installed = computed(() => {
 const matchingInstances = computed(() =>
 	instances.value.filter(
 		(instance) =>
-			!preview.value?.required_version || instance.game_version === preview.value.required_version,
+			!joinPreview.value?.required_version ||
+			instance.game_version === joinPreview.value.required_version,
 	),
 )
 const instanceOptions = computed(() => [
@@ -263,15 +269,15 @@ const instanceOptions = computed(() => [
 		value: `instance:${instance.id}`,
 		label: `${instance.name} · ${instance.game_version}`,
 	})),
-	...(preview.value?.required_version
+	...(joinPreview.value?.required_version
 		? [
 				{
 					value: 'vanilla',
-					label: formatMessage(messages.vanilla, { version: preview.value.required_version }),
+					label: formatMessage(messages.vanilla, { version: joinPreview.value.required_version }),
 				},
 			]
 		: []),
-	...(preview.value?.optional_pack_id
+	...(joinPreview.value?.optional_pack_id
 		? [{ value: 'enhanced', label: formatMessage(messages.enhanced) }]
 		: []),
 ])
@@ -280,9 +286,13 @@ const instanceId = computed(
 		installed.value?.instance_id ??
 		(localChoice.value.startsWith('instance:') ? localChoice.value.slice(9) : ''),
 )
+const usingCache = computed(
+	() => !!joinPreview.value?.using_cache || !!updateCheck.value?.using_cache,
+)
 const needsUpdate = computed(
 	() =>
 		!!installed.value &&
+		!usingCache.value &&
 		(!installed.value.up_to_date ||
 			!!outcome.value?.warning ||
 			(updateCheck.value?.pending_changes ?? 0) > 0 ||
@@ -301,7 +311,7 @@ const percentage = computed(() =>
 	transfer.value.fraction === null ? null : Math.round(transfer.value.fraction * 100),
 )
 const action = computed(() => {
-	if (preview.value?.has_pack)
+	if (joinPreview.value?.has_pack)
 		return !installed.value ? 'download' : needsUpdate.value ? 'update' : 'launch'
 	if (localChoice.value === 'vanilla' || localChoice.value === 'enhanced') return 'download'
 	return instanceId.value ? 'launch' : 'create'
@@ -313,7 +323,7 @@ const statusTitle = computed(() => {
 	if (checking.value || loading.value) return messages.checking
 	if (error.value) return messages.failed
 	if (launched.value) return messages.launched
-	if (preview.value && !preview.value.available) return messages.unavailable
+	if (joinPreview.value && !joinPreview.value.available) return messages.unavailable
 	if (needsUpdate.value) return messages.updateAvailable
 	if (action.value === 'download') return messages.available
 	return instanceId.value ? messages.ready : messages.choose
@@ -335,7 +345,7 @@ const progressDetail = computed(() => {
 })
 const versionText = computed(() => {
 	const current = outcome.value?.version || installed.value?.version
-	const target = preview.value?.target_version
+	const target = joinPreview.value?.target_version
 	if (current && target && current !== target)
 		return formatMessage(messages.versions, { current, target })
 	return current || target ? formatMessage(messages.version, { version: current || target }) : ''
@@ -362,7 +372,7 @@ async function inspect() {
 		)
 		if (!result || !current()) return
 		const { preview: next, instances: local, check } = result
-		preview.value = next
+		joinPreview.value = next
 		updateCheck.value = check
 		instances.value = local
 		const matching = local.filter(
@@ -391,15 +401,16 @@ async function inspect() {
 
 function packEntry(enhanced = false): DomainPackEntry | null {
 	const selected = server.value
-	const packId = enhanced ? preview.value?.optional_pack_id : preview.value?.pack_id
+	const packId = enhanced ? joinPreview.value?.optional_pack_id : joinPreview.value?.pack_id
 	if (!selected || !packId) return null
 	return {
 		serverId: selected.serverId,
 		serverName: selected.name,
 		packId,
 		targetVersion:
-			(enhanced ? preview.value?.optional_target_version : preview.value?.target_version) ?? '',
-		requiredVersion: preview.value?.required_version ?? '',
+			(enhanced ? joinPreview.value?.optional_target_version : joinPreview.value?.target_version) ??
+			'',
+		requiredVersion: joinPreview.value?.required_version ?? '',
 		seasonName: selected.seasonName ?? '',
 	}
 }
@@ -436,7 +447,7 @@ async function installVanilla(name: string, gameVersion: string, scope: DomainPa
 
 async function execute() {
 	if (busy.value || props.preview || !server.value) return
-	if (!preview.value || (error.value && !preview.value.available)) {
+	if (!joinPreview.value || (error.value && !joinPreview.value.available)) {
 		await inspect()
 		return
 	}
@@ -461,12 +472,15 @@ async function execute() {
 		await inspect()
 		requireContext()
 		if (requestError.value) return
-		if (!preview.value?.available)
-			throw new Error(preview.value?.reason || formatMessage(messages.unavailable))
-		if (intent === 'download' || intent === 'update' || needsUpdate.value) {
+		if (!joinPreview.value?.available)
+			throw new Error(joinPreview.value?.reason || formatMessage(messages.unavailable))
+		if (
+			intent === 'download' ||
+			(!usingCache.value && (intent === 'update' || needsUpdate.value))
+		) {
 			if (intent === 'download' && installed.value) return
-			if (!preview.value.has_pack && localChoice.value === 'vanilla') {
-				const gameVersion = preview.value.required_version
+			if (!joinPreview.value.has_pack && localChoice.value === 'vanilla') {
+				const gameVersion = joinPreview.value.required_version
 				if (!gameVersion) throw new Error(formatMessage(messages.choose))
 				const createdId = await installVanilla(server.value.name, gameVersion, operationScope.value)
 				requireContext()
@@ -474,17 +488,17 @@ async function execute() {
 				localChoice.value = `instance:${createdId}`
 			} else {
 				const enhanced =
-					!preview.value.has_pack &&
+					!joinPreview.value.has_pack &&
 					(localChoice.value === 'enhanced' ||
-						installed.value?.pack_id === preview.value.optional_pack_id)
+						installed.value?.pack_id === joinPreview.value.optional_pack_id)
 				const entry = packEntry(enhanced)
 				if (!entry) throw new Error(formatMessage(messages.unavailable))
 				const options = {
 					notify: false,
 					instanceId: installed.value?.instance_id,
 					selectedFeatures: (enhanced
-						? (preview.value.optional_features ?? [])
-						: preview.value.features
+						? (joinPreview.value.optional_features ?? [])
+						: joinPreview.value.features
 					)
 						.filter((feature) => feature.default)
 						.map((feature) => feature.id),
@@ -519,7 +533,13 @@ async function execute() {
 		const check = await ymcl.preLaunchCheck(targetInstance)
 		requireContext()
 		if (!next.available) throw new Error(next.reason || formatMessage(messages.unavailable))
-		if ((check.pending_changes ?? 0) > 0 || (check.pending_deletions ?? 0) > 0) {
+		joinPreview.value = next
+		updateCheck.value = check
+		if (
+			!next.using_cache &&
+			!check.using_cache &&
+			((check.pending_changes ?? 0) > 0 || (check.pending_deletions ?? 0) > 0)
+		) {
 			updateCheck.value = check
 			launching.value = false
 			const entry = packEntry(!next.has_pack && check.pack_id === next.optional_pack_id)
@@ -572,7 +592,7 @@ watch(
 	() => {
 		generation++
 		contextRevision++
-		preview.value = null
+		joinPreview.value = null
 		updateCheck.value = null
 		requestError.value = ''
 		fileError.value = ''
@@ -656,7 +676,7 @@ onUnmounted(() => {
 					</button>
 				</div>
 				<fieldset
-					v-if="preview && !preview.has_pack && !installed && !busy"
+					v-if="joinPreview && !joinPreview.has_pack && !installed && !busy"
 					class="m-0 mt-4 min-w-0 border-0 p-0"
 				>
 					<legend class="mb-2 text-xs text-white/60">{{ formatMessage(messages.instance) }}</legend>
@@ -739,8 +759,14 @@ onUnmounted(() => {
 							{{ formatMessage(messages.errorDetails) }}
 						</button>
 					</div>
-					<p v-else-if="preview && !preview.available" class="mb-0 mt-3 text-sm text-white/60">
-						{{ preview.reason || formatMessage(messages.unavailable) }}
+					<p
+						v-else-if="joinPreview && !joinPreview.available"
+						class="mb-0 mt-3 text-sm text-white/60"
+					>
+						{{ joinPreview.reason || formatMessage(messages.unavailable) }}
+					</p>
+					<p v-if="usingCache && !error" class="mb-0 mt-3 text-xs leading-relaxed text-white/60">
+						{{ formatMessage(messages.cached) }}
 					</p>
 					<div v-if="outcome?.warning" class="mt-3 text-xs leading-relaxed text-orange">
 						<p class="m-0 line-clamp-2">{{ outcome.warning }}</p>
@@ -871,7 +897,7 @@ onUnmounted(() => {
 					v-else-if="
 						action === 'create' &&
 						!error &&
-						preview?.available &&
+						joinPreview?.available &&
 						!store.isRouteHidden('/create') &&
 						!store.isEntranceHidden('create-instance')
 					"
@@ -887,7 +913,7 @@ onUnmounted(() => {
 				>
 					<button
 						type="button"
-						:disabled="(!error && (!preview || !preview.available)) || props.preview"
+						:disabled="(!error && (!joinPreview || !joinPreview.available)) || props.preview"
 						@click="execute"
 					>
 						<RefreshCwIcon v-if="error || action === 'update'" /><DownloadIcon

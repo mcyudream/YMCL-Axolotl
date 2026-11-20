@@ -7,6 +7,7 @@
 //! step so the UI can confirm (updatePolicy `prompt`).
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::io::Read;
 use std::path::Path;
 
@@ -19,6 +20,9 @@ use super::apply::{BACKUP_DIR_NAME, STAGING_DIR_NAME};
 use super::apply::{ObjectFetcher, apply_update};
 use super::diff::compute_update_plan;
 use super::manifest::{MipFileEntry, MipManifest};
+use super::metadata_cache::{
+    MetadataCache, MetadataSnapshot, can_use_cached_metadata,
+};
 use super::state::{self, MipPackState};
 use crate::State;
 use crate::api::ymcl::registry;
@@ -40,6 +44,8 @@ pub struct YmclUpdateCheck {
     /// Release notes of the target version (publisher-attached, optional) —
     /// shown to the player before they update.
     pub notes: Option<String>,
+    /// The adapter could not be refreshed; the installed version is usable.
+    pub using_cache: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -157,18 +163,65 @@ pub(crate) async fn fetch_json(
     state: &State,
     url: &str,
 ) -> crate::Result<serde_json::Value> {
+    Ok(fetch_json_snapshot(state, url, false).await?.value)
+}
+
+fn metadata_cache_scope(
+    domain_id: &str,
+    session: Option<&crate::state::ymcl_session::YmclStoredSession>,
+) -> crate::Result<String> {
+    let identity = session
+        .map(|session| (&session.session.user_id, &session.session.context));
+    Ok(serde_json::to_string(&(domain_id, identity))?)
+}
+
+async fn fetch_json_snapshot(
+    state: &State,
+    url: &str,
+    allow_cached: bool,
+) -> crate::Result<MetadataSnapshot> {
     // The adapter's MIP distribution face sits behind its plugin permission
     // wall, so attach the active domain's (freshest) session when one exists.
     let active = registry::active_domain_id(&state.pool).await?;
-    let bytes = crate::api::ymcl::auth::domain_request_opt(
-        state,
-        &active,
-        Method::GET,
-        url,
-        None,
-    )
-    .await?;
-    Ok(serde_json::from_slice(&bytes)?)
+    let session = crate::state::ymcl_session::get(&active, &state.pool).await?;
+    let scope = metadata_cache_scope(&active, session.as_ref())?;
+    MetadataCache::new(&state.directories.caches_dir(), &scope, url)
+        .fetch(
+            url,
+            allow_cached,
+            async {
+                let result = crate::api::ymcl::auth::domain_request_opt(
+                    state,
+                    &active,
+                    Method::GET,
+                    url,
+                    None,
+                )
+                .await;
+                let current =
+                    crate::state::ymcl_session::get(&active, &state.pool)
+                        .await?;
+                if metadata_cache_scope(&active, current.as_ref())? != scope {
+                    return Err(crate::ErrorKind::InputError(
+                        "The domain account changed while refreshing server information"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                result
+            },
+        )
+        .await
+}
+
+pub(super) async fn fetch_servers(
+    state: &State,
+    mip_base: &str,
+) -> crate::Result<(Vec<MipServerBinding>, bool)> {
+    let snapshot =
+        fetch_json_snapshot(state, &servers_url(mip_base), true).await?;
+    let servers = serde_json::from_value(snapshot.value["servers"].clone())?;
+    Ok((servers, snapshot.cached))
 }
 
 /// HTTP-backed object fetcher: walks a manifest entry's `sources[]` in
@@ -641,14 +694,54 @@ pub async fn check_instance(
             pending_deletions: None,
             skipped_files: None,
             notes: None,
+            using_cache: false,
         });
     };
+    let check = check_pack_update(
+        &state,
+        instance_id,
+        &instance_dir,
+        &pack_state,
+        apply,
+    );
+    if apply {
+        return check.await;
+    }
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(10), check)
+            .await
+            .unwrap_or_else(|_| {
+                Err(crate::ErrorKind::NetworkError(
+                    "MIP update check timed out".to_string(),
+                )
+                .into())
+            });
+    match result {
+        Err(error) if can_use_cached_metadata(&error) => {
+            tracing::warn!(
+                instance_id,
+                %error,
+                "MIP update check unavailable; keeping the installed instance"
+            );
+            Ok(cached_instance(&pack_state))
+        }
+        result => result,
+    }
+}
+
+async fn check_pack_update(
+    state: &State,
+    instance_id: &str,
+    instance_dir: &Path,
+    pack_state: &MipPackState,
+    apply: bool,
+) -> crate::Result<YmclUpdateCheck> {
     let pack_id = pack_state.pack_id.clone();
 
     // Active domain context: capabilities carry the MIP base URL.
     let active = registry::active_domain_id(&state.pool).await?;
     if active == registry::PERSONAL_DOMAIN_ID {
-        return Ok(unchanged(&pack_state, "not in a domain"));
+        return Ok(unchanged(pack_state, "not in a domain"));
     }
     let capabilities = registry::domain_capabilities(&active).await?;
     let Some(mip_base) = capabilities
@@ -656,14 +749,19 @@ pub async fn check_instance(
         .as_ref()
         .and_then(|mip| mip.base_url.clone())
     else {
-        return Ok(unchanged(&pack_state, "domain has no MIP distribution"));
+        return Ok(unchanged(pack_state, "domain has no MIP distribution"));
     };
 
     // Binding: prefer the instance's recorded server, else any server that
     // publishes this pack (MIP appendix B.3 step 2). The matched server id
     // rides along: installs are keyed by server on the frontend, because a
     // republished pack gets a new pack id while the server binding stays.
-    let servers_value = fetch_json(&state, &servers_url(&mip_base)).await?;
+    let servers_snapshot =
+        fetch_json_snapshot(state, &servers_url(&mip_base), !apply).await?;
+    if servers_snapshot.cached {
+        return Ok(cached_instance(pack_state));
+    }
+    let servers_value = servers_snapshot.value;
     let servers: Vec<MipServerBinding> = serde_json::from_value(
         servers_value
             .get("servers")
@@ -688,14 +786,19 @@ pub async fn check_instance(
         .filter(|(_, binding)| binding.pack_id == pack_id);
     let Some((bound_server_id, binding)) = resolved else {
         return Ok(unchanged(
-            &pack_state,
+            pack_state,
             "pack is no longer bound to a server",
         ));
     };
 
     // Target version: pinned wins, else channel latest.
-    let versions_value =
-        fetch_json(&state, &versions_url(&mip_base, &pack_id)).await?;
+    let versions_snapshot =
+        fetch_json_snapshot(state, &versions_url(&mip_base, &pack_id), !apply)
+            .await?;
+    if versions_snapshot.cached {
+        return Ok(cached_instance(pack_state));
+    }
+    let versions_value = versions_snapshot.value;
     let versions: Vec<MipVersionEntry> = serde_json::from_value(
         versions_value
             .get("versions")
@@ -707,20 +810,27 @@ pub async fn check_instance(
         binding.channel.as_deref(),
         binding.pinned_version.as_deref(),
     ) else {
-        return Ok(unchanged(&pack_state, "no released versions"));
+        return Ok(unchanged(pack_state, "no released versions"));
     };
     if target_version == pack_state.version {
-        return Ok(unchanged(&pack_state, "already up to date"));
+        return Ok(unchanged(pack_state, "already up to date"));
     }
 
     // Manifest + plan.
-    let manifest_value =
-        fetch_json(&state, &manifest_url(&mip_base, &pack_id, target_version))
-            .await?;
-    let manifest: MipManifest = serde_json::from_value(manifest_value)?;
+    let manifest_snapshot = fetch_json_snapshot(
+        state,
+        &manifest_url(&mip_base, &pack_id, target_version),
+        !apply,
+    )
+    .await?;
+    if manifest_snapshot.cached {
+        return Ok(cached_instance(pack_state));
+    }
+    let manifest: MipManifest =
+        serde_json::from_value(manifest_snapshot.value)?;
     manifest.validate()?;
-    let local_hashes = scan_local_hashes_cached_async(&instance_dir).await?;
-    let plan = compute_update_plan(&pack_state, &manifest, &local_hashes)?;
+    let local_hashes = scan_local_hashes_cached_async(instance_dir).await?;
+    let plan = compute_update_plan(pack_state, &manifest, &local_hashes)?;
 
     let check = YmclUpdateCheck {
         managed: true,
@@ -739,6 +849,7 @@ pub async fn check_instance(
             .iter()
             .find(|entry| entry.version == target_version)
             .and_then(|entry| entry.notes.clone()),
+        using_cache: false,
     };
 
     if !apply {
@@ -751,7 +862,7 @@ pub async fn check_instance(
         .map(|file| (file.path.clone(), file.clone()))
         .collect();
     let fetcher = HttpFetcher {
-        state: &state,
+        state,
         mip_base: Some(mip_base.as_str()),
     };
     let mut progress = super::apply::ApplyProgress::create(
@@ -763,8 +874,8 @@ pub async fn check_instance(
     )
     .await;
     let outcome = apply_update(
-        &instance_dir,
-        &pack_state,
+        instance_dir,
+        pack_state,
         &manifest,
         &plan,
         &entries,
@@ -773,7 +884,7 @@ pub async fn check_instance(
     )
     .await?;
     let new_state = outcome.new_state;
-    state::save(&instance_dir, &new_state).await?;
+    state::save(instance_dir, &new_state).await?;
 
     Ok(YmclUpdateCheck {
         managed: true,
@@ -792,6 +903,7 @@ pub async fn check_instance(
                 .collect(),
         ),
         notes: check.notes,
+        using_cache: false,
     })
 }
 
@@ -830,6 +942,14 @@ fn unchanged(pack_state: &MipPackState, reason: &str) -> YmclUpdateCheck {
         pending_deletions: Some(0),
         skipped_files: None,
         notes: None,
+        using_cache: false,
+    }
+}
+
+fn cached_instance(pack_state: &MipPackState) -> YmclUpdateCheck {
+    YmclUpdateCheck {
+        using_cache: true,
+        ..unchanged(pack_state, "using the installed version while offline")
     }
 }
 
@@ -1370,6 +1490,8 @@ pub struct YmclJoinPreview {
     /// direct-connect face for this server (YAP §6.12). `None` keeps the
     /// plain `mc_address`: the face is optional and never blocks a join.
     pub launch_address: Option<String>,
+    /// Fresh metadata was unavailable; local instances can still be launched.
+    pub using_cache: bool,
 }
 
 fn join_unavailable(reason: String) -> YmclJoinPreview {
@@ -1393,6 +1515,7 @@ fn join_unavailable(reason: String) -> YmclJoinPreview {
         optional_features: Vec::new(),
         installed: None,
         launch_address: None,
+        using_cache: false,
     }
 }
 
@@ -1423,6 +1546,11 @@ async fn find_installed_instance(
         String,
     )> = Vec::new();
     for metadata in instances {
+        if metadata.instance.install_stage
+            != crate::state::InstanceInstallStage::Installed
+        {
+            continue;
+        }
         let dir =
             match crate::api::instance::get_full_path(&metadata.instance.id)
                 .await
@@ -1499,6 +1627,100 @@ async fn load_optional_pack(
     Ok((target.to_string(), manifest.features))
 }
 
+async fn load_join_manifest(
+    state: &State,
+    mip_base: &str,
+    binding: &MipPackBinding,
+) -> crate::Result<(Option<MipManifest>, bool)> {
+    let versions_snapshot = fetch_json_snapshot(
+        state,
+        &versions_url(mip_base, &binding.pack_id),
+        true,
+    )
+    .await?;
+    let versions: Vec<MipVersionEntry> =
+        serde_json::from_value(versions_snapshot.value["versions"].clone())?;
+    let Some(target) = resolve_target_version(
+        &versions,
+        binding.channel.as_deref(),
+        binding.pinned_version.as_deref(),
+    ) else {
+        return Ok((None, versions_snapshot.cached));
+    };
+    let manifest_snapshot = fetch_json_snapshot(
+        state,
+        &manifest_url(mip_base, &binding.pack_id, target),
+        true,
+    )
+    .await?;
+    let manifest = serde_json::from_value(manifest_snapshot.value)?;
+    Ok((
+        Some(manifest),
+        versions_snapshot.cached || manifest_snapshot.cached,
+    ))
+}
+
+async fn complete_join_pack_preview(
+    preview: &mut YmclJoinPreview,
+    request: impl Future<Output = crate::Result<(Option<MipManifest>, bool)>>,
+) -> crate::Result<()> {
+    let resolved = if preview.installed.is_some() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), request)
+            .await
+            .unwrap_or_else(|_| {
+                Err(crate::ErrorKind::NetworkError(
+                    "MIP join preview timed out".to_string(),
+                )
+                .into())
+            })
+    } else {
+        request.await
+    };
+    match resolved {
+        Ok((manifest, cached)) => {
+            preview.using_cache |= cached;
+            if let Some(manifest) = manifest {
+                preview.target_version = Some(manifest.version);
+                preview.required_version = manifest
+                    .game
+                    .as_ref()
+                    .and_then(|game| game.minecraft.clone())
+                    .or_else(|| preview.required_version.clone());
+                preview.features = manifest.features;
+            } else if !preview.using_cache {
+                // A fresh, empty release list really does remove the pack.
+                preview.has_pack = false;
+                preview.pack_id = None;
+                preview.installed = None;
+            }
+        }
+        Err(error)
+            if preview.installed.is_some()
+                && can_use_cached_metadata(&error) =>
+        {
+            tracing::warn!(
+                server_id = ?preview.server_id,
+                %error,
+                "MIP join metadata unavailable; offering the installed instance"
+            );
+            preview.using_cache = true;
+        }
+        Err(error) => return Err(error),
+    }
+    if let Some(installed) = preview.installed.as_mut() {
+        if preview.using_cache {
+            preview.target_version = installed.version.clone();
+            installed.up_to_date = true;
+        } else {
+            installed.up_to_date =
+                preview.target_version.as_ref().is_none_or(|target| {
+                    installed.version.as_ref() == Some(target)
+                });
+        }
+    }
+    Ok(())
+}
+
 pub async fn join_preview(
     server_id: Option<&str>,
 ) -> crate::Result<YmclJoinPreview> {
@@ -1506,13 +1728,7 @@ pub async fn join_preview(
     let Some(mip_base) = resolve_mip_base(&state).await? else {
         return Ok(join_unavailable("请先在顶栏选择一个域".to_string()));
     };
-    let servers_value = fetch_json(&state, &servers_url(&mip_base)).await?;
-    let servers: Vec<MipServerBinding> = serde_json::from_value(
-        servers_value
-            .get("servers")
-            .cloned()
-            .unwrap_or(serde_json::Value::Array(vec![])),
-    )?;
+    let (servers, cached_servers) = fetch_servers(&state, &mip_base).await?;
     let server = match server_id {
         Some(id) => servers.iter().find(|server| server.server_id == id),
         None => servers.first(),
@@ -1559,6 +1775,7 @@ pub async fn join_preview(
         optional_features: Vec::new(),
         installed: None,
         launch_address: None,
+        using_cache: cached_servers,
     };
     // 直连入口（YAP §6.12）：域为这台服务器提供了 P2P 实例时，玩家侧的
     // 实际连接地址换成 sidecar 的本地回环口；失败/不可用一律回退公网地址。
@@ -1573,41 +1790,20 @@ pub async fn join_preview(
         preview.launch_address = Some(endpoint.address);
     }
     if has_pack {
-        let versions_value =
-            fetch_json(&state, &versions_url(&mip_base, &binding.pack_id))
-                .await?;
-        let versions: Vec<MipVersionEntry> = serde_json::from_value(
-            versions_value
-                .get("versions")
-                .cloned()
-                .unwrap_or(serde_json::Value::Array(vec![])),
-        )?;
-        if let Some(target) = resolve_target_version(
-            &versions,
-            binding.channel.as_deref(),
-            binding.pinned_version.as_deref(),
-        ) {
-            preview.target_version = Some(target.to_string());
-            let manifest_value = fetch_json(
-                &state,
-                &manifest_url(&mip_base, &binding.pack_id, target),
-            )
-            .await?;
-            let manifest: MipManifest = serde_json::from_value(manifest_value)?;
-            manifest.validate()?;
-            preview.required_version = manifest
-                .game
-                .as_ref()
-                .and_then(|game| game.minecraft.clone())
-                // 存量包（game 透传上线前入库）的兜底：绑定上的 mcVersion。
-                .or(binding.mc_version.clone());
-            preview.features = manifest.features;
-        } else {
-            // 绑定指向的包已无任何版本（被删除/重传换了新 id）：绑定已死，
-            // 按纯服语义降级——玩家仍可用本地实例或下载原版进服。
-            preview.has_pack = false;
-            preview.pack_id = None;
-        }
+        // Resolve local identity before touching the manifest: a broken
+        // metadata stream must not hide an already installed game.
+        preview.installed = find_installed_instance(
+            &state,
+            &server.server_id,
+            &binding.pack_id,
+            None,
+        )
+        .await;
+        complete_join_pack_preview(
+            &mut preview,
+            load_join_manifest(&state, &mip_base, &binding),
+        )
+        .await?;
     }
     if !preview.has_pack
         && let Some(optional_pack_id) = binding
@@ -1636,19 +1832,6 @@ pub async fn join_preview(
             }
         }
     }
-    if preview.has_pack
-        && let Some(pack_id) = preview.pack_id.clone()
-    {
-        // 本地已装识别（YAP §7 选定即启动）：绑定包的持有者可直接进服，
-        // 版本落后由 run.rs 的 pre_launch_update 在启动前权威补齐。
-        preview.installed = find_installed_instance(
-            &state,
-            &server.server_id,
-            &pack_id,
-            preview.target_version.as_deref(),
-        )
-        .await;
-    }
     Ok(preview)
 }
 
@@ -1656,6 +1839,109 @@ pub async fn join_preview(
 mod tests {
     use super::*;
     use crate::api::ymcl::mip::manifest::{MipFileEntry, MipSource};
+
+    fn installed_join_preview() -> YmclJoinPreview {
+        let mut preview = join_unavailable(String::new());
+        preview.available = true;
+        preview.reason = None;
+        preview.server_id = Some("server".to_string());
+        preview.mc_address = Some("play.example".to_string());
+        preview.has_pack = true;
+        preview.pack_id = Some("pack".to_string());
+        preview.installed = Some(YmclInstalledPack {
+            instance_id: "local-instance".to_string(),
+            pack_id: "pack".to_string(),
+            version: Some("2.0".to_string()),
+            up_to_date: false,
+        });
+        preview
+    }
+
+    fn join_manifest(version: &str) -> MipManifest {
+        serde_json::from_value(serde_json::json!({
+            "version": version,
+            "game": { "minecraft": "1.21.1" },
+            "files": []
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn join_metadata_failure_preserves_the_local_instance_and_address() {
+        let mut preview = installed_join_preview();
+        complete_join_pack_preview(&mut preview, async {
+            Err(crate::ErrorKind::NetworkError(
+                "HTTP/2 stream closed because of a broken pipe".to_string(),
+            )
+            .into())
+        })
+        .await
+        .unwrap();
+        assert!(preview.available);
+        assert!(preview.using_cache);
+        assert_eq!(preview.mc_address.as_deref(), Some("play.example"));
+        assert_eq!(preview.target_version.as_deref(), Some("2.0"));
+        let installed = preview.installed.unwrap();
+        assert_eq!(installed.instance_id, "local-instance");
+        assert!(installed.up_to_date);
+    }
+
+    #[tokio::test]
+    async fn join_requires_remote_metadata_when_no_instance_is_installed() {
+        let mut preview = installed_join_preview();
+        preview.installed = None;
+        assert!(
+            complete_join_pack_preview(&mut preview, async {
+                Err(crate::ErrorKind::NetworkError("broken pipe".to_string())
+                    .into())
+            })
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn join_uses_fresh_updates_but_never_downgrades_to_a_cached_version()
+    {
+        let mut fresh = installed_join_preview();
+        complete_join_pack_preview(&mut fresh, async {
+            Ok((Some(join_manifest("3.0")), false))
+        })
+        .await
+        .unwrap();
+        assert!(!fresh.using_cache);
+        assert_eq!(fresh.target_version.as_deref(), Some("3.0"));
+        assert_eq!(fresh.required_version.as_deref(), Some("1.21.1"));
+        assert!(!fresh.installed.unwrap().up_to_date);
+
+        let mut cached = installed_join_preview();
+        complete_join_pack_preview(&mut cached, async {
+            Ok((Some(join_manifest("1.0")), true))
+        })
+        .await
+        .unwrap();
+        assert!(cached.using_cache);
+        assert_eq!(cached.target_version.as_deref(), Some("2.0"));
+        assert!(cached.installed.unwrap().up_to_date);
+    }
+
+    #[tokio::test]
+    async fn join_only_removes_a_binding_after_a_fresh_empty_release_list() {
+        let mut fresh = installed_join_preview();
+        complete_join_pack_preview(&mut fresh, async { Ok((None, false)) })
+            .await
+            .unwrap();
+        assert!(!fresh.has_pack);
+        assert!(fresh.installed.is_none());
+
+        let mut cached = installed_join_preview();
+        complete_join_pack_preview(&mut cached, async { Ok((None, true)) })
+            .await
+            .unwrap();
+        assert!(cached.has_pack);
+        assert_eq!(cached.target_version.as_deref(), Some("2.0"));
+        assert_eq!(cached.installed.unwrap().instance_id, "local-instance");
+    }
 
     fn entry(sha512: &str) -> MipFileEntry {
         MipFileEntry {
