@@ -81,8 +81,10 @@ const remoteVideoSource = computed(() =>
 		? null
 		: resolveDomainImageUrl(currentSlide.value?.video, store.activeDomain?.origin),
 )
-const videoSource = useDomainHomeVideo(remoteVideoSource, async (url) =>
-	convertFileSrc(await ymcl.cacheHomeVideo(url)),
+const videoSource = useDomainHomeVideo(
+	remoteVideoSource,
+	async (url) => (props.preview ? url : convertFileSrc(await ymcl.cacheHomeVideo(url))),
+	() => props.active && visibility.value === 'visible',
 )
 const copy = computed(() => ({
 	title:

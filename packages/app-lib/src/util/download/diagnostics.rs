@@ -31,34 +31,46 @@ pub(crate) fn bounded_diagnostic_text(
     value.as_ref().chars().take(max_chars).collect()
 }
 
-pub(crate) fn download_error_category(error: &crate::Error) -> &'static str {
+fn request_error(error: &crate::Error) -> Option<&reqwest::Error> {
     match error.raw.as_ref() {
-        ErrorKind::FetchError(source) => {
-            let detail = format!("{source:?}").to_ascii_lowercase();
-            if source.status().is_some() {
-                "http"
-            } else if source.is_timeout() && source.is_body() {
-                "stall"
-            } else if source.is_timeout() {
-                "timeout"
-            } else if source.is_connect()
-                && ["certificate", "tls", "ssl"]
-                    .iter()
-                    .any(|needle| detail.contains(needle))
-            {
-                "tls"
-            } else if source.is_connect()
-                && ["dns", "lookup", "resolve"]
-                    .iter()
-                    .any(|needle| detail.contains(needle))
-            {
-                "dns"
-            } else if source.is_connect() {
-                "connect"
-            } else {
-                "network"
-            }
+        ErrorKind::FetchError(source) => Some(source),
+        ErrorKind::Any(report) => {
+            report.chain().find_map(|cause| cause.downcast_ref())
         }
+        _ => None,
+    }
+}
+
+pub(crate) fn download_error_category(error: &crate::Error) -> &'static str {
+    if let Some(source) = request_error(error) {
+        let detail = format!("{source:?}").to_ascii_lowercase();
+        return if source.status().is_some() {
+            "http"
+        } else if source.is_timeout()
+            && (source.is_body() || source.is_decode())
+        {
+            "stall"
+        } else if source.is_timeout() {
+            "timeout"
+        } else if source.is_connect()
+            && ["certificate", "tls", "ssl"]
+                .iter()
+                .any(|needle| detail.contains(needle))
+        {
+            "tls"
+        } else if source.is_connect()
+            && ["dns", "lookup", "resolve"]
+                .iter()
+                .any(|needle| detail.contains(needle))
+        {
+            "dns"
+        } else if source.is_connect() {
+            "connect"
+        } else {
+            "network"
+        };
+    }
+    match error.raw.as_ref() {
         ErrorKind::NetworkError(message) => {
             if message.contains("no response received") {
                 "timeout"
@@ -90,11 +102,13 @@ pub(crate) fn download_error_category(error: &crate::Error) -> &'static str {
 }
 
 pub(crate) fn download_error_detail(error: &crate::Error) -> String {
-    match error.raw.as_ref() {
-        ErrorKind::FetchError(source) => source.status().map_or_else(
+    if let Some(source) = request_error(error) {
+        return source.status().map_or_else(
             || format!("{} failure", download_error_category(error)),
             |status| format!("HTTP {}", status.as_u16()),
-        ),
+        );
+    }
+    match error.raw.as_ref() {
         ErrorKind::LabrinthError(error) => error.status.map_or_else(
             || "API response failure".to_string(),
             |status| format!("HTTP {status}"),
@@ -203,4 +217,56 @@ pub(crate) fn attach_download_attempt_history(
         context.push_str(&line);
     }
     error.with_context(context)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eyre::WrapErr;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn contextual_body_failures_keep_network_diagnostics_and_hide_urls() {
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/manifest?access_token=secret",
+            listener.local_addr().unwrap()
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{",
+                )
+                .await
+                .unwrap();
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
+        let error: crate::Error = response
+            .bytes()
+            .await
+            .wrap_err_with(|| {
+                format!("failed to read response body from {url}")
+            })
+            .unwrap_err()
+            .into();
+        server.await.unwrap();
+        assert_eq!(download_error_category(&error), "network");
+        assert_eq!(download_error_detail(&error), "network failure");
+    }
 }

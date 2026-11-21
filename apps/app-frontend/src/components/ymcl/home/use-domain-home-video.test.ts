@@ -33,6 +33,58 @@ test('a remote video waits for the persistent copy and plays the local URL', asy
 	assert.equal(playback.value, 'asset://cached.mp4')
 })
 
+test('inactive pages defer downloads and retain cached playback when hidden', async (t) => {
+	const scope = effectScope()
+	t.after(() => scope.stop())
+	const source = ref<string | null>('https://domain.test/first.mp4')
+	const enabled = ref(false)
+	const requests: string[] = []
+	const playback = scope.run(() =>
+		useDomainHomeVideo(
+			source,
+			async (url) => {
+				requests.push(url)
+				return `asset://cached/${url.split('/').pop()}`
+			},
+			enabled,
+		),
+	)!
+	assert.equal(playback.value, null)
+	assert.deepEqual(requests, [])
+	enabled.value = true
+	await nextTick()
+	assert.equal(playback.value, 'asset://cached/first.mp4')
+	enabled.value = false
+	assert.equal(playback.value, 'asset://cached/first.mp4')
+	enabled.value = true
+	await nextTick()
+	assert.equal(requests.length, 1)
+	enabled.value = false
+	source.value = 'https://domain.test/second.mp4'
+	assert.equal(playback.value, null)
+	assert.equal(requests.length, 1)
+	enabled.value = true
+	await nextTick()
+	assert.equal(playback.value, 'asset://cached/second.mp4')
+	assert.equal(requests.length, 2)
+})
+
+test('hiding a page detaches pending results until it is shown again', async (t) => {
+	const scope = effectScope()
+	t.after(() => scope.stop())
+	const source = ref<string | null>('https://domain.test/background.mp4')
+	const enabled = ref(true)
+	const pending = deferred()
+	const playback = scope.run(() => useDomainHomeVideo(source, () => pending.promise, enabled))!
+	enabled.value = false
+	pending.resolve('asset://cached.mp4')
+	await nextTick()
+	assert.equal(playback.value, null)
+	enabled.value = true
+	await nextTick()
+	assert.equal(playback.value, 'asset://cached.mp4')
+})
+
 test('switching backgrounds or domains ignores late cache successes and failures', async (t) => {
 	const scope = effectScope()
 	t.after(() => scope.stop())

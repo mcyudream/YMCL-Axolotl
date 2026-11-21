@@ -1281,7 +1281,7 @@ static DIRECT_FETCH_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("client configuration should be valid")
 });
 
-async fn metadata_http1_client(
+pub(crate) async fn http1_fallback_client(
     proxy: ProxyPolicy,
     protected_headers: bool,
     mirror_without_redirects: bool,
@@ -1984,6 +1984,7 @@ async fn fetch_advanced_with_client_and_progress(
     >,
     attempt_budget: usize,
 ) -> crate::Result<Bytes> {
+    let _foreground = super::download::foreground::FOREGROUND_REQUESTS.start();
     let resource = infer_resource_class(url);
     let mode =
         source_mode.unwrap_or_else(|| source_mode_for_resource(resource));
@@ -2111,7 +2112,7 @@ async fn fetch_advanced_with_client_and_progress(
                 || header.is_some_and(|header| is_sensitive_header(header.0));
             if use_http1 && http1_client.is_none() {
                 http1_client = Some(
-                    metadata_http1_client(
+                    http1_fallback_client(
                         route.proxy,
                         protected_headers,
                         is_mirror && modrinth_request_kind.is_some(),
@@ -2605,20 +2606,23 @@ async fn fetch_advanced_with_client_and_progress(
                         return Ok(bytes);
                     } else if let Err(err) = bytes {
                         record_route_failure(route, resource, None);
-                        let retry_http1 = !use_http1
-                            && has_more_attempts
-                            && err.chain().any(|source| {
+                        let failed_http2 = http_version
+                            == reqwest::Version::HTTP_2
+                            || err.chain().any(|source| {
                                 source
                                     .downcast_ref::<reqwest::Error>()
                                     .is_some_and(is_h2_protocol_failure)
                             });
+                        if failed_http2
+                            && let Some(authority) =
+                                url_authority(&response_url)
+                        {
+                            record_authority_h2_failure(&authority);
+                        }
+                        let retry_http1 =
+                            !use_http1 && has_more_attempts && failed_http2;
                         if retry_http1 {
                             use_http1 = true;
-                            if let Some(authority) =
-                                url_authority(&response_url)
-                            {
-                                record_authority_h2_failure(&authority);
-                            }
                             tracing::warn!(
                                 url = %log_request_url,
                                 "HTTP/2 response body failed; retrying metadata over HTTP/1.1"
@@ -7791,8 +7795,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metadata_recovers_from_http2_body_disconnect_over_http1() {
-        for streaming in [false, true] {
+    async fn metadata_recovers_from_http2_body_failures_over_http1() {
+        for (streaming, invalid_encoding) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
             let listener =
                 tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
@@ -7820,11 +7826,22 @@ mod tests {
                             let driver = tokio::spawn(async move {
                                 while connection.accept().await.is_some() {}
                             });
-                            let mut body = respond
-                                .send_response(http::Response::new(()), false)
-                                .unwrap();
-                            body.send_data(Bytes::from_static(b"{"), false)
-                                .unwrap();
+                            let mut response = http::Response::new(());
+                            if invalid_encoding {
+                                response.headers_mut().insert(
+                                    header::CONTENT_ENCODING,
+                                    header::HeaderValue::from_static("gzip"),
+                                );
+                            }
+                            let mut body =
+                                respond.send_response(response, false).unwrap();
+                            body.send_data(
+                                Bytes::from_static(
+                                    b"{invalid gzip or partial JSON",
+                                ),
+                                invalid_encoding,
+                            )
+                            .unwrap();
                             // Flush HTTP 200 and a partial body, then break the
                             // connection without sending END_STREAM.
                             tokio::time::sleep(Duration::from_millis(50)).await;

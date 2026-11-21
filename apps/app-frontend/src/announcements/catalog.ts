@@ -28,6 +28,36 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-2.2.7',
+		version: '2.2.7',
+		publishedAt: '2026-11-21',
+		title: {
+			'en-US': 'YMCL 2.2.7',
+			'zh-CN': 'YMCL 2.2.7',
+		},
+		changes: {
+			changed: [
+				{
+					'en-US':
+						'Updated homepage videos to download only the selected video, one at a time, while giving server refreshes and modpack checks priority.',
+					'zh-CN': '域首页视频改为按需单文件下载，优先响应服务器刷新和整合包检查。',
+				},
+			],
+			fixed: [
+				{
+					'en-US':
+						'Fixed modpack manifest downloads repeatedly failing after a connection interruption.',
+					'zh-CN': '修复整合包清单响应中途断开后反复重试失败的问题。',
+				},
+				{
+					'en-US':
+						'Fixed homepage videos failing to finish downloading after temporary network or server errors.',
+					'zh-CN': '修复域首页视频遇到临时网络或服务端错误后无法完成缓存的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-2.2.6',
 		version: '2.2.6',
 		publishedAt: '2026-11-20',

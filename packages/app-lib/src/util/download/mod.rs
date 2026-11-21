@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) mod diagnostics;
+pub(crate) mod foreground;
 pub mod h2_download;
 pub mod h2_pool;
 pub(crate) mod h2_range;

@@ -13,11 +13,18 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, Semaphore};
 
+use crate::util::download::foreground::FOREGROUND_REQUESTS;
+use crate::util::fetch::{
+    ResourceClass, authority_uses_http1_fallback, http1_fallback_client,
+    is_h2_protocol_failure, official_route, record_authority_h2_failure,
+    sanitize_url_for_log, url_authority,
+};
+
 const MAX_VIDEO_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_UNUSED_SECONDS: u64 = 30 * 24 * 60 * 60;
 const REVALIDATE_AFTER: u64 = 24 * 60 * 60;
-static DOWNLOADS: Semaphore = Semaphore::const_new(2);
+static DOWNLOADS: Semaphore = Semaphore::const_new(1);
 static ACTIVE_DIRECTORIES: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 static LOCKS: LazyLock<dashmap::DashMap<PathBuf, Weak<Mutex<()>>>> =
@@ -231,7 +238,78 @@ async fn download_video(
     now: u64,
 ) -> crate::Result<PathBuf> {
     let _permit = DOWNLOADS.acquire().await?;
-    let mut request = client.get(url.clone()).timeout(Duration::from_secs(180));
+    let authority = url_authority(url.as_str());
+    let mut use_http1 = authority
+        .as_deref()
+        .is_some_and(authority_uses_http1_fallback);
+    let mut fallback_client = None;
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        FOREGROUND_REQUESTS.wait_for_idle().await;
+        if use_http1 && fallback_client.is_none() {
+            let route = official_route(url.as_str(), ResourceClass::Other);
+            fallback_client =
+                Some(http1_fallback_client(route.proxy, false, false).await?);
+        }
+        let client = fallback_client.as_ref().unwrap_or(client);
+        match download_video_once(dir, url, client, cached, now).await {
+            Ok(path) => return Ok(path),
+            Err(error) => {
+                let retryable = matches!(
+                    error.raw.as_ref(),
+                    crate::ErrorKind::FetchError(source)
+                        if !source.is_builder()
+                            && !source.is_redirect()
+                            && source.status().is_none_or(|status| {
+                                status.is_server_error()
+                                    || status == reqwest::StatusCode::REQUEST_TIMEOUT
+                                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                            })
+                );
+                if attempt >= 3 || !retryable {
+                    return Err(error);
+                }
+                use_http1 |= authority
+                    .as_deref()
+                    .is_some_and(authority_uses_http1_fallback);
+                tracing::warn!(
+                    url = %sanitize_url_for_log(url.as_str()),
+                    attempt,
+                    http1_fallback = use_http1,
+                    "Background video download failed; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
+            }
+        }
+    }
+}
+
+fn video_transport_error(
+    url: &url::Url,
+    version: Option<reqwest::Version>,
+    error: reqwest::Error,
+) -> crate::Error {
+    if (version == Some(reqwest::Version::HTTP_2)
+        || is_h2_protocol_failure(&error))
+        && let Some(authority) = url_authority(url.as_str())
+    {
+        record_authority_h2_failure(&authority);
+    }
+    error.into()
+}
+
+async fn download_video_once(
+    dir: &Path,
+    url: &url::Url,
+    client: &reqwest::Client,
+    cached: Option<&CachedVideo>,
+    now: u64,
+) -> crate::Result<PathBuf> {
+    let mut request = client
+        .get(url.clone())
+        .header("Priority", "u=7")
+        .timeout(Duration::from_secs(30 * 60));
     if let Some(cached) = cached {
         if let Some(etag) = &cached.etag {
             request = request.header(IF_NONE_MATCH, etag);
@@ -240,7 +318,12 @@ async fn download_video(
             request = request.header(IF_MODIFIED_SINCE, modified);
         }
     }
-    let mut response = request.send().await?.error_for_status()?;
+    let mut response = request
+        .send()
+        .await
+        .map_err(|error| video_transport_error(url, None, error))?
+        .error_for_status()?;
+    let http_version = response.version();
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
         let cached = cached.ok_or_else(|| {
             error("Video server returned 304 without a cached file")
@@ -285,7 +368,14 @@ async fn download_video(
     let mut file = tokio::fs::File::from_std(temporary.reopen()?);
     let mut size = 0;
     let mut hash = Sha256::new();
-    while let Some(chunk) = response.chunk().await? {
+    loop {
+        FOREGROUND_REQUESTS.wait_for_idle().await;
+        let Some(chunk) = response.chunk().await.map_err(|error| {
+            video_transport_error(url, Some(http_version), error)
+        })?
+        else {
+            break;
+        };
         size += chunk.len() as u64;
         if size > MAX_VIDEO_BYTES {
             return Err(error(
@@ -375,7 +465,12 @@ pub async fn cache_video(raw: &str) -> crate::Result<String> {
     let root = state.directories.caches_dir().join("ymcl-home-videos");
     let dir =
         root.join(format!("{:x}", Sha256::digest(url.as_str().as_bytes())));
-    let client = state.configured_http_client();
+    let client = http1_fallback_client(
+        crate::util::fetch::ProxyPolicy::System,
+        false,
+        false,
+    )
+    .await?;
     {
         let mut active = ACTIVE_DIRECTORIES.lock().await;
         if let Err(error) =
@@ -461,6 +556,62 @@ mod tests {
             .timeout(Duration::from_secs(3))
             .build()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn background_video_waits_for_foreground_metadata_before_connecting()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let (url, requests) = server(vec![response("video-data")]).await;
+        let client = client();
+        let foreground = FOREGROUND_REQUESTS.start();
+        let download = ensure_video(root.path(), &url, &client, 1);
+        tokio::pin!(download);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), &mut download)
+                .await
+                .is_err()
+        );
+        assert!(!requests.is_finished());
+        drop(foreground);
+        let path = tokio::time::timeout(Duration::from_secs(30), download)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(tokio::fs::read(path).await.unwrap(), b"video-data");
+        let requests = requests.await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].contains("priority: u=7"));
+    }
+
+    #[tokio::test]
+    async fn transient_status_and_truncated_video_retry_until_a_complete_file()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let (url, requests) = server(vec![
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+            "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 100\r\nConnection: close\r\n\r\ncut".to_string(),
+            response("video-data"),
+        ])
+        .await;
+        let path = ensure_video(root.path(), &url, &client(), 1).await.unwrap();
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"video-data");
+        assert_eq!(requests.await.unwrap().len(), 3);
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_video_requests_are_not_retried() {
+        let root = tempfile::tempdir().unwrap();
+        let (url, requests) = server(vec![
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        ])
+        .await;
+        assert!(ensure_video(root.path(), &url, &client(), 1).await.is_err());
+        assert_eq!(requests.await.unwrap().len(), 1);
     }
 
     async fn cached_fixture(
@@ -649,7 +800,15 @@ mod tests {
     async fn interrupted_refresh_keeps_complete_copy_and_a_changed_video_gets_a_new_path()
      {
         let root = tempfile::tempdir().unwrap();
-        let (url, requests) = server(vec![response("original-video"), "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 100\r\nConnection: close\r\n\r\ncut".to_string(), response("replacement-video")]).await;
+        let interrupted = "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 100\r\nConnection: close\r\n\r\ncut".to_string();
+        let (url, requests) = server(vec![
+            response("original-video"),
+            interrupted.clone(),
+            interrupted.clone(),
+            interrupted,
+            response("replacement-video"),
+        ])
+        .await;
         let client = client();
         let first = ensure_video(root.path(), &url, &client, 1).await.unwrap();
         let failed =
@@ -675,7 +834,7 @@ mod tests {
             read_cached(next.parent().unwrap()).await.unwrap().file,
             next.file_name().unwrap().to_str().unwrap()
         );
-        assert_eq!(requests.await.unwrap().len(), 3);
+        assert_eq!(requests.await.unwrap().len(), 5);
     }
 
     #[tokio::test]
