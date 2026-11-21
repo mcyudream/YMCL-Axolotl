@@ -89,7 +89,7 @@ jobs:
           cargo test --package theseus --locked --lib util::download::foreground::tests
           cargo test --package theseus --locked --lib util::download::diagnostics::tests
           cargo test --package theseus --locked --lib metadata_recovers_from_http2_body_failures_over_http1
-          cargo test --package theseus --locked --lib api::ymcl::home_media::tests
+          cargo test --package theseus --locked --lib api::ymcl::home_media::tests -- --test-threads=1
       - name: Test Windows portable ZIP contents
         run: node --test scripts/axolotl/package-portable.test.mjs
       - name: Test mod dependency presentation
