@@ -1,6 +1,35 @@
 {
-  "updated_at": "2026-11-21T15:51:53.242Z",
+  "updated_at": "2026-11-23T15:50:55.369Z",
   "announcements": [
+    {
+      "id": "launcher-2.3.0",
+      "version": "2.3.0",
+      "publishedAt": "2026-11-23",
+      "title": {
+        "en-US": "YMCL 2.3.0",
+        "zh-CN": "YMCL 2.3.0"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Mod list badges identify client-only, server-only, shared, and unknown mods using provider metadata and JAR declarations.",
+            "zh-CN": "Mod 列表新增客户端、服务端、双端和未知标识，默认根据来源信息与 JAR 声明判断。"
+          },
+          {
+            "en-US": "Manual mod-side rules apply to the current modpack or all local instances and override automatic detection.",
+            "zh-CN": "支持单项或批量手动标记 Mod，可保存为当前整合包或本地通用规则，手动规则优先于来源信息。"
+          },
+          {
+            "en-US": "Complete server pack export bundles selected enabled mods, server configurations, and scripts, excluding client-only mods.",
+            "zh-CN": "新增完整服务端包导出，包含选中的已启用 Mod、服务端配置和脚本，并排除纯客户端 Mod。"
+          },
+          {
+            "en-US": "Slim server packs download and verify mods from a manifest on first launch, bundling files without a download source.",
+            "zh-CN": "新增精简服务端包导出，首次启动根据下载清单获取并校验 Mod，本地或无下载来源的文件随包携带。"
+          }
+        ]
+      }
+    },
     {
       "id": "launcher-2.2.7",
       "version": "2.2.7",
