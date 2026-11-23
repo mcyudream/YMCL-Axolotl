@@ -36,10 +36,12 @@ import { truncatedTooltip } from '#ui/utils/truncate'
 import type {
 	ContentCardProject,
 	ContentCardVersion,
+	ContentModSideInfo,
 	ContentOwner,
 	ContentRowInlineAction,
 	ContentWorldGroupMeta,
 } from '../types'
+import { modSideMessages, modSideSourceMessages } from '../utils/mod-sides'
 
 const { formatMessage } = useVIntl()
 
@@ -102,6 +104,7 @@ interface Props {
 		autoDependency: boolean
 		orphaned: boolean
 	} | null
+	modSide?: ContentModSideInfo | null
 	showCheckbox?: boolean
 	hideDelete?: boolean
 	hideActions?: boolean
@@ -143,6 +146,7 @@ const props = withDefaults(defineProps<Props>(), {
 	toggleDisabled: false,
 	toggleDisabledTooltip: undefined,
 	dependencyBadge: null,
+	modSide: undefined,
 	showCheckbox: false,
 	hideDelete: false,
 	hideActions: false,
@@ -548,6 +552,19 @@ const deleteHovered = ref(false)
 								dependencyBadge.orphaned
 									? formatMessage(messages.orphanedDependencyBadge)
 									: formatMessage(messages.dependencyBadge)
+							}}
+						</span>
+						<span
+							v-if="modSide"
+							v-tooltip="formatMessage(modSideSourceMessages[modSide.source])"
+							class="shrink-0 rounded-md bg-surface-3 px-1.5 py-0.5 text-xs font-medium leading-4 text-secondary"
+						>
+							{{
+								formatMessage(
+									modSideMessages[
+										modSide.server_support === 'optional' ? 'optional' : modSide.side
+									],
+								)
 							}}
 						</span>
 						<slot name="title-badges" />

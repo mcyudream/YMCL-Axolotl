@@ -1286,6 +1286,7 @@ pub(crate) async fn dependencies_to_content_items(
                 origin_provider: Some(ContentProvider::Modrinth),
                 rollback: None,
                 environment: None,
+                mod_side: None,
                 source_kind: None,
                 external: false,
                 loader: version
@@ -1904,6 +1905,40 @@ async fn content_files_to_content_listing(
             }
         }
     };
+    // Older installed releases may not occur in a project's latestFiles.
+    // Fetch only those missing releases during an explicit metadata refresh.
+    let mut curseforge_files = curseforge_projects
+        .values()
+        .flat_map(|project| project.latest_files.iter().cloned())
+        .map(|file| (file.id, file))
+        .collect::<HashMap<_, _>>();
+    if cache_behaviour != Some(CacheBehaviour::CacheOnly)
+        && !curseforge_projects.is_empty()
+    {
+        let mut missing = provider_refs_by_path
+            .values()
+            .flatten()
+            .filter_map(|reference| match reference {
+                ContentProviderRef::CurseForge {
+                    file_id: Some(file_id),
+                    ..
+                } if !curseforge_files.contains_key(&file_id.get()) => {
+                    Some(file_id.get())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        missing.sort_unstable();
+        missing.dedup();
+        for chunk in missing.chunks(50) {
+            if let Ok(files) =
+                crate::api::curseforge::get_files_many(chunk.to_vec()).await
+            {
+                curseforge_files
+                    .extend(files.into_iter().map(|file| (file.id, file)));
+            }
+        }
+    }
     let content_set = sqlite::content_rows::get_applied_content_set(
         &instance.id,
         &state.pool,
@@ -2090,10 +2125,7 @@ async fn content_files_to_content_listing(
                     else {
                         return None;
                     };
-                    curseforge_project?
-                        .latest_files
-                        .iter()
-                        .find(|file| file.id == file_id.get())
+                    curseforge_files.get(&file_id.get())
                 });
             let curseforge_update =
                 curseforge_resolution.and_then(|resolution| {
@@ -2180,7 +2212,13 @@ async fn content_files_to_content_listing(
                 .or_else(|| {
                     version.and_then(|version| version.loaders.first().cloned())
                 })
-                .or(local_loader);
+                .or(local_loader)
+                .or_else(|| {
+                    content_set
+                        .as_ref()
+                        .filter(|_| file.project_type == ProjectType::Mod)
+                        .map(|set| set.loader.as_str().to_string())
+                });
             let owner = project.and_then(|project| {
                 resolve_owner(project, &meta.teams, &meta.organizations)
             });
@@ -2355,6 +2393,17 @@ async fn content_files_to_content_listing(
                     &content_backups,
                 ),
                 environment,
+                mod_side: (file.project_type == ProjectType::Mod).then(|| {
+                    crate::state::detect_mod_side(
+                        environment,
+                        project,
+                        curseforge_file
+                            .map(|file| file.game_versions.as_slice())
+                            .unwrap_or_default()
+                            .iter(),
+                        local_mod.as_ref(),
+                    )
+                }),
                 source_kind,
                 external,
                 loader,
@@ -2363,6 +2412,12 @@ async fn content_files_to_content_listing(
         .collect::<Vec<_>>();
     sort_content_items(&mut items);
 
+    crate::api::instance::mod_sides::hydrate_mod_sides(
+        &instance.id,
+        &mut items,
+        &state.pool,
+    )
+    .await?;
     Ok(ContentListing { items, warnings })
 }
 

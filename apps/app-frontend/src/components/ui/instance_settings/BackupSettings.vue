@@ -2,10 +2,10 @@
 import { FileArchiveIcon, SaveIcon, TrashIcon, UndoIcon, XIcon } from '@modrinth/assets'
 import {
 	Admonition,
-	NewButton as Button,
 	commonMessages,
 	defineMessages,
 	injectNotificationManager,
+	NewButton as Button,
 	NewModal,
 	useFormatBytes,
 	useFormatDateTime,
@@ -324,7 +324,7 @@ async function refresh() {
 		instanceRoot.value = nextRoot
 		snapshots.value = nextSnapshots
 		await refreshOperation()
-	} catch (error) {
+	} catch {
 		if (!disposed && current === refreshGeneration) loadError.value = true
 	} finally {
 		if (!disposed && current === refreshGeneration) loading.value = false

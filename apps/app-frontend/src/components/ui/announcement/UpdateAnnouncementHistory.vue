@@ -9,14 +9,13 @@ import {
 	getLocalizedAnnouncementText,
 	type LauncherAnnouncement,
 } from '@/announcements/catalog'
-import { AxolotlBrandConfig } from '@/config'
+import { isYmclUpdateConfigured } from '@/helpers/ymcl-content'
 import {
 	findYmclAnnouncementByVersion,
 	getUpdatePlatformLabel,
 	loadYmclUpdateAnnouncements,
 	resolveUpdateChangelogUrl,
 } from '@/helpers/ymcl-update-history'
-import { isYmclUpdateConfigured } from '@/helpers/ymcl-content'
 import i18n from '@/i18n.config'
 
 import UpdateAnnouncementContent from './UpdateAnnouncementContent.vue'
@@ -34,7 +33,8 @@ const messages = defineMessages({
 	},
 	description: {
 		id: 'app.settings.updates.announcements.description',
-		defaultMessage: 'See what changed in your installed version and browse other published releases.',
+		defaultMessage:
+			'See what changed in your installed version and browse other published releases.',
 	},
 	otherReleases: {
 		id: 'app.settings.updates.announcements.other-releases',
@@ -66,7 +66,9 @@ const locale = computed(() => i18n.global.locale.value)
 const remoteAnnouncements = ref<LauncherAnnouncement[] | null>(null)
 const loadingRemote = ref(false)
 
-const usingYmclPlatform = computed(() => isYmclUpdateConfigured() && remoteAnnouncements.value !== null)
+const usingYmclPlatform = computed(
+	() => isYmclUpdateConfigured() && remoteAnnouncements.value !== null,
+)
 
 const launcherAnnouncements = computed<readonly LauncherAnnouncement[]>(() => {
 	if (remoteAnnouncements.value) return remoteAnnouncements.value
@@ -105,17 +107,14 @@ onMounted(async () => {
 		const remote = await loadYmclUpdateAnnouncements({ channel: 'all', limit: 50 })
 		if (remote && remote.length) {
 			remoteAnnouncements.value = remote
-		}
-		else if (remote) {
+		} else if (remote) {
 			// 平台已配置但暂无发布：仍标记为 YMCL 源，避免误显示 Axolotl 本地目录
 			remoteAnnouncements.value = []
 		}
-	}
-	catch {
+	} catch {
 		// 网络失败时保留本地 catalog 回退
 		remoteAnnouncements.value = null
-	}
-	finally {
+	} finally {
 		loadingRemote.value = false
 	}
 })

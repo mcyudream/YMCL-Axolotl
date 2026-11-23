@@ -131,6 +131,7 @@ const REVERTIBLE_SCHEMA = {
 		tables: ['instance_content_refresh_files', 'instance_content_refreshes'],
 	},
 	20261102204000: { tables: ['instance_schematic_sources'] },
+	20261123120000: { tables: ['mod_side_detections', 'mod_side_overrides'] },
 }
 
 function fail(message) {

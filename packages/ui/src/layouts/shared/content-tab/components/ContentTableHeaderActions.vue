@@ -6,14 +6,19 @@ import {
 	ClockArrowDownIcon,
 	ClockArrowUpIcon,
 	DownloadIcon,
+	PackageIcon,
 	PinIcon,
 	RotateCounterClockwiseIcon,
 } from '@modrinth/assets'
 
 import ButtonStyled from '#ui/components/base/ButtonStyled.vue'
 import PopoutMenu from '#ui/components/base/PopoutMenu.vue'
+import { useVIntl } from '#ui/composables/i18n'
 
 import type { ContentSortMode } from '../composables'
+import { modSideMessages } from '../utils/mod-sides'
+
+const { formatMessage } = useVIntl()
 
 export interface ContentSortOption {
 	id: ContentSortMode
@@ -34,6 +39,7 @@ const props = withDefaults(
 		bulkUpdateLabel?: string
 		bulkUpdateTooltip?: string
 		isBulkOperating?: boolean
+		hasServerExport?: boolean
 	}>(),
 	{
 		hasBulkUpdateSupport: false,
@@ -41,6 +47,7 @@ const props = withDefaults(
 		bulkUpdateLabel: undefined,
 		bulkUpdateTooltip: undefined,
 		isBulkOperating: false,
+		hasServerExport: false,
 	},
 )
 
@@ -49,11 +56,23 @@ const emit = defineEmits<{
 	togglePin: []
 	resetView: []
 	updateAll: []
+	exportServer: []
 }>()
 </script>
 
 <template>
 	<div class="flex items-center justify-end gap-2">
+		<ButtonStyled v-if="props.hasServerExport" circular type="transparent">
+			<button
+				v-tooltip="formatMessage(modSideMessages.exportServer)"
+				type="button"
+				:aria-label="formatMessage(modSideMessages.exportServer)"
+				:disabled="props.isBulkOperating"
+				@click="emit('exportServer')"
+			>
+				<PackageIcon />
+			</button>
+		</ButtonStyled>
 		<PopoutMenu :tooltip="props.sortLabel" placement="bottom-end">
 			<ButtonStyled circular type="transparent">
 				<button :aria-label="props.sortLabel">

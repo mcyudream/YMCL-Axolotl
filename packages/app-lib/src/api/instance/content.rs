@@ -620,6 +620,7 @@ mod tests {
             origin_provider: Some(ContentProvider::Modrinth),
             rollback: None,
             environment: None,
+            mod_side: None,
             source_kind: None,
             external: false,
             loader: None,

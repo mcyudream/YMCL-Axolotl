@@ -142,6 +142,11 @@
 		</CollapsibleAdmonition>
 		<ContentPageLayout @visible-items="handleVisibleItems">
 			<template #modals>
+				<ModSideModal
+					ref="modSideModal"
+					:instance-id="props.instance.id"
+					@saved="applyModSideUpdates"
+				/>
 				<ContentToggleDependenciesModal ref="toggleDependenciesModal" />
 				<DependencyGraphModal
 					ref="dependencyGraphModal"
@@ -168,7 +173,7 @@
 					@confirm="handleModpackUpdateConfirm"
 					@cancel="handleModpackUpdateCancel"
 				/>
-				<ExportModal v-if="projects.length > 0" ref="exportModal" :instance="instance" />
+				<ExportModal ref="exportModal" :instance="instance" />
 				<ContentUpdaterModal
 					v-if="updatingProject || updatingModpack"
 					ref="contentUpdaterModal"
@@ -218,6 +223,7 @@ import {
 import {
 	type BulkOperationStatus,
 	ButtonStyled,
+	canMarkContentModSide,
 	CollapsibleAdmonition,
 	commonMessages,
 	ConfirmModpackUpdateModal,
@@ -231,6 +237,7 @@ import {
 	defineMessages,
 	injectNotificationManager,
 	LoadingIndicator,
+	modSideMessages,
 	type OverflowMenuOption,
 	provideAppBackup,
 	provideContentManager,
@@ -249,6 +256,7 @@ import { useRouter } from 'vue-router'
 import DependencyGraphModal from '@/components/instance/dependencies/DependencyGraphModal.vue'
 import ExportModal from '@/components/ui/ExportModal.vue'
 import ContentRefreshStatus from '@/components/ui/instance_content/ContentRefreshStatus.vue'
+import ModSideModal from '@/components/ui/instance_content/ModSideModal.vue'
 import ContentToggleDependenciesModal from '@/components/ui/modal/ContentToggleDependenciesModal.vue'
 import ShareModalWrapper from '@/components/ui/modal/ShareModalWrapper.vue'
 import { postUpgradeNoticeQueryKey, usePostUpgradeNotice } from '@/composables/usePostUpgradeNotice'
@@ -1009,7 +1017,21 @@ const isCurseForgeLinkedModpack = computed(
 )
 
 const shareModal = ref<InstanceType<typeof ShareModalWrapper> | null>()
-const exportModal = ref(null)
+const exportModal = ref<InstanceType<typeof ExportModal>>()
+const modSideModal = ref<InstanceType<typeof ModSideModal>>()
+function applyModSideUpdates(updated: ContentItem[]) {
+	const sides = new Map(updated.map((item) => [item.file_path, item.mod_side]))
+	const apply = (items: ContentItem[]) =>
+		items.map((item) =>
+			sides.has(item.file_path) ? { ...item, mod_side: sides.get(item.file_path) } : item,
+		)
+	projects.value = apply(projects.value)
+	linkedModpackContentItems.value = apply(linkedModpackContentItems.value)
+	writeInstanceCache(props.instance.id, {
+		contentItems: projects.value,
+		linkedContentItems: linkedModpackContentItems.value,
+	})
+}
 const contentUpdaterModal = ref<InstanceType<typeof ContentUpdaterModal> | null>()
 const dependencyGraphModal = ref<InstanceType<typeof DependencyGraphModal> | null>()
 const modpackUpdateConfirmModal = ref<InstanceType<typeof ConfirmModpackUpdateModal> | null>()
@@ -2545,6 +2567,13 @@ async function handleShareItems(
 
 function getOverflowOptions(item: ContentItem): OverflowMenuOption[] {
 	const options: OverflowMenuOption[] = []
+	if (canMarkContentModSide(item)) {
+		options.push({
+			id: formatMessage(modSideMessages.mark),
+			icon: PencilIcon,
+			action: () => modSideModal.value?.show([item]),
+		})
+	}
 
 	if (item.instanceMaterializationState === 'present' && item.file_path) {
 		options.push({
@@ -2911,6 +2940,8 @@ provideContentManager({
 	bulkUpdateItem: updateProject,
 	updateModpack: props.isServerInstance ? undefined : handleModpackUpdate,
 	viewDependencies: handleViewDependencies,
+	exportServerPack: () => exportModal.value?.show('server_full'),
+	markModSide: (items: ContentItem[]) => modSideModal.value?.show(items),
 	unlinkModpack: unpairInstance,
 
 	openSettings: props.openSettings,
@@ -2977,6 +3008,7 @@ provideContentManager({
 
 		return {
 			id: getContentItemId(item),
+			mod_side: item.mod_side,
 			duplicateCount: (() => {
 				const key = duplicateModKey(item)
 				return key ? duplicateModCounts.value.get(key) : undefined

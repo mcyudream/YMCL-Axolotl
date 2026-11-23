@@ -9,12 +9,14 @@ mod home;
 mod install;
 mod lifecycle;
 mod mcarchive;
+pub(crate) mod mod_sides;
 mod paths;
 mod planet_minecraft;
 mod projects;
 mod run;
 mod screenshot_groups;
 mod screenshots;
+mod server_pack;
 pub(crate) mod synced_options;
 pub(crate) mod synced_packs {
     pub(crate) use super::synced_packs_axolotl::{
@@ -88,6 +90,7 @@ pub use self::mcarchive::{
     McArchiveContentInstallRequest, McArchiveContentInstallResult,
     import_mcarchive_content, install_mcarchive_content,
 };
+pub use self::mod_sides::{ModSideScope, set_mod_side};
 pub use self::paths::{get_full_path, get_mod_full_path};
 pub use self::planet_minecraft::{
     PlanetMinecraftContentInstallRequest, PlanetMinecraftContentInstallResult,
@@ -126,6 +129,10 @@ pub use self::screenshots::{
     delete_screenshots, export_screenshots, get_screenshot_path,
     list_all_screenshots, list_screenshots, list_synced_screenshots,
     move_screenshots, save_edited_screenshot,
+};
+pub use self::server_pack::{
+    ServerPackExportRequest, ServerPackMode, ServerPackPreview,
+    export_server_pack, preview_server_pack,
 };
 pub use self::synced_options::game_options::{
     GameOptionsSourceCandidate, GameSettingLocaleLabels,

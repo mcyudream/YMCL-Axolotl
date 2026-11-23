@@ -29,6 +29,25 @@ const { useContentSelection } = await import('./content-selection.ts')
 const { canUpdateContentItem, getUpdatableContentItems } = await import('./content-filtering.ts')
 hooks.deregister()
 
+test('selection drops hidden items before bulk changes', async () => {
+	const visible = ref([
+		contentItem('visible', 'user_added', null),
+		contentItem('hidden', 'pack_managed', null),
+	])
+	const scope = effectScope()
+	const selection = scope.run(() => useContentSelection(visible, (item) => item.id))!
+	selection.selectedIds.value = ['visible', 'hidden']
+	assert.equal(selection.selectedItems.value.length, 2)
+	visible.value = visible.value.filter((item) => item.id === 'visible')
+	await nextTick()
+	assert.deepEqual(selection.selectedIds.value, ['visible'])
+	assert.deepEqual(
+		selection.selectedItems.value.map((item) => item.id),
+		['visible'],
+	)
+	scope.stop()
+})
+
 function contentItem(
 	id: string,
 	ownership: ContentItem['instanceOwnershipKind'],

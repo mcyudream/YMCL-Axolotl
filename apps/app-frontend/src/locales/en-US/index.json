@@ -18179,6 +18179,9 @@
 	"app.ymcl.landing.pause": {
 		"message": "Pause slideshow"
 	},
+	"app.ymcl.landing.cache-video": {
+		"message": "Downloading background video for offline playback…"
+	},
 	"app.ymcl.landing.players": {
 		"message": "{count} online"
 	},
@@ -18319,5 +18322,59 @@
 	},
 	"app.ymcl.publish.progress.bytes": {
 		"message": "{uploaded} / {total} uploaded"
+	},
+	"app.mod-side.title": {
+		"message": "Set side for {count, number} mods"
+	},
+	"app.mod-side.scope": {
+		"message": "Apply to"
+	},
+	"app.mod-side.scope-instance": {
+		"message": "This modpack"
+	},
+	"app.mod-side.scope-local": {
+		"message": "All local modpacks using this mod and loader"
+	},
+	"app.mod-side.auto": {
+		"message": "Remove override"
+	},
+	"app.mod-side.auto-hint": {
+		"message": "Removes the rule in the selected scope. Inherited local rules and automatic detection still apply."
+	},
+	"app.mod-side.side": {
+		"message": "Mod side"
+	},
+	"app.export-modal.format-server-full": {
+		"message": "Full server pack (.zip)"
+	},
+	"app.export-modal.format-server-slim": {
+		"message": "Slim server pack (.zip)"
+	},
+	"app.export-modal.server-description": {
+		"message": "Exports enabled server-compatible and unknown-side mods with server configs and scripts. Client-only mods, client scripts, worlds and player data are excluded. Install the matching server core separately; launch scripts require Python 3.9+ and Java."
+	},
+	"app.export-modal.server-slim-description": {
+		"message": "Downloads mods with verified source URLs on first launch and checks SHA-256. Local mods and mods without a usable download URL are bundled."
+	},
+	"app.export-modal.server-summary": {
+		"message": "{mods, number} mods selected · {unknown, number} unknown side · {downloads, number} downloaded on first launch · {excluded, number} excluded"
+	},
+	"app.export-modal.server-missing": {
+		"message": "{count, number} required mod files are missing from this instance. Complete the downloads before exporting a usable server pack."
+	},
+	"app.export-modal.server-dependency-missing": {
+		"message": "Required dependencies are excluded. Select them or correct their mod side before exporting:"
+	},
+	"app.export-modal.server-excluded-mods": {
+		"message": "Excluded mods ({count, number})"
+	},
+	"app.export-modal.server-unknown-mods": {
+		"message": "Review unknown-side mods ({count, number})"
+	},
+	"app.export-modal.server-disabled-mod": {
+		"message": "Disabled"
+	},
+	"app.export-modal.refresh-preview": {
+		"message": "Refresh file preview"
 	}
 }

@@ -28,6 +28,8 @@ struct ModAnnotation {
     minecraft_version: Option<String>,
     dependencies: String,
     use_metadata: Option<bool>,
+    client_side_only: bool,
+    server_side_only: bool,
 }
 
 /// Extract legacy Forge and Cleanroom metadata without loading Java classes.
@@ -81,6 +83,7 @@ fn extract_with_budget(
         annotations.iter().find(|item| item.mod_id == mod_id);
     let mut additional_mods = Vec::new();
     let mut dependencies = Vec::new();
+    let mut server_dependencies = Vec::new();
     for entry in &entries {
         let Some(id) = entry.modid.as_deref() else {
             continue;
@@ -101,15 +104,27 @@ fn extract_with_budget(
         {
             for required in &entry.required_mods {
                 push_dependency(required, &mut dependencies);
+                push_dependency(required, &mut server_dependencies);
             }
         } else if let Some(annotation) = annotation {
             annotation_dependencies(
                 &annotation.dependencies,
                 &mut dependencies,
             );
+            annotation_dependencies_for_side(
+                &annotation.dependencies,
+                &mut server_dependencies,
+                true,
+            );
         }
     }
     dependencies.retain(|dependency| {
+        dependency.mod_id != mod_id
+            && !additional_mods
+                .iter()
+                .any(|item| item.mod_id == dependency.mod_id)
+    });
+    server_dependencies.retain(|dependency| {
         dependency.mod_id != mod_id
             && !additional_mods
                 .iter()
@@ -135,8 +150,37 @@ fn extract_with_budget(
             .or_else(|| primary.mcversion.clone()),
         loader_version: None,
         loader: Some("forge".into()),
+        environment: legacy_environment(&entries, &annotations, scan.complete),
         dependencies: Some(dependencies),
+        server_dependencies: Some(server_dependencies),
     })
+}
+
+fn legacy_environment(
+    entries: &[McmodInfoEntry],
+    annotations: &[ModAnnotation],
+    complete: bool,
+) -> Option<crate::state::ModSide> {
+    if !complete || entries.is_empty() {
+        return None;
+    }
+    let mut side = None;
+    for entry in entries {
+        let annotation = annotations.iter().find(|annotation| {
+            entry.modid.as_deref() == Some(annotation.mod_id.as_str())
+        })?;
+        let next =
+            match (annotation.client_side_only, annotation.server_side_only) {
+                (true, false) => crate::state::ModSide::Client,
+                (false, true) => crate::state::ModSide::Server,
+                _ => return None,
+            };
+        if side.is_some_and(|side| side != next) {
+            return None;
+        }
+        side = Some(next);
+    }
+    side
 }
 
 fn mod_version(
@@ -247,6 +291,18 @@ fn read_annotation(annotation: Annotation<'_>) -> Option<ModAnnotation> {
             ("useMetadata", AnnotationElementValue::BooleanConstant(value)) => {
                 result.use_metadata = Some(value != 0);
             }
+            (
+                "clientSideOnly",
+                AnnotationElementValue::BooleanConstant(value),
+            ) => {
+                result.client_side_only = value != 0;
+            }
+            (
+                "serverSideOnly",
+                AnnotationElementValue::BooleanConstant(value),
+            ) => {
+                result.server_side_only = value != 0;
+            }
             _ => {}
         }
     }
@@ -257,6 +313,14 @@ fn read_annotation(annotation: Annotation<'_>) -> Option<ModAnnotation> {
 fn annotation_dependencies(
     value: &str,
     dependencies: &mut Vec<LocalModDependency>,
+) {
+    annotation_dependencies_for_side(value, dependencies, false)
+}
+
+fn annotation_dependencies_for_side(
+    value: &str,
+    dependencies: &mut Vec<LocalModDependency>,
+    server: bool,
 ) {
     for clause in value.split(';') {
         let Some((prefix, reference)) = clause.trim().split_once(':') else {
@@ -269,7 +333,7 @@ fn annotation_dependencies(
             .collect::<Vec<_>>();
         if reference.contains(':')
             || !parts.contains(&"required")
-            || parts.contains(&"server")
+            || parts.contains(&if server { "client" } else { "server" })
             || parts.iter().filter(|part| **part == "required").count() != 1
             || parts
                 .iter()
@@ -325,6 +389,86 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+
+    #[test]
+    fn legacy_mod_sides_require_matching_declarations_for_every_bundled_mod() {
+        use crate::state::ModSide;
+        let entry = |id: &str| McmodInfoEntry {
+            modid: Some(id.into()),
+            ..Default::default()
+        };
+        let annotation = |id: &str, client, server| ModAnnotation {
+            mod_id: id.into(),
+            client_side_only: client,
+            server_side_only: server,
+            ..Default::default()
+        };
+        assert_eq!(
+            legacy_environment(
+                &[entry("a")],
+                &[annotation("a", true, false)],
+                true
+            ),
+            Some(ModSide::Client)
+        );
+        assert_eq!(
+            legacy_environment(
+                &[entry("a")],
+                &[annotation("a", false, true)],
+                true
+            ),
+            Some(ModSide::Server)
+        );
+        assert_eq!(
+            legacy_environment(
+                &[entry("a")],
+                &[annotation("a", false, false)],
+                true
+            ),
+            None
+        );
+        assert_eq!(
+            legacy_environment(
+                &[entry("a")],
+                &[annotation("a", true, false)],
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            legacy_environment(
+                &[entry("a"), entry("b")],
+                &[annotation("a", true, false), annotation("b", false, true)],
+                true
+            ),
+            None
+        );
+        assert_eq!(
+            legacy_environment(
+                &[entry("a"), entry("b")],
+                &[annotation("a", true, false)],
+                true
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn server_dependencies_include_server_clauses_and_exclude_client_clauses() {
+        let mut dependencies = Vec::new();
+        annotation_dependencies_for_side(
+            "required-after-client:client_ui;required-after:shared_library;required-after-server:server_library",
+            &mut dependencies,
+            true,
+        );
+        assert_eq!(
+            dependencies
+                .into_iter()
+                .map(|dependency| dependency.mod_id)
+                .collect::<Vec<_>>(),
+            ["shared_library", "server_library"]
+        );
+    }
 
     #[test]
     fn incomplete_annotation_scan_preserves_metadata_only_mods() {

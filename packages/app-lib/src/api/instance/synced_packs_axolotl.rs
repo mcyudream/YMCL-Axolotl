@@ -278,6 +278,7 @@ fn row_item(row: &PackRow) -> crate::Result<ContentItem> {
         origin_provider: None::<ContentProvider>,
         rollback: None::<ContentItemRollback>,
         environment: None,
+        mod_side: None,
         source_kind: Some(ContentSourceKind::SharedInstance),
         external: true,
         loader: None,

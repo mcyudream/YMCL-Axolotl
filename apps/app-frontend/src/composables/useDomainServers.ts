@@ -1,10 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
 import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 
+import { useDomainPacks } from '@/composables/useDomainPacks'
 import { list } from '@/helpers/instance'
 import { PERSONAL_DOMAIN_ID, ymcl, ymclErrorMessage } from '@/helpers/ymcl'
 import { useYmclStore } from '@/store/ymcl'
-import { useDomainPacks } from '@/composables/useDomainPacks'
 
 /**
  * Launcher-side view of every domain server (MIP appendix B.2 + YAP servers
@@ -155,13 +155,6 @@ function normalizeStatus(value: unknown): DomainServerRow['status'] {
 		if (lower === 'offline' || lower === 'false') return 'offline'
 	}
 	return 'unknown'
-}
-
-function formatAddress(host: string, port?: number | string | null): string {
-	if (!host) return ''
-	const parsed = typeof port === 'string' ? Number(port) : port
-	if (parsed == null || !Number.isFinite(parsed) || parsed === 25565) return host
-	return `${host}:${parsed}`
 }
 
 function matchYapRecord(

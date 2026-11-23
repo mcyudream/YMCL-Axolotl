@@ -369,6 +369,16 @@ async fn get_content_snapshot_inner(
             origin_provider,
             rollback: None,
             environment: None,
+            mod_side: (project_type == crate::state::ProjectType::Mod).then(
+                || {
+                    crate::state::detect_mod_side(
+                        None,
+                        None,
+                        std::iter::empty::<&str>(),
+                        local_mod.as_ref(),
+                    )
+                },
+            ),
             source_kind: entry.map(|entry| entry.source_kind),
             external,
             loader: local_mod.as_ref().and_then(|meta| meta.loader.clone()),
@@ -499,11 +509,34 @@ async fn get_content_snapshot_inner(
                 }
             }
         }
-        Err(error) => warnings.push(InstanceContentWarning {
-            code: "provider_metadata_unavailable".to_string(),
-            message: error.to_string(),
-            provider: None,
-        }),
+        Err(error) => {
+            let mut local_content = items
+                .iter()
+                .filter_map(|item| item.content.clone())
+                .collect::<Vec<_>>();
+            crate::api::instance::mod_sides::hydrate_mod_sides(
+                instance_id,
+                &mut local_content,
+                &state.pool,
+            )
+            .await?;
+            let sides = local_content
+                .into_iter()
+                .map(|item| (item.file_path, item.mod_side))
+                .collect::<HashMap<_, _>>();
+            for item in &mut items {
+                if let Some(content) = &mut item.content
+                    && let Some(side) = sides.get(&content.file_path)
+                {
+                    content.mod_side = side.clone();
+                }
+            }
+            warnings.push(InstanceContentWarning {
+                code: "provider_metadata_unavailable".to_string(),
+                message: error.to_string(),
+                provider: None,
+            });
+        }
     }
 
     let remote_pack = match super::list_content::get_linked_modpack_info(
@@ -2584,6 +2617,7 @@ mod tests {
             origin_provider,
             rollback: None,
             environment: None,
+            mod_side: None,
             source_kind: Some(ContentSourceKind::Local),
             external: false,
             loader: None,

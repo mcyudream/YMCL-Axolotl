@@ -28,6 +28,9 @@ pub struct ContentItem {
     /// Modrinth v3 version API. `None` when the file has no Modrinth
     /// version match (e.g. CurseForge-only content).
     pub environment: Option<VersionEnvironment>,
+    /// Effective classification, including persistent user overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_side: Option<crate::state::ModSideInfo>,
     /// Local content source kind (local file, CurseForge pack member, ...).
     pub source_kind: Option<ContentSourceKind>,
     /// True when the file is not linked to any online project (no Modrinth

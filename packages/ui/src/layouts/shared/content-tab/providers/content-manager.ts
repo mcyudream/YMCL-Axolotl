@@ -89,6 +89,8 @@ export interface ContentManagerContext {
 	// Modpack actions (optional)
 	updateModpack?: () => void
 	viewDependencies?: () => void
+	exportServerPack?: () => void
+	markModSide?: (items: ContentItem[]) => void
 	unlinkModpack?: () => void
 	openSettings?: () => void
 

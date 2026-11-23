@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import { hasActiveBackupOperations } from '@/helpers/instance-backup'
-import { confirmAppClose, registerAppCloseGuard } from '@/helpers/app-close-guards'
-import { useQueryClient } from '@tanstack/vue-query'
 import { AuthFeature, TauriModrinthClient, VerboseLoggingFeature } from '@modrinth/api-client'
 import {
 	ChangeSkinIcon,
@@ -9,7 +6,6 @@ import {
 	DownloadIcon,
 	ExternalIcon,
 	FlaskConicalIcon,
-	GlobeIcon,
 	FolderOpenIcon,
 	HomeIcon,
 	ImagesIcon,
@@ -65,7 +61,7 @@ import ConfirmDropTypeModal from '@modrinth/ui/src/components/flows/drop/Confirm
 import GenericContentInstallModal from '@modrinth/ui/src/components/flows/drop/GenericContentInstallModal.vue'
 import LauncherImportModal from '@modrinth/ui/src/components/flows/drop/LauncherImportModal.vue'
 import SymlinkMethodCards from '@modrinth/ui/src/components/flows/drop/SymlinkMethodCards.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getVersion } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -111,6 +107,7 @@ import { minecraftLaunchErrorKey } from '@/composables/useMinecraftLaunchError'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { AxolotlBrandConfig, config, getOfficialLabrinthBaseUrl } from '@/config'
 import { trackEvent } from '@/helpers/analytics'
+import { confirmAppClose, registerAppCloseGuard } from '@/helpers/app-close-guards'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
@@ -125,6 +122,7 @@ import {
 } from '@/helpers/events.js'
 import { install_create_modpack_instance, install_get_modpack_preview } from '@/helpers/install'
 import { type DirectLinkSyncReport, get as getInstance, run } from '@/helpers/instance'
+import { hasActiveBackupOperations } from '@/helpers/instance-backup'
 import { reconcileMojangAuthSourceAtStartup } from '@/helpers/mojang-auth'
 import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
@@ -902,12 +900,19 @@ watch(
 )
 
 onMounted(async () => {
-	unlistenContentRefresh = await listen<{ event: string; instance_id: string }>('instance', ({ payload }) => {
-		if (payload.event === 'content_changed') {
-			void instanceContentQueryClient.invalidateQueries({ queryKey: ['instance-upgrade', 'content-data', payload.instance_id] })
-		}
+	unlistenContentRefresh = await listen<{ event: string; instance_id: string }>(
+		'instance',
+		({ payload }) => {
+			if (payload.event === 'content_changed') {
+				void instanceContentQueryClient.invalidateQueries({
+					queryKey: ['instance-upgrade', 'content-data', payload.instance_id],
+				})
+			}
+		},
+	)
+	unlistenLightweightModeRequest = await listen('request-lightweight-mode', () => {
+		void enterLightweightModeOnClose()
 	})
-	unlistenLightweightModeRequest = await listen('request-lightweight-mode', () => { void enterLightweightModeOnClose() })
 	unlistenLightweightModeError = await listen<string>('lightweight-mode-error', ({ payload }) => {
 		allowWindowClose = false
 		closeRequestInProgress.value = false
@@ -1114,7 +1119,11 @@ async function onImportFileReceived({
 }
 
 const messages = defineMessages({
-	backupCloseBlocked: { id: 'app.backups.close-blocked', defaultMessage: 'Wait for backup operations to finish before closing or restarting the launcher.' },
+	backupCloseBlocked: {
+		id: 'app.backups.close-blocked',
+		defaultMessage:
+			'Wait for backup operations to finish before closing or restarting the launcher.',
+	},
 	updateInstalledToastTitle: {
 		id: 'app.update.complete-toast.title',
 		defaultMessage: 'Version {version} was successfully installed!',
@@ -1974,8 +1983,6 @@ async function handleCloseRequested(event: { preventDefault: () => void }) {
 	closeChoiceRemember.value = false
 	closeChoiceModal.value?.show()
 }
-
-const handleClose = () => closeWindowImmediately()
 
 const loading = setupLoadingStateProvider()
 loading.setEnabled(false)

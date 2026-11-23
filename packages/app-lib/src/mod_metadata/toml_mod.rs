@@ -37,10 +37,11 @@ pub(crate) struct ModsTomlEntry {
 pub(crate) struct ForgeDependencyEntry {
     pub mod_id: Option<String>,
     pub mandatory: Option<bool>,
+    #[serde(rename = "type")]
+    pub dependency_type: Option<String>,
     pub version_range: Option<String>,
     #[allow(dead_code)]
     pub ordering: Option<String>,
-    #[allow(dead_code)]
     pub side: Option<String>,
 }
 

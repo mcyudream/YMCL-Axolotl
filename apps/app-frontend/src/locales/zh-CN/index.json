@@ -18181,6 +18181,9 @@
 	"app.ymcl.landing.pause": {
 		"message": "暂停轮播"
 	},
+	"app.ymcl.landing.cache-video": {
+		"message": "正在下载背景视频，完成后可离线播放…"
+	},
 	"app.ymcl.landing.players": {
 		"message": "{count} 人在线"
 	},
@@ -18321,5 +18324,59 @@
 	},
 	"app.ymcl.publish.progress.bytes": {
 		"message": "已上传 {uploaded} / {total}"
+	},
+	"app.mod-side.title": {
+		"message": "标记 {count, number} 个 Mod 的端别"
+	},
+	"app.mod-side.scope": {
+		"message": "应用范围"
+	},
+	"app.mod-side.scope-instance": {
+		"message": "当前整合包"
+	},
+	"app.mod-side.scope-local": {
+		"message": "此设备上使用相同 Mod 与加载器的所有整合包"
+	},
+	"app.mod-side.auto": {
+		"message": "移除手动标记"
+	},
+	"app.mod-side.auto-hint": {
+		"message": "移除所选范围的标记，继续使用继承的本地通用标记或自动判断结果。"
+	},
+	"app.mod-side.side": {
+		"message": "Mod 端别"
+	},
+	"app.export-modal.format-server-full": {
+		"message": "完整服务端包（.zip）"
+	},
+	"app.export-modal.format-server-slim": {
+		"message": "精简服务端包（.zip）"
+	},
+	"app.export-modal.server-description": {
+		"message": "导出已启用的服务端兼容 Mod、端别未知的 Mod、服务端配置及脚本，排除纯客户端 Mod、客户端脚本、世界和玩家数据。需另行安装对应版本的服务端核心，启动脚本需要 Python 3.9 或更新版本及 Java。"
+	},
+	"app.export-modal.server-slim-description": {
+		"message": "首次启动时下载具有已验证来源地址的 Mod 并校验 SHA-256。本地 Mod 和没有可用下载地址的 Mod 随包附带。"
+	},
+	"app.export-modal.server-summary": {
+		"message": "已选 {mods, number} 个 Mod · {unknown, number} 个端别未知 · {downloads, number} 个首次启动下载 · 已排除 {excluded, number} 个"
+	},
+	"app.export-modal.server-missing": {
+		"message": "此实例缺少 {count, number} 个必需 Mod 文件。请先完成下载，再导出可用的服务端包。"
+	},
+	"app.export-modal.server-dependency-missing": {
+		"message": "部分必需依赖已被排除。请勾选依赖或修正其端别后导出："
+	},
+	"app.export-modal.server-excluded-mods": {
+		"message": "已排除的 Mod（{count, number}）"
+	},
+	"app.export-modal.server-unknown-mods": {
+		"message": "检查端别未知的 Mod（{count, number}）"
+	},
+	"app.export-modal.server-disabled-mod": {
+		"message": "已禁用"
+	},
+	"app.export-modal.refresh-preview": {
+		"message": "刷新文件预览"
 	}
 }

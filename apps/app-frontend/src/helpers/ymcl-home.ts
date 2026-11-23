@@ -380,7 +380,7 @@ export function mapDashboardToHomeProfile(
 				'greetingFont',
 				'greetingFontSize',
 			] as const) {
-				delete card.params[key]
+				Reflect.deleteProperty(card.params, key)
 				if (widget.options?.[key] !== undefined) card.params[key] = widget.options[key]
 			}
 		} else if (widget.kind === 'recent') {

@@ -5,6 +5,7 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 
 import type { ContentItem } from '../types'
 import { pruneMetadataFilterSelections } from './content-filter-state'
+import { getContentEnvironmentFilterValue } from './content-filtering'
 
 export interface MetadataFilterOption {
 	value: string
@@ -60,28 +61,6 @@ const openSourceLicenseIds = new Set([
 	'UPL-1.0',
 	'Zlib',
 ])
-
-type EnvironmentFilterValue = 'client' | 'server' | 'client_and_server' | 'singleplayer'
-
-function getEnvironmentFilterValue(environment?: string): EnvironmentFilterValue | undefined {
-	switch (environment) {
-		case 'client_only':
-			return 'client'
-		case 'server_only':
-		case 'dedicated_server_only':
-			return 'server'
-		case 'client_and_server':
-		case 'client_only_server_optional':
-		case 'server_only_client_optional':
-		case 'client_or_server':
-		case 'client_or_server_prefers_both':
-			return 'client_and_server'
-		case 'singleplayer_only':
-			return 'singleplayer'
-		default:
-			return undefined
-	}
-}
 
 function isOpenSource(item: ContentItem): boolean {
 	const licenseId = item.project?.license?.id.replace(/-(?:only|or-later)$/, '')
@@ -229,7 +208,7 @@ export function useContentMetadataFilters(
 				label: formatMessage(messages.categoryEnvironment),
 				order: ['client', 'server', 'client_and_server', 'singleplayer'],
 				values: (item) => {
-					const value = getEnvironmentFilterValue(item.environment)
+					const value = getContentEnvironmentFilterValue(item)
 					return value ? [value] : [UNKNOWN]
 				},
 				labelFor: (value) => {

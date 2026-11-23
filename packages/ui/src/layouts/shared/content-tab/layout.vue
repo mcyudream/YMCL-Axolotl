@@ -50,6 +50,7 @@ import {
 	useContentPipeline,
 	useContentSelection,
 } from './composables'
+import { canMarkContentModSide } from './composables/content-filtering'
 import { injectContentManager } from './providers/content-manager'
 import type {
 	BulkOperationStatus,
@@ -57,6 +58,7 @@ import type {
 	ContentItem,
 	ContentWorldGroupMeta,
 } from './types'
+import { modSideMessages } from './utils/mod-sides'
 
 const { formatMessage, locale } = useVIntl()
 
@@ -240,7 +242,6 @@ const filterOptionsReady = computed(
 const {
 	searchQuery,
 	searchableItemCount,
-	sortedModpackItems,
 	modpackChildIdSet,
 	selectedTypeFilter,
 	selectedStatusFilters,
@@ -306,9 +307,7 @@ const filteredModpackItems = computed(() =>
 const activeMetadataFilterCount = computed(() => metadataFilteringKeys.value.length)
 
 const { selectedIds, selectedItems, clearSelection, removeFromSelection } = useContentSelection(
-	computed(() => {
-		return [...sortedModpackItems.value, ...ctx.items.value]
-	}),
+	computed(() => [...filteredModpackItems.value, ...filteredItems.value]),
 	getItemId,
 )
 
@@ -1155,6 +1154,8 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 								formatMessage(messages.updateAll)
 							"
 							:is-bulk-operating="isBulkOperating"
+							:has-server-export="!!ctx.exportServerPack"
+							@export-server="ctx.exportServerPack?.()"
 							@select-sort="(mode) => (sortMode = mode)"
 							@toggle-pin="togglePinnedView"
 							@reset-view="resetView"
@@ -1202,6 +1203,18 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 			@disable="bulkDisable"
 		>
 			<template #actions>
+				<ButtonStyled
+					v-if="ctx.markModSide && selectedItems.some(canMarkContentModSide)"
+					type="transparent"
+				>
+					<button
+						type="button"
+						:disabled="isBulkOperating || ctx.isBusy.value"
+						@click="ctx.markModSide(selectedItems.filter(canMarkContentModSide))"
+					>
+						{{ formatMessage(modSideMessages.mark) }}
+					</button>
+				</ButtonStyled>
 				<ButtonStyled
 					v-if="hasBulkUpdateSupport && selectedItems.some(canUpdateContentItem)"
 					type="transparent"

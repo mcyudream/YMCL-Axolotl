@@ -24,6 +24,9 @@ pub use self::dirs::*;
 mod instance_types;
 pub use self::instance_types::*;
 
+mod content_sides;
+pub use self::content_sides::*;
+
 pub(crate) mod instances;
 pub use self::instances::*;
 

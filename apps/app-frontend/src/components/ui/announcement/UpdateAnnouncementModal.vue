@@ -2,11 +2,7 @@
 import { ButtonStyled, commonMessages, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
-import {
-	getAnnouncementByVersion,
-	type LauncherAnnouncement,
-} from '@/announcements/catalog'
-import { AxolotlBrandConfig } from '@/config'
+import { getAnnouncementByVersion, type LauncherAnnouncement } from '@/announcements/catalog'
 import { isYmclUpdateConfigured } from '@/helpers/ymcl-content'
 import {
 	findYmclAnnouncementByVersion,
@@ -44,8 +40,7 @@ async function show(nextVersion: string) {
 		try {
 			const remote = await loadYmclUpdateAnnouncements({ channel: 'all', limit: 50 })
 			if (remote) remoteAnnouncements.value = remote
-		}
-		catch {
+		} catch {
 			// 保留本地 catalog 回退
 		}
 	}

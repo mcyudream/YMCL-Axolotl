@@ -5122,5 +5122,44 @@
 	},
 	"skin.preview.armor.unequipped": {
 		"defaultMessage": "Unequipped"
+	},
+	"content.mod-side.client": {
+		"defaultMessage": "Client only"
+	},
+	"content.mod-side.server": {
+		"defaultMessage": "Server only"
+	},
+	"content.mod-side.both": {
+		"defaultMessage": "Client and server"
+	},
+	"content.mod-side.unknown": {
+		"defaultMessage": "Unknown side"
+	},
+	"content.mod-side.optional": {
+		"defaultMessage": "Server optional"
+	},
+	"content.mod-side.mark": {
+		"defaultMessage": "Set mod side"
+	},
+	"content.mod-side.export-server": {
+		"defaultMessage": "Export server pack"
+	},
+	"content.mod-side.source.instance": {
+		"defaultMessage": "Override for this modpack"
+	},
+	"content.mod-side.source.local": {
+		"defaultMessage": "Local rule for this mod and loader"
+	},
+	"content.mod-side.source.modrinth": {
+		"defaultMessage": "Detected from Modrinth metadata"
+	},
+	"content.mod-side.source.curseforge": {
+		"defaultMessage": "Detected from CurseForge metadata"
+	},
+	"content.mod-side.source.embedded": {
+		"defaultMessage": "Declared in the mod JAR"
+	},
+	"content.mod-side.source.unknown": {
+		"defaultMessage": "No explicit environment information"
 	}
 }

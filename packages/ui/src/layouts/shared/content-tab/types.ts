@@ -97,6 +97,7 @@ export interface ContentCardTableItem {
 		autoDependency: boolean
 		orphaned: boolean
 	} | null
+	mod_side?: ContentModSideInfo | null
 	overflowOptions?: OverflowMenuOption[]
 	inlineActions?: ContentRowInlineAction[]
 	isGroupHeader?: boolean
@@ -111,6 +112,13 @@ export interface ContentCardTableItem {
 	downloads?: number | null
 	followers?: number | null
 	categories?: ContentModpackCardCategory[]
+}
+
+export type ContentModSide = 'client' | 'server' | 'both' | 'unknown'
+export interface ContentModSideInfo {
+	side: ContentModSide
+	server_support: 'required' | 'optional' | 'unsupported' | 'unknown'
+	source: 'instance' | 'local' | 'modrinth' | 'curseforge' | 'embedded' | 'unknown'
 }
 
 export type ContentCardTableSortColumn = 'project' | 'version'

@@ -467,7 +467,7 @@ async fn curseforge_manifest(
     ))
 }
 
-fn is_already_compressed(path: &str) -> bool {
+pub(crate) fn is_already_compressed(path: &str) -> bool {
     let Some(extension) = path.rsplit('.').next() else {
         return false;
     };
@@ -913,7 +913,7 @@ async fn create_mrpack_json_inner(
 }
 
 #[async_recursion::async_recursion]
-async fn add_all_recursive_folder_paths(
+pub(crate) async fn add_all_recursive_folder_paths(
     folder: &PathBuf,
     output: &mut Vec<PathBuf>,
 ) -> crate::Result<()> {

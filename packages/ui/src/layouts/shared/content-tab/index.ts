@@ -15,10 +15,12 @@ export type {
 	ContentInstallProjectOwner,
 } from './components/modals/ContentInstallModal.vue'
 export { default as ContentInstallModal } from './components/modals/ContentInstallModal.vue'
+export { canMarkContentModSide } from './composables/content-filtering'
 export { clearPinnedContentViewPreferences } from './composables/content-view-state'
 export { default as ContentCardLayout } from './layout.vue'
 export { default as ContentPageLayout } from './layout.vue'
 export * from './providers'
 export * from './types'
+export * from './utils/mod-sides'
 export * from './utils/update-channels'
 export { default as ConfirmLeaveModal } from '#ui/components/modal/ConfirmLeaveModal.vue'

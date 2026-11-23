@@ -20,7 +20,7 @@ mod toml_mod;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-pub(crate) const METADATA_VERSION: u32 = 4;
+pub(crate) const METADATA_VERSION: u32 = 6;
 
 /// Unified local mod metadata extracted from inside a JAR.
 ///
@@ -58,6 +58,9 @@ pub struct LocalModMetadata {
     pub loader_version: Option<String>,
     /// Loader type (e.g. "fabric", "forge", "neoforge", "quilt")
     pub loader: Option<String>,
+    /// The JAR's own loading environment; dependency sides are unrelated.
+    #[serde(default)]
+    pub environment: Option<crate::state::ModSide>,
     /// Required dependencies declared in the embedded metadata (Fabric
     /// `depends`, Quilt `depends`, Forge mandatory dependencies).
     ///
@@ -65,6 +68,9 @@ pub struct LocalModMetadata {
     /// triggers a one-time re-extraction of the file.
     #[serde(default)]
     pub dependencies: Option<Vec<LocalModDependency>>,
+    /// Required dependencies when running on a dedicated server.
+    #[serde(default)]
+    pub server_dependencies: Option<Vec<LocalModDependency>>,
 }
 
 impl LocalModMetadata {
@@ -212,7 +218,9 @@ fn try_fabric(
             "fabricloader",
         ),
         loader: Some("fabric".into()),
+        environment: embedded_environment(parsed.environment.as_ref()),
         dependencies: Some(fabric::fabric_dependencies(&parsed.depends)),
+        server_dependencies: Some(fabric::fabric_dependencies(&parsed.depends)),
     })
 }
 
@@ -241,7 +249,14 @@ fn try_quilt(
         minecraft_version: fabric::quilt_dep_value(&inner.depends, "minecraft"),
         loader_version: fabric::quilt_dep_value(&inner.depends, "quilt_loader"),
         loader: Some("quilt".into()),
+        environment: embedded_environment(
+            parsed
+                .minecraft
+                .as_ref()
+                .and_then(|minecraft| minecraft.environment.as_ref()),
+        ),
         dependencies: Some(fabric::quilt_dependencies(&inner.depends)),
+        server_dependencies: Some(fabric::quilt_dependencies(&inner.depends)),
     })
 }
 
@@ -319,6 +334,34 @@ fn try_toml_path(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let server_dependencies = parsed
+        .dependencies
+        .as_ref()
+        .and_then(|dependencies| dependencies.get(&mod_id))
+        .into_iter()
+        .flatten()
+        .filter(|dependency| {
+            dependency.mandatory.unwrap_or_else(|| {
+                dependency
+                    .dependency_type
+                    .as_deref()
+                    .is_none_or(|kind| kind == "required")
+            })
+        })
+        .filter(|dependency| {
+            !dependency
+                .side
+                .as_deref()
+                .is_some_and(|side| side.eq_ignore_ascii_case("client"))
+        })
+        .filter_map(|dependency| {
+            let mod_id = dependency.mod_id.as_ref()?;
+            (!is_env_dependency_id(mod_id)).then(|| LocalModDependency {
+                mod_id: mod_id.clone(),
+                version_range: dependency.version_range.clone(),
+            })
+        })
+        .collect();
 
     // Forge `mods.toml` commonly stores the version as a Gradle placeholder
     // (e.g. `${file.jarVersion}`) that the loader resolves at runtime from the
@@ -340,11 +383,50 @@ fn try_toml_path(
         minecraft_version,
         loader_version,
         loader,
+        environment: None,
         dependencies: Some(dependencies),
+        server_dependencies: Some(server_dependencies),
     })
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+fn embedded_environment(
+    value: Option<&serde_json::Value>,
+) -> Option<crate::state::ModSide> {
+    use crate::state::ModSide;
+    match value {
+        None => Some(ModSide::Both),
+        Some(serde_json::Value::String(value)) => match value.as_str() {
+            "client" => Some(ModSide::Client),
+            "server" | "dedicated_server" => Some(ModSide::Server),
+            "*" => Some(ModSide::Both),
+            _ => None,
+        },
+        Some(serde_json::Value::Array(values)) if !values.is_empty() => {
+            let mut client = false;
+            let mut server = false;
+            for value in values {
+                match embedded_environment(Some(value))? {
+                    ModSide::Client => client = true,
+                    ModSide::Server => server = true,
+                    ModSide::Both => {
+                        client = true;
+                        server = true;
+                    }
+                    ModSide::Unknown => return None,
+                }
+            }
+            Some(match (client, server) {
+                (true, true) => ModSide::Both,
+                (true, false) => ModSide::Client,
+                (false, true) => ModSide::Server,
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
 
 fn merge_authors(
     primary: &[fabric::FabricAuthorOrArray],
@@ -420,7 +502,7 @@ mod tests {
             "mcmod.info",
             r#"[{"modid":"example","version":"1"}]"#,
         )]);
-        let metadata = extract_mod_metadata(&jar).unwrap();
+        let metadata = super::extract_mod_metadata(&jar).unwrap();
         let cached = serialize_metadata_cache(Some(&metadata)).unwrap();
         assert!(!metadata_cache_needs_refresh(Some(&cached)));
         let old = cached.replace(
@@ -444,6 +526,83 @@ mod tests {
             archive.finish().expect("finish zip");
         }
         bytes::Bytes::from(buffer.into_inner())
+    }
+
+    #[test]
+    fn fabric_and_quilt_environments_are_loading_sides() {
+        use crate::state::ModSide;
+        for (document, expected) in [
+            (
+                r#"{"id":"example","environment":"client"}"#,
+                ModSide::Client,
+            ),
+            (
+                r#"{"id":"example","environment":"server"}"#,
+                ModSide::Server,
+            ),
+            (r#"{"id":"example"}"#, ModSide::Both),
+            (
+                r#"{"id":"example","environment":["client"]}"#,
+                ModSide::Client,
+            ),
+            (
+                r#"{"id":"example","environment":["client","server"]}"#,
+                ModSide::Both,
+            ),
+        ] {
+            let metadata = super::extract_mod_metadata(&build_jar(&[(
+                "fabric.mod.json",
+                document,
+            )]))
+            .unwrap();
+            assert_eq!(metadata.environment, Some(expected));
+        }
+        let metadata = super::extract_mod_metadata(&build_jar(&[(
+            "quilt.mod.json",
+            r#"{"quilt_loader":{"id":"example"},"minecraft":{"environment":"client"}}"#,
+        )])).unwrap();
+        assert_eq!(metadata.environment, Some(ModSide::Client));
+        let forge = super::extract_mod_metadata(&build_jar(&[(
+            "META-INF/mods.toml",
+            "displayTest = \"IGNORE_SERVER_VERSION\"\n[[mods]]\nmodId = \"example\"\n",
+        )])).unwrap();
+        assert_eq!(forge.environment, None);
+    }
+
+    #[test]
+    fn server_dependencies_exclude_forge_client_only_and_neoforge_optional_entries()
+     {
+        let jar = build_jar(&[(
+            "META-INF/neoforge.mods.toml",
+            r#"
+[[mods]]
+modId = "example"
+[[dependencies.example]]
+modId = "client_ui"
+type = "required"
+side = "CLIENT"
+[[dependencies.example]]
+modId = "shared_library"
+type = "required"
+side = "BOTH"
+[[dependencies.example]]
+modId = "server_library"
+type = "required"
+side = "SERVER"
+[[dependencies.example]]
+modId = "optional_extra"
+type = "optional"
+side = "BOTH"
+"#,
+        )]);
+        let metadata = super::extract_mod_metadata(&jar).unwrap();
+        let ids = metadata
+            .server_dependencies
+            .unwrap()
+            .into_iter()
+            .map(|dependency| dependency.mod_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["shared_library", "server_library"]);
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub(crate) struct FabricModJson {
     pub name: Option<String>,
     pub version: Option<String>,
     pub description: Option<String>,
+    pub environment: Option<serde_json::Value>,
     #[serde(default)]
     pub authors: Vec<FabricAuthorOrArray>,
     #[serde(default)]
@@ -60,8 +61,14 @@ pub(crate) enum FabricAuthorOrArray {
 #[derive(Debug, Deserialize)]
 pub(crate) struct QuiltModJson {
     pub quilt_loader: FabricModJson,
+    #[serde(default)]
+    pub minecraft: Option<QuiltMinecraft>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct QuiltMinecraft {
+    pub environment: Option<serde_json::Value>,
+}
 /// Extract a string value from a Fabric-style depends map.
 pub(crate) fn fabric_dep_value(
     depends: &Option<serde_json::Value>,

@@ -127,6 +127,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_cache_icon,
             instance_edit_icon,
             instance_export_mrpack,
+            instance_set_mod_side,
+            instance_preview_server_pack,
+            instance_export_server_pack,
             instance_get_pack_export_candidates,
             instance_list_screenshots,
             instance_list_all_screenshots,
@@ -1869,6 +1872,41 @@ pub async fn instance_repair_managed_modrinth(
     instance_id: &str,
 ) -> Result<theseus::install::InstallJobSnapshot> {
     Ok(theseus::instance::repair_managed_modrinth(instance_id).await?)
+}
+
+#[tauri::command]
+pub async fn instance_set_mod_side(
+    instance_id: &str,
+    paths: Vec<String>,
+    scope: theseus::instance::ModSideScope,
+    side: Option<theseus::data::ModSide>,
+) -> Result<Vec<ContentItem>> {
+    Ok(
+        theseus::instance::set_mod_side(instance_id, paths, scope, side)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn instance_preview_server_pack(
+    instance_id: &str,
+    mode: theseus::instance::ServerPackMode,
+) -> Result<theseus::instance::ServerPackPreview> {
+    Ok(theseus::instance::preview_server_pack(instance_id, mode).await?)
+}
+
+#[tauri::command]
+pub async fn instance_export_server_pack(
+    instance_id: &str,
+    export_location: PathBuf,
+    request: theseus::instance::ServerPackExportRequest,
+) -> Result<()> {
+    Ok(theseus::instance::export_server_pack(
+        instance_id,
+        export_location,
+        request,
+    )
+    .await?)
 }
 
 #[tauri::command]
