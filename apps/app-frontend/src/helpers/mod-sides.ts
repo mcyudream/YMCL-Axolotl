@@ -18,6 +18,19 @@ export interface ServerPackPreview {
 	missingMods: string[]
 }
 
+export function selectServerPackFiles(
+	files: ServerPackPreview['files'],
+	previous?: { files: ReadonlyArray<{ path: string }>; selectedPaths: readonly string[] },
+): string[] {
+	const previousPaths = new Set(previous?.files.map((file) => file.path))
+	const previousSelected = new Set(previous?.selectedPaths)
+	return files
+		.filter((file) =>
+			previousPaths.has(file.path) ? previousSelected.has(file.path) : file.selected,
+		)
+		.map((file) => file.path)
+}
+
 export async function setModSide(
 	instanceId: string,
 	paths: string[],

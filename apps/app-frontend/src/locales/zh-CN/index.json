@@ -18353,7 +18353,7 @@
 		"message": "精简服务端包（.zip）"
 	},
 	"app.export-modal.server-description": {
-		"message": "导出已启用的服务端兼容 Mod、端别未知的 Mod、服务端配置及脚本，排除纯客户端 Mod、客户端脚本、世界和玩家数据。需另行安装对应版本的服务端核心，启动脚本需要 Python 3.9 或更新版本及 Java。"
+		"message": "默认勾选已启用且支持服务端或端别未知的 Mod，以及服务端配置和脚本；其他实例文件可手动勾选。纯客户端和已禁用的 Mod 不参与导出。请另行安装匹配的服务端核心；启动脚本需要 Python 3.9+ 和 Java。"
 	},
 	"app.export-modal.server-slim-description": {
 		"message": "首次启动时下载具有已验证来源地址的 Mod 并校验 SHA-256。本地 Mod 和没有可用下载地址的 Mod 随包附带。"

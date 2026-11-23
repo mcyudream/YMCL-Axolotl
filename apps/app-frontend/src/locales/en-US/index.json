@@ -18351,7 +18351,7 @@
 		"message": "Slim server pack (.zip)"
 	},
 	"app.export-modal.server-description": {
-		"message": "Exports enabled server-compatible and unknown-side mods with server configs and scripts. Client-only mods, client scripts, worlds and player data are excluded. Install the matching server core separately; launch scripts require Python 3.9+ and Java."
+		"message": "Preselects enabled server-compatible and unknown-side mods, server configs and scripts. Other instance files can be selected manually. Client-only and disabled mods are excluded. Install the matching server core separately; launch scripts require Python 3.9+ and Java."
 	},
 	"app.export-modal.server-slim-description": {
 		"message": "Downloads mods with verified source URLs on first launch and checks SHA-256. Local mods and mods without a usable download URL are bundled."

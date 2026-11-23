@@ -54,6 +54,67 @@ pub struct ServerPackPreview {
     pub missing_mods: Vec<String>,
 }
 
+fn is_server_export_candidate(path: &str) -> bool {
+    let root = path.split('/').next().unwrap_or_default();
+    if root.is_empty()
+        || path
+            .split('/')
+            .any(|part| part.starts_with('.') || part == "__MACOSX")
+    {
+        return false;
+    }
+    ![
+        "profile.json",
+        "modrinth_logs",
+        SERVER_PACK_MANIFEST,
+        "ymcl-server-bootstrap.py",
+        "start-server.sh",
+        "start-server.cmd",
+        "SERVER-README.txt",
+    ]
+    .iter()
+    .any(|reserved| root.eq_ignore_ascii_case(reserved))
+}
+
+async fn collect_server_pack_paths(
+    root: &PathBuf,
+) -> crate::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    let mut pending = vec![root.clone()];
+    while let Some(directory) = pending.pop() {
+        let mut entries = io::read_dir(&directory).await?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|error| IOError::with_path(error, &directory))?
+        {
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| {
+                    crate::ErrorKind::InputError(error.to_string())
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !is_server_export_candidate(&relative) {
+                continue;
+            }
+            let metadata = tokio::fs::symlink_metadata(&path)
+                .await
+                .map_err(|error| IOError::with_path(error, &path))?;
+            if io::is_symlink_or_reparse(&metadata) {
+                continue;
+            }
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+    Ok(paths)
+}
+
 fn is_server_support_file(path: &str) -> bool {
     let parts = path.split('/').collect::<Vec<_>>();
     if parts
@@ -330,45 +391,7 @@ async fn preview_from_snapshot(
     snapshot: &InstanceContentSnapshot,
 ) -> crate::Result<ServerPackPreview> {
     let root = get_full_path(instance_id).await?;
-    let mut paths = Vec::new();
-    // Do not enumerate worlds, assets and launcher caches just to discard them.
-    let mut directories = io::read_dir(&root).await?;
-    while let Some(entry) = directories
-        .next_entry()
-        .await
-        .map_err(|error| IOError::with_path(error, &root))?
-    {
-        let name = entry.file_name();
-        if !matches!(
-            name.to_str(),
-            Some(
-                "mods"
-                    | "config"
-                    | "defaultconfigs"
-                    | "scripts"
-                    | "datapacks"
-                    | "global_packs"
-                    | "openloader"
-                    | "crafttweaker"
-                    | "structures"
-                    | "kubejs"
-                    | "paxi"
-                    | "server.properties"
-            )
-        ) {
-            continue;
-        }
-        let path = entry.path();
-        let metadata = tokio::fs::symlink_metadata(&path).await?;
-        if metadata.is_dir() && !io::is_symlink_or_reparse(&metadata) {
-            super::export_mrpack::add_all_recursive_folder_paths(
-                &path, &mut paths,
-            )
-            .await?;
-        } else if metadata.is_file() && !io::is_symlink_or_reparse(&metadata) {
-            paths.push(path);
-        }
-    }
+    let paths = collect_server_pack_paths(&root).await?;
     let mods = snapshot
         .items
         .iter()
@@ -404,9 +427,6 @@ async fn preview_from_snapshot(
             });
             continue;
         }
-        if relative.split('/').any(|part| part.starts_with('.')) {
-            continue;
-        }
         let (mod_side, selected, requires) = if is_mod {
             let installed = mods.get(relative.as_str());
             let side = installed
@@ -434,10 +454,8 @@ async fn preview_from_snapshot(
                 })
                 .unwrap_or_default();
             (Some(side), selected, requires)
-        } else if is_server_support_file(&relative) {
-            (None, true, Vec::new())
         } else {
-            continue;
+            (None, is_server_support_file(&relative), Vec::new())
         };
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -750,7 +768,7 @@ async fn write_archive(
         "update": {
             "protocol": "ymcl-server-pack/v1",
             "deletePolicy": "previous_manifest_only",
-            "preservePaths": ["world/**", "world_nether/**", "world_the_end/**", "server.properties", "ops.json", "whitelist.json", "banned-players.json", "banned-ips.json"],
+            "preservePaths": ["world/**", "world_nether/**", "world_the_end/**", "saves/**", "server.properties", "ops.json", "whitelist.json", "banned-players.json", "banned-ips.json"],
             "endpoint": null
         }
     });
@@ -769,7 +787,7 @@ async fn write_archive(
         ),
         (
             "SERVER-README.txt",
-            "YMCL server pack / 服务端包\n\nRequires Java for your Minecraft version and Python 3.9+.\n需要对应 Minecraft 版本的 Java 和 Python 3.9 或更新版本。\n\nWindows: start-server.cmd\nLinux/macOS: sh start-server.sh\nDownload only / 仅准备 Mod: python3 ymcl-server-bootstrap.py --prepare-only\n\nThe slim pack downloads referenced mods on first launch and verifies SHA-256.\nLocal mods or mods without a verified public download URL are bundled.\n精简包首次启动下载有可用来源的 Mod 并校验 SHA-256；本地 Mod 和无可用下载地址的 Mod 随包附带。\n\nInstall the matching dedicated server core in this directory before launching.\nThis export does not include Java, the server core, worlds or player data.\n启动前请在此目录安装对应版本的服务端核心。导出不包含 Java、服务端核心、世界及玩家数据。\n\nReview unknown mod sides and client-specific config before hosting.\n开服前请检查未知端别的 Mod 和配置中的客户端选项。\n",
+            "YMCL server pack / 服务端包\n\nRequires Java for your Minecraft version and Python 3.9+.\n需要对应 Minecraft 版本的 Java 和 Python 3.9 或更新版本。\n\nWindows: start-server.cmd\nLinux/macOS: sh start-server.sh\nDownload only / 仅准备 Mod: python3 ymcl-server-bootstrap.py --prepare-only\n\nThe slim pack downloads referenced mods on first launch and verifies SHA-256.\nLocal mods or mods without a verified public download URL are bundled.\n精简包首次启动下载有可用来源的 Mod 并校验 SHA-256；本地 Mod 和无可用下载地址的 Mod 随包附带。\n\nInstall the matching dedicated server core in this directory before launching.\nJava and the server core are not installed automatically. Worlds, player data and other optional files are included only if selected.\n启动前请在此目录安装对应版本的服务端核心。不会自动安装 Java 或服务端核心；世界、玩家数据等可选文件仅在手动勾选后包含。\n\nReview unknown mod sides and client-specific config before hosting.\n开服前请检查未知端别的 Mod 和配置中的客户端选项。\n",
         ),
     ] {
         writer
@@ -843,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn excludes_client_scripts_private_data_and_disabled_files() {
+    fn server_defaults_do_not_restrict_optional_file_choices() {
         for path in [
             "kubejs/client_scripts/hud.js",
             "options.txt",
@@ -866,6 +884,89 @@ mod tests {
         ] {
             assert!(is_server_support_file(path), "{path}");
         }
+        for path in [
+            "server-icon.png",
+            "custom/server-rules.txt",
+            "kubejs/client_scripts/hud.js",
+            "resourcepacks/assets.zip",
+            "options.txt",
+            "logs/latest.log",
+            "saves/World/level.dat",
+        ] {
+            assert!(is_server_export_candidate(path), "{path}");
+            assert!(!is_server_support_file(path), "{path}");
+        }
+        for path in [
+            ".env",
+            ".fabric/cache/file",
+            "config/private/.token",
+            "__MACOSX/file",
+            "profile.json",
+            "modrinth_logs/latest.log",
+            SERVER_PACK_MANIFEST,
+            "start-server.sh",
+            "START-SERVER.CMD",
+            "ymcl-server-bootstrap.py",
+            "SERVER-README.txt",
+        ] {
+            assert!(!is_server_export_candidate(path), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn file_scan_includes_custom_folders_and_root_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().to_path_buf();
+        for path in [
+            "mods/server.jar",
+            "config/server.toml",
+            "custom/nested/server-rules.txt",
+            "server-icon.png",
+            "saves/World/level.dat",
+            "profile.json",
+            ".cache/file",
+            "config/.token",
+            "start-server.cmd",
+        ] {
+            let target = root.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, b"data").unwrap();
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                root.join("custom"),
+                root.join("linked-folder"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(
+                root.join("server-icon.png"),
+                root.join("linked-file.png"),
+            )
+            .unwrap();
+        }
+        let mut paths = collect_server_pack_paths(&root)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "config/server.toml",
+                "custom/nested/server-rules.txt",
+                "mods/server.jar",
+                "saves/World/level.dat",
+                "server-icon.png",
+            ]
+        );
     }
 
     #[test]
@@ -989,6 +1090,15 @@ mod tests {
         std::fs::create_dir_all(root.join("mods")).unwrap();
         std::fs::write(root.join("mods/remote.jar"), b"remote mod").unwrap();
         std::fs::write(root.join("mods/local.jar"), b"local mod").unwrap();
+        for path in [
+            "server-icon.png",
+            "custom/server-rules.txt",
+            "custom/unselected.txt",
+        ] {
+            let target = root.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, b"optional file").unwrap();
+        }
         let snapshot: InstanceContentSnapshot = serde_json::from_value(json!({
             "instanceId": "pack", "revision": 1, "pack": null, "items": [],
             "pendingManualDownloads": [], "warnings": []
@@ -1021,6 +1131,30 @@ mod tests {
                         requires: Vec::new(),
                         downloads: Vec::new(),
                     },
+                    ServerPackFile {
+                        path: "server-icon.png".into(),
+                        size: 13,
+                        selected: false,
+                        mod_side: None,
+                        requires: Vec::new(),
+                        downloads: Vec::new(),
+                    },
+                    ServerPackFile {
+                        path: "custom/server-rules.txt".into(),
+                        size: 13,
+                        selected: false,
+                        mod_side: None,
+                        requires: Vec::new(),
+                        downloads: Vec::new(),
+                    },
+                    ServerPackFile {
+                        path: "custom/unselected.txt".into(),
+                        size: 13,
+                        selected: false,
+                        mod_side: None,
+                        requires: Vec::new(),
+                        downloads: Vec::new(),
+                    },
                 ],
             };
             let request = ServerPackExportRequest {
@@ -1032,9 +1166,11 @@ mod tests {
                 selected_paths: preview
                     .files
                     .iter()
+                    .filter(|file| file.path != "custom/unselected.txt")
                     .map(|file| file.path.clone())
                     .collect(),
             };
+            validate_selection(&preview, &request.selected_paths).unwrap();
             let path = root.join(format!("{mode:?}.zip"));
             write_archive(
                 "pack",
@@ -1059,6 +1195,9 @@ mod tests {
                 mode == ServerPackMode::Full
             );
             assert!(zip.by_name("mods/local.jar").is_ok());
+            assert!(zip.by_name("server-icon.png").is_ok());
+            assert!(zip.by_name("custom/server-rules.txt").is_ok());
+            assert!(zip.by_name("custom/unselected.txt").is_err());
             for name in [
                 "start-server.sh",
                 "start-server.cmd",
@@ -1084,6 +1223,8 @@ mod tests {
                 "previous_manifest_only"
             );
             assert_eq!(manifest["minecraft"]["loaderVersion"], "0.16.0");
+            assert_eq!(manifest["files"].as_array().unwrap().len(), 4);
+            assert_eq!(manifest["files"][2]["downloads"], json!([]));
         }
     }
 }

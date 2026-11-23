@@ -25,8 +25,11 @@ Forge 依赖的 `side` 和 `displayTest` 不作为自身端别证据。
 - 精简包：筛选相同；有匹配实际文件 SHA-1、大小及 HTTPS 地址的来源文件只记录下载信息，
   首次启动下载并校验实际内容的 SHA-256。无可用来源的 Mod 随包附带。
 
-两者包含服务端常用配置、默认配置、数据包、启动与服务端脚本，排除客户端脚本、
-启动器信息、世界、日志和玩家数据。配置不能仅凭 Mod 名可靠拆分，管理员仍需检查客户端选项。
+两者展示实例中的可选文件，默认勾选服务端常用配置、默认配置、数据包、启动与服务端脚本。
+自定义目录、根目录文件、客户端脚本、世界、日志和玩家数据默认不勾选，可手动选择。
+隐藏文件、启动器信息、符号链接及导出器生成的同名文件不作为候选，纯客户端和已禁用的 Mod 仍被排除。
+完整与精简模式互相切换或刷新预览时保留仍然存在的手动选择。
+配置不能仅凭 Mod 名可靠拆分，管理员仍需检查客户端选项。
 导出预览列出缺失文件和被排除的依赖，后端拒绝省略已知必需依赖的选择。
 JAR 声明的服务端依赖参与校验；Forge / NeoForge 的仅客户端依赖与可选依赖不被当成服务端必需项。
 
@@ -64,7 +67,7 @@ JAR 声明的服务端依赖参与校验；Forge / NeoForge 的仅客户端依�
 	"update": {
 		"protocol": "ymcl-server-pack/v1",
 		"deletePolicy": "previous_manifest_only",
-		"preservePaths": ["world/**", "world_nether/**", "world_the_end/**", "server.properties", "ops.json", "whitelist.json", "banned-players.json", "banned-ips.json"],
+		"preservePaths": ["world/**", "world_nether/**", "world_the_end/**", "saves/**", "server.properties", "ops.json", "whitelist.json", "banned-players.json", "banned-ips.json"],
 		"endpoint": null
 	}
 }

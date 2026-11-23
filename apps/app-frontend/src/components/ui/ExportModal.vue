@@ -25,7 +25,7 @@ import {
 	get_full_path,
 	get_pack_export_candidates,
 } from '@/helpers/instance'
-import { exportServerPack, previewServerPack } from '@/helpers/mod-sides'
+import { exportServerPack, previewServerPack, selectServerPackFiles } from '@/helpers/mod-sides'
 import { highlightInFolder } from '@/helpers/utils'
 
 const { handleError } = injectNotificationManager()
@@ -57,7 +57,7 @@ const messages = defineMessages({
 	serverDescription: {
 		id: 'app.export-modal.server-description',
 		defaultMessage:
-			'Exports enabled server-compatible and unknown-side mods with server configs and scripts. Client-only mods, client scripts, worlds and player data are excluded. Install the matching server core separately; launch scripts require Python 3.9+ and Java.',
+			'Preselects enabled server-compatible and unknown-side mods, server configs and scripts. Other instance files can be selected manually. Client-only and disabled mods are excluded. Install the matching server core separately; launch scripts require Python 3.9+ and Java.',
 	},
 	slimDescription: {
 		id: 'app.export-modal.server-slim-description',
@@ -191,8 +191,11 @@ const dependencyIssues = computed(() => {
 
 watch(
 	format,
-	() => {
-		if (isOpen.value) void initFiles()
+	(_nextFormat, previousFormat) => {
+		if (isOpen.value)
+			void initFiles(
+				isServerFormat.value && ['server_full', 'server_slim'].includes(previousFormat),
+			)
 	},
 	{ flush: 'sync' },
 )
@@ -206,16 +209,20 @@ watch(
 )
 
 async function initFiles(preserveSelection = false) {
-	const previousPaths = new Set(files.value.map((file) => file.path))
-	const previousSelected = new Set(selectedFilePaths.value)
+	const previousSelection =
+		preserveSelection === true
+			? { files: files.value, selectedPaths: selectedFilePaths.value }
+			: undefined
 	filesLoading.value = true
 	filesError.value = false
 	fileErrorMessage.value = ''
 	filesInstanceId.value = ''
 	const loadId = ++filesLoadId.value
 	const instanceId = props.instance.id
-	files.value = []
-	selectedFilePaths.value = []
+	if (!preserveSelection) {
+		files.value = []
+		selectedFilePaths.value = []
+	}
 	serverPreview.value = null
 	fileTreeKey.value++
 	try {
@@ -229,13 +236,7 @@ async function initFiles(preserveSelection = false) {
 				type: 'file',
 				size: file.size,
 			}))
-			selectedFilePaths.value = preview.files
-				.filter((file) =>
-					preserveSelection === true && previousPaths.has(file.path)
-						? previousSelected.has(file.path)
-						: file.selected,
-				)
-				.map((file) => file.path)
+			selectedFilePaths.value = selectServerPackFiles(preview.files, previousSelection)
 			return
 		}
 		const [filePaths, root] = await Promise.all([
@@ -588,7 +589,7 @@ function isExportCandidateDisabled(path) {
 					</p>
 				</div>
 				<ButtonStyled
-					><button type="button" @click="initFiles()">
+					><button type="button" @click="initFiles(isServerFormat)">
 						{{ formatMessage(messages.retry) }}
 					</button></ButtonStyled
 				>
