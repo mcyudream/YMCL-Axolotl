@@ -1,6 +1,27 @@
 {
-  "updated_at": "2026-11-23T15:50:55.369Z",
+  "updated_at": "2026-11-23T18:33:24.835Z",
   "announcements": [
+    {
+      "id": "launcher-2.3.1",
+      "version": "2.3.1",
+      "publishedAt": "2026-11-23",
+      "title": {
+        "en-US": "YMCL 2.3.1",
+        "zh-CN": "YMCL 2.3.1"
+      },
+      "changes": {
+        "fixed": [
+          {
+            "en-US": "Fixed full and slim server pack exports hiding optional files, including custom folders, root files, and worlds.",
+            "zh-CN": "修复完整和精简服务端包导出无法选择其他文件的问题，现可手动勾选自定义目录、根目录文件和世界等内容。"
+          },
+          {
+            "en-US": "Fixed file selections being reset when switching between full and slim server pack exports or refreshing the preview.",
+            "zh-CN": "修复切换完整与精简服务端包模式或刷新预览时丢失文件勾选的问题。"
+          }
+        ]
+      }
+    },
     {
       "id": "launcher-2.3.0",
       "version": "2.3.0",
